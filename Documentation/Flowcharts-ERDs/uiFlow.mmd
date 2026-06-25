@@ -1,0 +1,83 @@
+erDiagram
+    USER {
+        string id PK "zNumber, e.g. z002p25"
+        string pinHash
+        string role "enum: Worker, IM, LeadWorker, SysAdmin"
+    }
+
+    ITEM {
+        int department PK "3 digits"
+        int class PK "2 digits"
+        int item PK "4 digits"
+        string upc
+        string name
+        string desc
+        string descShort
+    }
+
+    PALLET {
+        int palletId PK "8 digits"
+        int dept FK
+        int class FK
+        int item FK
+        int palletQuant
+        int cartonQuant
+        int sspQuant
+        int vcp "vendor case pack, set at receiving"
+        int ssp "store ship pack, set at receiving"
+        string status "enum, TBD"
+        string receivedByUserId FK
+        datetime receivedAt
+        string putByUserId FK
+        datetime putAt
+        string lastPulledByUserId FK
+        datetime lastPulledAt
+    }
+
+    LOCATION {
+        int aisle PK
+        int bin PK
+        int level PK
+        int zone
+        string status "enum: Empty, Stored, Reserved, PullPending, etc"
+        string holdType "nullable enum: Inbound, Outbound, Both, Permanent"
+        string storageCode
+        string size
+        int palletId FK "nullable"
+    }
+
+    LABEL {
+        int labelId PK
+        int palletId FK
+        int dept FK
+        int class FK
+        int item FK
+        int quantity
+        date batchDate
+        date purgeDate
+        string destinationStore
+        string status "enum: Pending, Pulled, Canceled, Purged"
+    }
+
+    ACTIVITYLOG {
+        int id PK
+        datetime timestamp
+        string userId FK
+        string actionType
+        int palletId FK "nullable"
+        string locationId FK "nullable"
+        int dpci FK "nullable"
+        string details "flexible JSON"
+    }
+
+    ITEM ||--o{ PALLET : "identifies"
+    ITEM ||--o{ LABEL : "identifies"
+    PALLET ||--o| LOCATION : "currently stored in"
+    PALLET ||--o{ LABEL : "generates"
+    USER ||--o{ PALLET : "received"
+    USER ||--o{ PALLET : "put"
+    USER ||--o{ PALLET : "last pulled"
+    USER ||--o{ ACTIVITYLOG : "performed"
+    PALLET ||--o{ ACTIVITYLOG : "referenced in"
+    LOCATION ||--o{ ACTIVITYLOG : "referenced in"
+    ITEM ||--o{ ACTIVITYLOG : "referenced in"

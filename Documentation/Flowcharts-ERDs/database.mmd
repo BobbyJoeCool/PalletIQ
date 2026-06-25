@@ -1,0 +1,167 @@
+erDiagram
+
+    %% ============================================================
+    %% COMPOSITE PRIMARY KEYS (Prisma @@id — not expressible in ERD)
+    %% ============================================================
+    %% Item:     @@id([dept, class, item], name: "DPCI")
+    %% Location: @@id([aisle, bin, level], name: "LocationID")
+    %% ============================================================
+    %% ENUMS — stored as NVarChar strings (Prisma v7 SQL Server does not support enum blocks)
+    %% LocationStatus: HOLD_IN, HOLD_OUT, HOLD_BOTH, HOLD_PERM, EMPTY, STORED, PULL_PENDING, RESERVED, STAGED  → NVarChar(15)
+    %% LocationSize:   XS, HS, S, M, L                                                                         → NVarChar(2)
+    %% PalletStatus:   PUT_PENDING, STORED, PULL_PENDING, PULLED, CANCELED (open — expand as needed)           → NVarChar(15)
+    %% LabelStatus:    AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                  → NVarChar(15)
+    %% Role:           ADMIN, MANAGER, LEAD, IM, WORKER                                                        → NVarChar(10)
+    %% ActionType:     TBD — define and expand as app is built                                                  → NVarChar(10)
+    %% ============================================================
+    %% BUSINESS RULES
+    %% SSP must be a factor of VCP (enforced in app logic, not schema)
+    %% LID format: {storeCode(1-4)}{DPCI(9)}{pid(8)}{random(8)}{batchDate(7)} = NVarChar(36)
+    %% DPCI(9) is zero-padded: dept(3) + class(2) + item(4)
+    %% pid: app-generated 8-digit Int with collision check
+    %% zNumber format: z###x## (z + 3 digits + 1 letter + 2 digits) = NVarChar(7)
+    %% PurgeDate defaults to 7 days after batchDate, set at label creation in app logic
+    %% Status change to PURGED triggered in app logic on purge date
+    %% ActionType enum must be defined and expanded as features are built
+    %% ============================================================
+
+    Item {
+        int dept PK "3 digits"
+        int class PK "2 digits"
+        int item PK "4 digits"
+        string upc "unique NVarChar(12)"
+        string name "NVarChar(50)"
+        string desc "NVarChar(Max)"
+        string descShort "NVarChar(155)"
+        decimal retailPrice "Decimal(10,2)"
+        decimal cost "Decimal(10,2)"
+        int packingZoneCode FK "→ PackingZone"
+        string storageCode FK "NVarChar(2) → StorageCode"
+        boolean conveyable "default: true"
+    }
+
+    PackingZone {
+        int id PK "2-digit int"
+        string desc "NVarChar(60)"
+    }
+
+    StorageCode {
+        string id PK "NVarChar(2)"
+        string desc "NVarChar(60)"
+    }
+
+    Location {
+        int aisle PK "3 digits"
+        int bin PK "3 digits"
+        int level PK "2 digits"
+        int zone "raw int, set by aisle"
+        string status "NVarChar(15), LocationStatus values"
+        string holdTypeCode FK "nullable, NVarChar(3) → HoldType"
+        string storageCode FK "NVarChar(2) → StorageCode"
+        string size "NVarChar(2), LocationSize values"
+    }
+
+    HoldType {
+        string code PK "NVarChar(3) → 1 letter (Department) 2 numbers (Reason)"
+        string desc "NVarChar(20)"
+    }
+
+    Pallet {
+        int pid PK "8-digit app-generated"
+        int dept FK "composite FK → Item"
+        int class FK "composite FK → Item"
+        int item FK "composite FK → Item"
+        int receivedPallets
+        int currentPallets
+        int receivedCartons
+        int currentCartons
+        int receivedSSPs
+        int currentSSPs
+        int vcp "Vendor Case Pack, eaches per carton"
+        int ssp "Store Ship Pack, must be factor of vcp"
+        string status "NVarChar(15), PalletStatus values"
+        int locationAisle FK "nullable → Location"
+        int locationBin FK "nullable → Location"
+        int locationLevel FK "nullable → Location"
+        string receivedByZ FK "NVarChar(7) → User"
+        datetime receivedAt
+        string putByZ FK "nullable, NVarChar(7) → User"
+        datetime putAt "nullable"
+        string lastPulledByZ FK "nullable, NVarChar(7) → User"
+        datetime lastPulledAt "nullable"
+    }
+
+    Label {
+        string lid PK "NVarChar(36), app-generated composite"
+        int pid FK "→ Pallet"
+        int dept FK "composite FK → Item"
+        int class FK "composite FK → Item"
+        int item FK "composite FK → Item"
+        int quantity "non-breakpack full cartons"
+        int sspQuantity "SSPs to packers"
+        int batchDate "Julian date e.g. 2026175"
+        date purgeDate "db.Date, default 7 days after batchDate"
+        int destinationStore FK "→ Store"
+        string status "NVarChar(15), LabelStatus values"
+    }
+
+    Store {
+        int id PK "4-digit store code"
+        string name "NVarChar(40)"
+    }
+
+    User {
+        string zNumber PK "NVarChar(7), format z###x##"
+        string firstName "NVarChar(50)"
+        string lastName "NVarChar(50)"
+        string pinHash "NVarChar(60)"
+        string role "NVarChar(10), Role values"
+        string departmentId FK "NVarChar(3) → Department"
+    }
+
+    Department {
+        string id PK "NVarChar(3)"
+        string name "INB, OUT, WHS, BKP, SEC, IQA"
+    }
+
+    ActivityLog {
+        int id PK "autoincrement"
+        datetime timestamp "auto-set on creation"
+        string userId FK "NVarChar(7) → User"
+        string actionType "NVarChar(10), ActionType values, TBD"
+        int palletId FK "nullable → Pallet"
+        int locationAisle FK "nullable → Location"
+        int locationBin FK "nullable → Location"
+        int locationLevel FK "nullable → Location"
+        int dept FK "nullable → Item"
+        int class FK "nullable → Item"
+        int item FK "nullable → Item"
+        string details "nullable, NVarChar(Max), free JSON notes"
+    }
+
+    %% ============================================================
+    %% RELATIONS
+    %% ============================================================
+
+    Item }o--|| PackingZone : "packingZoneCode"
+    Item }o--|| StorageCode : "storageCode"
+
+    Location }o--o| HoldType : "holdTypeCode (nullable)"
+    Location }o--|| StorageCode : "storageCode"
+
+    Pallet }o--|| Item : "dept/class/item"
+    Pallet }o--o| Location : "locationAisle/Bin/Level (nullable)"
+    Pallet }o--|| User : "receivedByZ"
+    Pallet }o--o| User : "putByZ (nullable)"
+    Pallet }o--o| User : "lastPulledByZ (nullable)"
+
+    Label }o--|| Pallet : "pid"
+    Label }o--|| Item : "dept/class/item"
+    Label }o--|| Store : "destinationStore"
+
+    User }o--|| Department : "departmentId"
+
+    ActivityLog }o--|| User : "userId"
+    ActivityLog }o--o| Pallet : "palletId (nullable)"
+    ActivityLog }o--o| Location : "locationAisle/Bin/Level (nullable)"
+    ActivityLog }o--o| Item : "dept/class/item (nullable)"

@@ -1,0 +1,65 @@
+classDiagram
+
+    %% ============================================================
+    %% All enums for the warehouse management system
+    %% NOTE: ActionType is intentionally empty — define and expand
+    %% as features are built throughout the app.
+    %% PalletStatus is open — expand as needed.
+    %% ============================================================
+
+    class Role {
+        <<enumeration>>
+        ADMIN
+        MANAGER
+        LEAD
+        IM
+        WORKER
+    }
+
+    class LocationStatus {
+        <<enumeration>>
+        HOLD_IN
+        HOLD_OUT
+        HOLD_BOTH
+        HOLD_PERM
+        EMPTY
+        STORED
+        PULL_PENDING
+        RESERVED
+        STAGED
+    }
+
+    class LocationSize {
+        <<enumeration>>
+        XS
+        HS
+        S
+        M
+        L
+    }
+
+    class PalletStatus {
+        <<enumeration>>
+        PUT_PENDING
+        STORED
+        PULL_PENDING
+        PULLED
+        CANCELED
+        %% Open — expand as app is built
+    }
+
+    class LabelStatus {
+        <<enumeration>>
+        AVAILABLE
+        PRINTED
+        PULLED
+        DIVERTED
+        CANCELED
+        PURGED
+        %% May expand as app is built
+    }
+
+    class ActionType {
+        <<enumeration>>
+        %% TBD — define and expand as features are built
+    }

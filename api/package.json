@@ -1,0 +1,19 @@
+{
+  "name": "palletiq-api",
+  "version": "1.0.0",
+  "description": "PalletIQ — Azure Functions API",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "start": "func start"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.7.0",
+    "@prisma/client": "^7.8.0"
+  },
+  "devDependencies": {
+    "prisma": "^7.8.0",
+    "typescript": "~6.0.2"
+  }
+}

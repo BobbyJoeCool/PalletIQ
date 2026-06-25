@@ -1,0 +1,178 @@
+datasource db {
+  provider = "sqlserver"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─── Lookup tables ───────────────────────────────────────────────────────────
+
+model StorageCode {
+  id   String @id @db.NVarChar(2)
+  desc String @db.NVarChar(60)
+
+  items     Item[]
+  locations Location[]
+}
+
+model Department {
+  id   String @id @db.NVarChar(3)
+  name String @db.NVarChar(20)
+
+  users User[]
+}
+
+model HoldType {
+  code String @id @db.NVarChar(3)
+  desc String @db.NVarChar(20)
+
+  locations Location[]
+}
+
+model PackingZone {
+  id   Int    @id
+  desc String @db.NVarChar(60)
+
+  items Item[]
+}
+
+model Store {
+  id   Int    @id
+  name String @db.NVarChar(40)
+
+  labels Label[]
+}
+
+// ─── Core models ─────────────────────────────────────────────────────────────
+
+model Item {
+  dept            Int
+  class           Int
+  item            Int
+  upc             String  @unique @db.NVarChar(12)
+  name            String  @db.NVarChar(50)
+  desc            String  @db.NVarChar(Max)
+  descShort       String  @db.NVarChar(155)
+  retailPrice     Decimal @db.Decimal(10, 2)
+  cost            Decimal @db.Decimal(10, 2)
+  packingZoneCode Int
+  storageCode     String  @db.NVarChar(2)
+  conveyable      Boolean @default(true)
+
+  packingZone PackingZone @relation(fields: [packingZoneCode], references: [id])
+  storageRef  StorageCode @relation(fields: [storageCode], references: [id])
+
+  pallets      Pallet[]
+  labels       Label[]
+  activityLogs ActivityLog[]
+
+  @@id([dept, class, item], name: "DPCI")
+}
+
+model Location {
+  aisle        Int
+  bin          Int
+  level        Int
+  zone         Int
+  status       String  @db.NVarChar(15)
+  holdTypeCode String? @db.NVarChar(3)
+  storageCode  String  @db.NVarChar(2)
+  size         String  @db.NVarChar(2)
+
+  holdType   HoldType?   @relation(fields: [holdTypeCode], references: [code])
+  storageRef StorageCode @relation(fields: [storageCode], references: [id])
+
+  pallets      Pallet[]
+  activityLogs ActivityLog[]
+
+  @@id([aisle, bin, level], name: "LocationID")
+}
+
+model User {
+  zNumber      String @id @db.NVarChar(7)
+  firstName    String @db.NVarChar(50)
+  lastName     String @db.NVarChar(50)
+  pinHash      String @db.NVarChar(60)
+  role         String @db.NVarChar(10)
+  departmentId String @db.NVarChar(3)
+
+  department Department @relation(fields: [departmentId], references: [id])
+
+  receivedPallets Pallet[]      @relation("PalletReceivedBy")
+  putPallets      Pallet[]      @relation("PalletPutBy")
+  pulledPallets   Pallet[]      @relation("PalletLastPulledBy")
+  activityLogs    ActivityLog[]
+}
+
+model Pallet {
+  pid             Int       @id
+  dept            Int
+  class           Int
+  item            Int
+  receivedPallets Int
+  currentPallets  Int
+  receivedCartons Int
+  currentCartons  Int
+  receivedSSPs    Int
+  currentSSPs     Int
+  vcp             Int
+  ssp             Int
+  status          String    @db.NVarChar(15)
+  locationAisle   Int?
+  locationBin     Int?
+  locationLevel   Int?
+  receivedByZ     String    @db.NVarChar(7)
+  receivedAt      DateTime
+  putByZ          String?   @db.NVarChar(7)
+  putAt           DateTime?
+  lastPulledByZ   String?   @db.NVarChar(7)
+  lastPulledAt    DateTime?
+
+  itemRef      Item      @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
+  location     Location? @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
+  receivedBy   User      @relation("PalletReceivedBy", fields: [receivedByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  putBy        User?     @relation("PalletPutBy", fields: [putByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  lastPulledBy User?     @relation("PalletLastPulledBy", fields: [lastPulledByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+
+  labels       Label[]
+  activityLogs ActivityLog[]
+}
+
+model Label {
+  lid              String    @id @db.NVarChar(36)
+  pid              Int
+  dept             Int
+  class            Int
+  item             Int
+  quantity         Int
+  sspQuantity      Int
+  batchDate        Int
+  purgeDate        DateTime  @db.Date
+  destinationStore Int
+  status           String    @db.NVarChar(15)
+
+  pallet  Pallet @relation(fields: [pid], references: [pid], onDelete: NoAction, onUpdate: NoAction)
+  itemRef Item   @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
+  store   Store  @relation(fields: [destinationStore], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model ActivityLog {
+  id            Int       @id @default(autoincrement())
+  timestamp     DateTime  @default(now())
+  userId        String    @db.NVarChar(7)
+  actionType    String    @db.NVarChar(10)
+  palletId      Int?
+  locationAisle Int?
+  locationBin   Int?
+  locationLevel Int?
+  dept          Int?
+  class         Int?
+  item          Int?
+  details       String?   @db.NVarChar(Max)
+
+  user     User      @relation(fields: [userId], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  pallet   Pallet?   @relation(fields: [palletId], references: [pid], onDelete: NoAction, onUpdate: NoAction)
+  location Location? @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
+  itemRef  Item?     @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
+}
