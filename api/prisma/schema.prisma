@@ -18,7 +18,7 @@ model StorageCode {
 
 model Department {
   id   String @id @db.NVarChar(3)
-  name String @db.NVarChar(20)
+  name String @db.NVarChar(60)
 
   users User[]
 }

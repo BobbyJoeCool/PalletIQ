@@ -25,6 +25,8 @@ This is a build plan, not a functional spec — see `outline.md` for what the sy
 
 **Enum maintenance (ongoing):** Any time a new enum or new enum value is added — regardless of phase — update `Documentation/Flowcharts-ERDs/enums.mmd` to match. `ActionType` in particular is intentionally left empty at schema creation and must be expanded as each feature that writes to the activity log is built.
 
+**Smoke test (required at end of every phase):** No phase is complete until its endpoints and/or UI flows have been verified to work end-to-end in the local environment. API phases: curl each new endpoint. UI phases: exercise the flow in the browser. Mixed phases: both. Log the results in `DevNotes/Logs/phase-N.md`.
+
 ---
 
 ## Phase 1 — Project Setup
@@ -90,26 +92,26 @@ This is a build plan, not a functional spec — see `outline.md` for what the sy
 
 ### 3.1 Badge + PIN Flow
 
-- [ ] Resolve the open implementation decision from `outline.md` (custom DB-backed auth vs. AD B2C custom policy) and document the choice
-- [ ] Build identifier-lookup endpoint (Azure Function) accepting either a badge scan value or a manually typed 8-digit employee number through a single input — no separate endpoints or modes for the two input methods
-- [ ] Build PIN verification (hashed comparison) as a second step keyed to the identified user
-- [ ] Issue session token on successful PIN match
-- [ ] Implement 15-minute idle timeout (client-side inactivity detection + server-side session expiry)
+- [X] Resolve the open implementation decision from `outline.md` (custom DB-backed auth vs. AD B2C custom policy) and document the choice
+- [X] Build identifier-lookup endpoint (Azure Function) accepting either a badge scan value or a manually typed 8-digit employee number through a single input — no separate endpoints or modes for the two input methods
+- [X] Build PIN verification (hashed comparison) as a second step keyed to the identified user
+- [X] Issue session token on successful PIN match
+- [X] Implement 15-minute idle timeout (client-side inactivity detection + server-side session expiry)
 
 ### 3.2 Frontend Auth
 
-- [ ] Build Login screen: single field accepting badge scan or manually typed employee number (numpad), no mode toggle
-- [ ] Build identifier-not-found handling: audio alert, message bar error, clear field, retry on the same screen
-- [ ] Build PIN screen: `Welcome: {name}, enter your PIN` message, 4-digit numpad
-- [ ] Build PIN-mismatch handling: audio alert, message bar error, clear PIN field, retry on the same screen (does not return to identifier entry)
-- [ ] Build auth context/provider for the React app
-- [ ] Wire up protected routing (no access to function screens without a valid session)
-- [ ] Implement idle-timeout detection and auto-redirect to login
+- [X] Build Login screen: single field accepting badge scan or manually typed employee number (numpad), no mode toggle
+- [X] Build identifier-not-found handling: audio alert, message bar error, clear field, retry on the same screen
+- [X] Build PIN screen: `Welcome: {name}, enter your PIN` message, 4-digit numpad
+- [X] Build PIN-mismatch handling: audio alert, message bar error, clear PIN field, retry on the same screen (does not return to identifier entry)
+- [X] Build auth context/provider for the React app
+- [X] Wire up protected routing (no access to function screens without a valid session)
+- [X] Implement idle-timeout detection and auto-redirect to login
 
 ### 3.3 Role-Based Permission Checks
 
-- [ ] Build a shared permission-check utility usable both client-side (UI gating) and server-side (API enforcement) — server-side is the source of truth
-- [ ] Define the role hierarchy (Worker → IM → Lead Worker → System Admin) as inheritable permission sets per `outline.md`
+- [X] Build a shared permission-check utility usable both client-side (UI gating) and server-side (API enforcement) — server-side is the source of truth
+- [X] Define the role hierarchy (Worker → IM → Lead Worker → System Admin) as inheritable permission sets per `outline.md`
 
 ---
 
@@ -117,16 +119,16 @@ This is a build plan, not a functional spec — see `outline.md` for what the sy
 
 ### 4.1 Shared Infrastructure
 
-- [ ] Build Prisma client singleton for Azure Functions cold-start reuse
-- [ ] Build standard API response/error format
-- [ ] Build activity-log write helper (used by every state-changing endpoint)
-- [ ] Build location-barcode parser (8-digit input → Aisle+Bin, discarding Level, per `outline.md`)
+- [X] Build Prisma client singleton for Azure Functions cold-start reuse
+- [X] Build standard API response/error format
+- [X] Build activity-log write helper (used by every state-changing endpoint)
+- [X] Build location-barcode parser (8-digit input → Aisle+Bin, discarding Level, per `outline.md`)
 
 ### 4.2 Pallet and Location Lookup Endpoints
 
-- [ ] `GET /api/pallets/:id` — pallet detail lookup
-- [ ] `PATCH /api/pallets/:id` — pallet field edit (DPCI/VCP/SSP/quantity), IM+ only
-- [ ] `GET /api/locations/:id` — location detail lookup (accepts 6 or 8-digit input, normalizes)
+- [X] `GET /api/pallets/:id` — pallet detail lookup
+- [X] `PATCH /api/pallets/:id` — pallet field edit (DPCI/VCP/SSP/quantity), IM+ only
+- [X] `GET /api/locations/:id` — location detail lookup (accepts 6 or 8-digit input, normalizes)
 
 ---
 

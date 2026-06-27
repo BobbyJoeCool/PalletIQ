@@ -13,4 +13,9 @@ export default defineConfig({
       '@shared': resolve(__dirname, './shared'),
     },
   },
+  server: {
+    proxy: {
+      '/api': 'http://localhost:7071',
+    },
+  },
 })

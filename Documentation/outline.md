@@ -51,7 +51,8 @@ Roles are strictly hierarchical — each role inherits every permission of the r
 | **Worker** | — | Pulls; directed and manual puts; view Pallet ID and Location ID screens; place Hold Both; unassign their own active reservation |
 | **Inventory Manager (IM)** | Worker | Edit Pallet ID fields (DPCI, VCP, SSP, quantity); place and remove Hold Inbound and Hold Outbound; remove Hold Both |
 | **Lead Worker** | IM | Place and remove Hold Permanent; aisle/warehouse setup (not built in this demo — stubbed); assign the IM role to user accounts |
-| **System Admin** | Lead Worker | Create user accounts; assign the Lead Worker role |
+| **Manager** | Lead Worker | Assign the Lead Worker role to user accounts |
+| **System Admin** | Manager | Create user accounts |
 
 Permission checks happen at the field and action level, not the screen level — every role can navigate to every screen from the home menu. A Worker can open the Pallet ID screen but cannot enter edit mode on it, for example.
 
@@ -73,7 +74,7 @@ On opening the app, the user is always prompted to log in first — there is no 
 
 **Session timeout:** 15 minutes of inactivity logs the user out automatically. This is a shared-terminal security measure.
 
-**Implementation note:** badge+PIN is a custom authentication flow, not a standard Azure AD B2C flow. AD B2C supports this via custom policies, but for this project the badge/PIN verification may be implemented directly against the application database (PIN stored hashed, badge ID as the lookup key), with AD B2C used for underlying token issuance. This is an open implementation decision to be resolved during the API design phase.
+**Implementation note:** Auth is implemented as a fully custom DB-backed flow. Badge/PIN verification runs directly against the application database (PIN stored as a bcrypt hash, zNumber as the lookup key). On successful login the API issues a signed JWT (HS256, 15-minute expiry) returned to the client and stored in localStorage. AD B2C is not used. Two endpoints handle the two-step flow: `POST /api/auth/identify` (zNumber lookup, returns name) and `POST /api/auth/login` (zNumber + PIN, returns JWT + user). The login field accepts a zNumber typed as digits + a 'P' key tap (the leading 'z' and the letter between digit segments are handled by the UI — the server stores and matches the full zNumber string, e.g. `z002p25`).
 
 ---
 

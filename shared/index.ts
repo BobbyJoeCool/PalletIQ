@@ -4,6 +4,21 @@
 
 export type Role = 'ADMIN' | 'MANAGER' | 'LEAD' | 'IM' | 'WORKER';
 
+// ─── Role hierarchy ───────────────────────────────────────────────────────────
+
+export const ROLE_RANK: Record<Role, number> = {
+  WORKER:  1,
+  IM:      2,
+  LEAD:    3,
+  MANAGER: 4,
+  ADMIN:   5,
+};
+
+/** Returns true if userRole meets or exceeds minRole in the hierarchy. */
+export function hasMinRole(userRole: Role, minRole: Role): boolean {
+  return ROLE_RANK[userRole] >= ROLE_RANK[minRole];
+}
+
 export type LocationStatus =
   | 'HOLD_IN'
   | 'HOLD_OUT'

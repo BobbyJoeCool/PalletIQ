@@ -3,17 +3,28 @@
   "version": "1.0.0",
   "description": "PalletIQ — Azure Functions API",
   "type": "module",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "start": "func start"
   },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "dependencies": {
     "@azure/functions": "^4.7.0",
-    "@prisma/client": "^7.8.0"
+    "@prisma/adapter-mssql": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.3"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "exceljs": "^4.4.0",
+    "mssql": "^12.6.0",
     "prisma": "^7.8.0",
+    "tsx": "^4.22.4",
     "typescript": "~6.0.2"
   }
 }
