@@ -7,12 +7,15 @@ erDiagram
     %% Location: @@id([aisle, bin, level], name: "LocationID")
     %% ============================================================
     %% ENUMS — stored as NVarChar strings (Prisma v7 SQL Server does not support enum blocks)
-    %% LocationStatus: HOLD_IN, HOLD_OUT, HOLD_BOTH, HOLD_PERM, EMPTY, STORED, PULL_PENDING, RESERVED, STAGED  → NVarChar(15)
+    %% LocationStatus: EMPTY, STORED, PULL_PENDING, RESERVED, STAGED                                           → NVarChar(15)
+    %% HoldCategory:   HOLD_IN, HOLD_OUT, HOLD_BOTH, HOLD_PERM (Location.holdCategory, independent of status)   → NVarChar(10)
     %% LocationSize:   XS, HS, S, M, L                                                                         → NVarChar(2)
     %% PalletStatus:   PUT_PENDING, STORED, PULL_PENDING, PULLED, CANCELED (open — expand as needed)           → NVarChar(15)
     %% LabelStatus:    AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                  → NVarChar(15)
+    %% PullFunction:   CA (Carton Air), CF (Carton Floor), FP (Full Pallet), BK (Bulk/level-0, not in demo)   → NVarChar(2)
     %% Role:           ADMIN, MANAGER, LEAD, IM, WORKER                                                        → NVarChar(10)
-    %% ActionType:     TBD — define and expand as app is built                                                  → NVarChar(10)
+    %% ActionType:     EDIT_PAL, PULL, RESERVE, PUT, UNASSIGN, BLOCK_PUT, RES_TMOUT, MNP_SCAN, STAGE, RESTAGE,
+    %%                 HOLD_PLACE, HOLD_CLEAR, REINSTATE                                                       → NVarChar(10)
     %% ============================================================
     %% BUSINESS RULES
     %% SSP must be a factor of VCP (enforced in app logic, not schema)
@@ -23,6 +26,8 @@ erDiagram
     %% PurgeDate defaults to 7 days after batchDate, set at label creation in app logic
     %% Status change to PURGED triggered in app logic on purge date
     %% ActionType enum must be defined and expanded as features are built
+    %% Location.holdTypeCode (reason-code FK) is unpopulated — WLH.md states the reason
+    %% code is written only to ActivityLog.details, never stored as a column (Phase 10)
     %% ============================================================
 
     Item {
@@ -56,9 +61,11 @@ erDiagram
         int level PK "2 digits"
         int zone "raw int, set by aisle"
         string status "NVarChar(15), LocationStatus values"
-        string holdTypeCode FK "nullable, NVarChar(3) → HoldType"
+        string holdTypeCode FK "nullable, NVarChar(3) → HoldType — reason code; unused, see comment below"
+        string holdCategory "nullable, NVarChar(10), HoldCategory values — independent of status, added Phase 10"
         string storageCode FK "NVarChar(2) → StorageCode"
         string size "NVarChar(2), LocationSize values"
+        boolean contraction "default: false, set by Lead+ via Aisle Setup (out of scope) — read-only in this app"
     }
 
     HoldType {
@@ -103,6 +110,7 @@ erDiagram
         date purgeDate "db.Date, default 7 days after batchDate"
         int destinationStore FK "→ Store"
         string status "NVarChar(15), LabelStatus values"
+        string pullFunction "NVarChar(2), PullFunction values, default CA"
     }
 
     Store {
@@ -122,6 +130,21 @@ erDiagram
     Department {
         string id PK "NVarChar(3)"
         string name "INB, OUT, WHS, BKP, SEC, IQA"
+    }
+
+    Reservation {
+        int id PK "autoincrement"
+        int locationAisle FK "→ Location"
+        int locationBin FK "→ Location"
+        int locationLevel FK "→ Location"
+        int palletId FK "→ Pallet"
+        string workerZ FK "NVarChar(7) → User"
+        int targetAisle "original search aisle"
+        string targetSize "nullable, NVarChar(2)"
+        string targetStorage "nullable, NVarChar(2)"
+        int targetZone "nullable"
+        boolean consolidating "default: false, preserved for Blocked Put re-search"
+        datetime createdAt "auto-set on creation"
     }
 
     ActivityLog {
@@ -160,6 +183,10 @@ erDiagram
     Label }o--|| Store : "destinationStore"
 
     User }o--|| Department : "departmentId"
+
+    Reservation }o--|| Location : "locationAisle/Bin/Level"
+    Reservation }o--|| Pallet : "palletId"
+    Reservation }o--|| User : "workerZ"
 
     ActivityLog }o--|| User : "userId"
     ActivityLog }o--o| Pallet : "palletId (nullable)"

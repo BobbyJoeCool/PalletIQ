@@ -1,1 +1,52 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --font-ui: 'IBM Plex Sans', sans-serif;
+  --font-data: 'IBM Plex Mono', monospace;
+}
+
+:root {
+  --red-primary: #CC0000;
+  --surface-0: #000000;
+  --surface-1: #0A0A0A;
+  --surface-2: #0D0D0D;
+  --surface-3: #111111;
+  --surface-4: #161616;
+  --surface-5: #1A1A1A;
+  --surface-6: #262626;
+  --border-faint: #1C1C1C;
+  --border-subtle: #222222;
+  --border-default: #2A2A2A;
+  --border-dashed: #2C2C2C;
+  --border-strong: #3A3A3A;
+  --text-primary: #FFFFFF;
+  --text-secondary: #CFCFCF;
+  --text-tertiary: #BBBBBB;
+  --text-muted: #9A9A9A;
+  --text-disabled: #555555;
+  --info: #4D9FFF;
+  --info-bg: rgba(77,159,255,.13);
+  --info-border: rgba(77,159,255,.55);
+  --warning: #F0A500;
+  --warning-bg: rgba(240,165,0,.13);
+  --warning-border: rgba(240,165,0,.55);
+  --error: #FF5B5B;
+  --error-bg: rgba(204,0,0,.18);
+  --error-border: #CC0000;
+  --success: #5FD18B;
+  --success-bg: rgba(95,209,139,.12);
+  --success-border: rgba(95,209,139,.40);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: 'IBM Plex Sans', sans-serif;
+}

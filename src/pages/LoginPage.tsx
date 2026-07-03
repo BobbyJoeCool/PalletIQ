@@ -1,64 +1,132 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ZnumPad } from '../components/ZnumPad';
+import { MessageBar } from '../components/shell/MessageBar';
+import { MessageBarProvider } from '../context/MessageBarContext';
 import { identify } from '../lib/api';
-import { playErrorBeep } from '../lib/audio';
+import { playAlert } from '../lib/audio';
+import { useMessageBar } from '../context/MessageBarContext';
 
-export function LoginPage() {
+/**
+ * Inner content of the Login screen. Renders a two-panel layout: a badge-scan placeholder
+ * zone on the left (the hardware scanner routes its barcode here via AppShell) and a ZnumPad
+ * on the right for manual zNumber entry. On submit, calls identify(); on success navigates to
+ * /pin with the user's name in route state for the PIN screen greeting.
+ *
+ * Uses its own MessageBarProvider (provided by LoginPage) so error messages don't bleed into
+ * the shell's message bar.
+ */
+function LoginContent() {
   const navigate = useNavigate();
+  const { setMessage, clearMessage } = useMessageBar();
   const [znumber, setZnumber] = useState('z');
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
     if (znumber.length < 3 || loading) return;
-    setError(null);
+    clearMessage();
     setLoading(true);
     try {
       const { firstName, lastName } = await identify(znumber);
       navigate('/pin', { state: { zNumber: znumber, firstName, lastName } });
     } catch (err) {
-      playErrorBeep();
-      const code = err instanceof Error ? err.message : 'REQUEST_FAILED';
-      setError(code === 'NOT_FOUND' ? 'Employee not found. Please try again.' : 'Something went wrong. Please try again.');
+      playAlert('error');
+      const code = err instanceof Error ? err.message : '';
+      setMessage({
+        type: 'error',
+        text: code === 'NOT_FOUND'
+          ? 'zNumber not found — rescan badge or re-enter'
+          : 'Connection error — please try again',
+      });
       setZnumber('z');
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-8 p-8">
-      <h1 className="text-4xl font-bold text-white tracking-wide">PalletIQ</h1>
+  const handleChange = (v: string) => {
+    setZnumber(v);
+    clearMessage();
+  };
 
-      {/* display field */}
-      <div className="w-64 h-16 bg-slate-800 rounded-xl flex items-center px-5 border-2 border-slate-600">
-        <span className="text-3xl font-mono text-white tracking-widest">
-          {znumber.length === 1 ? (
-            <>
-              <span className="text-slate-400">z</span>
-              <span className="animate-pulse text-slate-400">_</span>
-            </>
-          ) : (
-            znumber
-          )}
-        </span>
+  return (
+    <div className="fixed inset-0 flex flex-col bg-black select-none">
+      {/* Top: wordmark + headlines */}
+      <div className="flex flex-col items-center pt-14 gap-3">
+        <h1 className="font-ui text-[40px] font-bold tracking-tight">
+          <span className="text-white">Pallet</span>
+          <span className="text-[#CC0000]">IQ</span>
+        </h1>
+        <h2 className="font-ui text-[32px] font-semibold text-white">Welcome to PalletIQ</h2>
+        <p className="font-ui text-[24px] text-[#9A9A9A]">
+          Please scan your badge or enter your zNumber
+        </p>
       </div>
 
-      {error && (
-        <div className="w-64 bg-red-900/60 border border-red-500 rounded-lg px-4 py-3 text-red-200 text-sm text-center">
-          {error}
+      {/* Middle: badge scanner | OR | zNumber pad */}
+      <div className="flex-1 flex items-center justify-center gap-0">
+        {/* Badge scanner zone */}
+        <div className="flex flex-col items-center justify-center w-[504px] h-[544px] rounded-[16px] border-2 border-dashed border-[#2C2C2C] bg-[#0A0A0A] gap-6">
+          {/* Badge icon placeholder */}
+          <div className="flex flex-col items-center gap-3 opacity-40">
+            <div className="w-[80px] h-[60px] rounded-[8px] bg-[#3A3A3A] flex items-center justify-center">
+              <div className="w-[34px] h-[34px] rounded-full bg-[#555]" />
+            </div>
+            <div className="w-[96px] h-[10px] rounded-full bg-[#3A3A3A]" />
+            <div className="w-[70px] h-[10px] rounded-full bg-[#2C2C2C]" />
+          </div>
+          <p className="font-data text-[22px] font-semibold tracking-[0.09em] text-[#CC0000]">
+            TAP BADGE TO SCANNER
+          </p>
+          <p className="font-ui text-[20px] text-[#777777]">Primary sign-in</p>
         </div>
-      )}
 
-      <ZnumPad
-        value={znumber}
-        onChange={(v) => { setZnumber(v); setError(null); }}
-        onSubmit={handleSubmit}
-        disabled={loading}
-      />
+        {/* OR divider */}
+        <div className="flex flex-col items-center mx-6">
+          <div className="w-[2px] h-[196px] bg-[#1F1F1F]" />
+          <div className="w-[56px] h-[56px] rounded-full border-2 border-[#2A2A2A] bg-black flex items-center justify-center my-[-1px]">
+            <span className="font-ui text-[20px] text-[#777777]">or</span>
+          </div>
+          <div className="w-[2px] h-[196px] bg-[#1F1F1F]" />
+        </div>
 
-      <p className="text-slate-500 text-sm">Enter your employee number or scan your badge</p>
+        {/* zNumber entry */}
+        <div className="flex flex-col gap-4">
+          <p className="font-ui text-[22px] font-medium text-[#CFCFCF]">Enter your zNumber</p>
+
+          {/* Input display field */}
+          <div className="flex items-center h-[92px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] w-[504px]">
+            <span className="font-data text-[40px] font-medium text-[#CC0000]">z</span>
+            <span className="font-data text-[40px] font-medium text-white tracking-[0.04em] ml-1">
+              {znumber.slice(1)}
+            </span>
+            <span className="inline-block w-[3px] h-[46px] bg-[#CC0000] ml-1 animate-pulse rounded-sm" />
+          </div>
+
+          <ZnumPad
+            value={znumber}
+            onChange={handleChange}
+            onSubmit={handleSubmit}
+            disabled={loading}
+          />
+        </div>
+      </div>
+
+      {/* Bottom: message bar (standalone 84 px) */}
+      <MessageBar standalone />
     </div>
+  );
+}
+
+/**
+ * Login screen — the first unauthenticated screen a worker sees.
+ * Wraps LoginContent in an isolated MessageBarProvider so login error messages are
+ * shown in the standalone bottom bar without touching the app shell's context.
+ */
+export function LoginPage() {
+  return (
+    <MessageBarProvider>
+      <LoginContent />
+    </MessageBarProvider>
   );
 }

@@ -1,0 +1,85 @@
+---
+title: SDP — System Directed Put Flow
+---
+flowchart TD
+    START([Worker opens SDP\nsrc/pages/SDPPage.tsx]) --> S1
+
+    S1[State: entry\naisleField auto-focuses\nIM+ overrides available]
+
+    S1 --> AISLE[Worker enters Aisle number\nhandleAisleConfirm\nfocus moves to palletField]
+
+    AISLE --> PALLET_SCAN{Scan Pallet ID\nhandlePalletScan}
+
+    PALLET_SCAN --> VALIDATE{Aisle entered?}
+    VALIDATE -->|No aisle| NOOP[Field disabled\nno action]
+    VALIDATE -->|Aisle present| API_DIR
+
+    API_DIR[POST /api/puts/directed\napi/functions/puts.ts — directedPut\ncheckPalletEligibility\nresolveStartingZone\nfindNextLocation\nCreate Reservation row]
+
+    API_DIR --> DIR_OK{Result?}
+    DIR_OK -->|PALLET_NOT_FOUND| ERR_P1[Error: Pallet not found\npalletField cleared]
+    DIR_OK -->|NO_CARTONS| ERR_P2[Error: No stored cartons\npalletField cleared]
+    DIR_OK -->|NO_LOCATIONS| ERR_P3[Error: No eligible locations\nin requested aisle\npalletField cleared]
+    DIR_OK -->|OK| DIR_RESULT[Returns reservationId\ndirectedLocation\npallet details\nalreadyStored flag]
+
+    ERR_P1 --> S1
+    ERR_P2 --> S1
+    ERR_P3 --> S1
+
+    DIR_RESULT --> MOVE_CHECK{alreadyStored?}
+    MOVE_CHECK -->|Yes + consolidating| INFO_MSG[Info: move scenario\nshown in message bar]
+    MOVE_CHECK -->|Yes, not consolidating| WARN_MSG[Warning: move scenario\nshown in message bar]
+    MOVE_CHECK -->|No| S2
+
+    INFO_MSG --> S2
+    WARN_MSG --> S2
+
+    S2[State: directed\nScreen LOCKED — active reservation\ndirectedLocation shown in red\nconfirmField auto-focuses\n5-min timer starts server-side]
+
+    S2 --> ACTION{Worker action?}
+
+    ACTION -->|Scan confirm location\nhandleLocationConfirm| CONF[POST /api/puts/:id/confirm\napi/functions/puts.ts — confirmPut\nvalidate scanned === directed\nplacePallet atomic transaction\ndelete Reservation\nwriteLog PUT or MOVE_PUT]
+
+    CONF --> CONF_OK{Result?}
+    CONF_OK -->|LOCATION_MISMATCH| ERR_C1[Error: Wrong location\nconfirmField cleared + re-focused]
+    CONF_OK -->|NOT_FOUND\nreservation expired| EXPIRE_C[Warning: Reservation expired\nfull reset to entry]
+    CONF_OK -->|OK| PUT_SUCCESS[Success: Put / Move complete\nstopPolling\nhistory outcome → PUT or MOVE]
+
+    ERR_C1 --> S2
+
+    ACTION -->|Unassign button\nhandleUnassign| UNASSIGN[POST /api/puts/:id/unassign\napi/functions/puts.ts — unassignPut\nclear location to EMPTY\ndelete Reservation atomic]
+
+    UNASSIGN --> UN_OK{Result?}
+    UN_OK -->|NOT_FOUND| EXPIRE_U[Warning: Reservation expired\nfull reset]
+    UN_OK -->|OK| UN_SUCCESS[Info: Reservation cleared\nhistory outcome → RELEASED\nreset to entry — locked overrides kept]
+
+    ACTION -->|Blocked Put button\nhandleBlock| BLOCK[POST /api/puts/:id/block\napi/functions/puts.ts — blockPut\nHold Both on current location\nfindNextLocation\nnew Reservation\nwriteLog RESERVE]
+
+    BLOCK --> BLK_OK{Result?}
+    BLK_OK -->|NO_LOCATIONS| ERR_BLK[Error: No further locations\nhold placed\nfull reset to entry]
+    BLK_OK -->|NOT_FOUND| EXPIRE_B[Warning: Reservation expired\nfull reset]
+    BLK_OK -->|OK| BLK_SUCCESS[New reservationId + directedLocation\nupdate directed state\nold entry → BLOCKED\nnew entry → ASSIGNED\nconfirmField re-focused]
+
+    BLK_SUCCESS --> S2
+
+    PUT_SUCCESS --> RESET_N[Partial reset\nclear pallet + confirm\nnon-locked overrides cleared\nfocus → pallet field]
+    RESET_N --> S1
+
+    UN_SUCCESS --> S1
+    EXPIRE_C --> S1_FULL[Full reset — all fields cleared\nfocus → aisle field]
+    EXPIRE_U --> S1_FULL
+    EXPIRE_B --> S1_FULL
+    ERR_BLK --> S1_FULL
+    S1_FULL --> S1
+
+    style START fill:#1a1a1a,stroke:#555,color:#fff
+    style PUT_SUCCESS fill:#003300,stroke:#006600,color:#fff
+    style UN_SUCCESS fill:#003333,stroke:#006666,color:#aaffff
+    style ERR_P1 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_P2 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_P3 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_C1 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_BLK fill:#330000,stroke:#660000,color:#ff8080
+    style EXPIRE_C fill:#332200,stroke:#664400,color:#ffcc88
+    style EXPIRE_U fill:#332200,stroke:#664400,color:#ffcc88
+    style EXPIRE_B fill:#332200,stroke:#664400,color:#ffcc88

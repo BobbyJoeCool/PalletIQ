@@ -1,3 +1,35 @@
+/**
+ * Generic authenticated API call helper. Attaches a Bearer token to every request
+ * and throws an Error with the server's error code as its message on non-OK responses.
+ * The thrown error's message is the string callers check (e.g. "PALLET_MISMATCH").
+ *
+ * @param path - API path relative to origin (e.g. "/api/labels/123")
+ * @param token - JWT Bearer token from the current session
+ * @param opts - Optional fetch options (method, body, additional headers)
+ * @returns Parsed JSON response body typed as T
+ * @throws Error whose message is the server's `error` field, or "REQUEST_FAILED" for parse errors
+ */
+export async function apiFetch<T>(
+  path: string,
+  token: string,
+  opts?: RequestInit,
+): Promise<T> {
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...(opts?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => ({}));
+    const code = (body as { error?: string }).error ?? 'REQUEST_FAILED';
+    throw Object.assign(new Error(code), { status: res.status });
+  }
+  return res.json() as Promise<T>;
+}
+
 export interface AuthUser {
   zNumber: string;
   firstName: string;
@@ -5,6 +37,15 @@ export interface AuthUser {
   role: string;
 }
 
+/**
+ * Sends a zNumber to the identify endpoint and returns the user's name.
+ * Used by LoginPage to look up the user before asking for their PIN.
+ * Does not require an auth token — this is the first step of the login flow.
+ *
+ * @param zNumber - Employee z-number from badge scan or numpad entry (e.g. "z002p23")
+ * @returns `{ firstName, lastName }` from the matching user record
+ * @throws Error with message "NOT_FOUND" if no user matches; "REQUEST_FAILED" for other errors
+ */
 export async function identify(zNumber: string): Promise<{ firstName: string; lastName: string }> {
   const res = await fetch('/api/auth/identify', {
     method: 'POST',
@@ -16,6 +57,15 @@ export async function identify(zNumber: string): Promise<{ firstName: string; la
   return res.json() as Promise<{ firstName: string; lastName: string }>;
 }
 
+/**
+ * Submits a zNumber + PIN pair to the login endpoint and returns a session token and user record.
+ * Called automatically when the user enters their 4th PIN digit on the PIN screen.
+ *
+ * @param zNumber - The employee z-number (must match the value from the identify step)
+ * @param pin - The 4-digit PIN string
+ * @returns `{ token, user }` — token is a 15-minute HS256 JWT; user includes zNumber, name, and role
+ * @throws Error with message "INVALID_PIN" on wrong PIN; "NOT_FOUND" if user not found; "REQUEST_FAILED" otherwise
+ */
 export async function loginWithPin(
   zNumber: string,
   pin: string,

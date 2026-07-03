@@ -1,0 +1,70 @@
+---
+title: PIP — Pallet ID Pull Flow
+---
+flowchart TD
+    START([Worker opens PIP\nsrc/pages/PIPPage.tsx]) --> S1
+
+    S1[State: selectFunction\nshow CA / CF / FP buttons]
+    S1 --> SEL[Worker taps pull function\nhandleSelectFunction]
+    SEL --> S2
+
+    S2[State: ready\nlabelField auto-focuses\nvia useEffect on screenState]
+
+    S2 --> SCAN_L{Scanner fires\nor numpad submit\nhandleLabelScan}
+
+    SCAN_L --> API_L[GET /api/labels/:id\napi/functions/labels.ts — getLabel\nvalidate status\nresolve Label→Pallet→Location]
+
+    API_L --> L_FOUND{Found?}
+    L_FOUND -->|NOT_FOUND| ERR_L1[Error: Label not found\nlabelField cleared\nremain in ready]
+    L_FOUND -->|BAD STATUS\ne.g. PULLED/CANCELLED| ERR_L2[Error: Invalid status\nlabelField cleared\nremain in ready]
+    L_FOUND -->|OK| FN_CHECK{pullFunction\nmatch?}
+
+    FN_CHECK -->|Mismatch| ERR_L3[Error: Wrong function\nlabelField cleared\nremain in ready]
+    FN_CHECK -->|Match| S3
+
+    ERR_L1 --> S2
+    ERR_L2 --> S2
+    ERR_L3 --> S2
+
+    S3[State: verifying\nstores labelData\npidField auto-focuses\nvia useEffect on screenState]
+
+    S3 --> RESCAN{New label\nscanned while verifying?}
+    RESCAN -->|Yes — handleLabelScan| WARN[Warning: Label not verified\nclear PID + Alt fields\nreload label data]
+    WARN --> S3
+
+    S3 --> VER_PATH{Worker scans one of:}
+
+    VER_PATH -->|Pallet ID\nPID field| PID_VERIFY[POST /api/pulls/verify\nwith palletId\napi/functions/pulls.ts — verifyPull]
+    VER_PATH -->|Alternate ID\nAlt ID field| ALT_VERIFY[POST /api/pulls/verify\nwith alternateId\napi/functions/pulls.ts — verifyPull]
+
+    PID_VERIFY --> PID_OK{Result?}
+    PID_OK -->|PALLET_MISMATCH| ERR_PID[Error: Incorrect Pallet ID\npidField cleared + re-focused]
+    PID_OK -->|WRONG_PULL_FUNCTION| ERR_PID2[Error: Pull function mismatch]
+    PID_OK -->|OK| SUCCESS
+
+    ALT_VERIFY --> ALT_OK{Result?}
+    ALT_OK -->|ALTERNATE_MISMATCH| ERR_ALT[Error: Invalid Alternate ID\naltField cleared + re-focused]
+    ALT_OK -->|WRONG_PULL_FUNCTION| ERR_ALT2[Error: Pull function mismatch]
+    ALT_OK -->|OK| SUCCESS
+
+    ERR_PID --> S3
+    ERR_PID2 --> S3
+    ERR_ALT --> S3
+    ERR_ALT2 --> S3
+
+    SUCCESS[onPullSuccess\nlabel marked PULLED\nquantities deducted\nwriteLog PUT_PULL]
+
+    SUCCESS --> HIST[Append history entry\nlocation + updatedQty + timestamp]
+    HIST --> MSG[MessageBar: success\nPull location + remaining qty]
+    MSG --> RESET[Clear all fields\nsetLabelData null\nsetScreenState ready]
+    RESET --> S2
+
+    style START fill:#1a1a1a,stroke:#555,color:#fff
+    style SUCCESS fill:#003300,stroke:#006600,color:#fff
+    style ERR_L1 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_L2 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_L3 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_PID fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_PID2 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_ALT fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_ALT2 fill:#330000,stroke:#660000,color:#ff8080

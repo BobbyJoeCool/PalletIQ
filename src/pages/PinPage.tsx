@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { PinPad } from '../components/PinPad';
+import { MessageBar } from '../components/shell/MessageBar';
+import { MessageBarProvider, useMessageBar } from '../context/MessageBarContext';
 import { useAuth } from '../context/AuthContext';
 import { loginWithPin } from '../lib/api';
-import { playErrorBeep } from '../lib/audio';
+import { playAlert } from '../lib/audio';
 
 interface LocationState {
   zNumber: string;
@@ -11,73 +13,127 @@ interface LocationState {
   lastName: string;
 }
 
-export function PinPage() {
-  const location = useLocation();
+/**
+ * Inner content of the PIN screen. Shows the user's first name (from LoginPage route state),
+ * four PIN dot boxes that fill as digits are entered, and a PinPad. Auto-submits when the pin
+ * reaches 4 digits — no separate OK tap is required. On success, calls auth context login()
+ * (stores the JWT + user) and navigates to the app home screen with replace:true so Back doesn't
+ * return here.
+ *
+ * @param state - Route state passed from LoginPage: zNumber, firstName, lastName
+ */
+function PinContent({ state }: { state: LocationState }) {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const state = location.state as LocationState | null;
-
+  const { setMessage, clearMessage } = useMessageBar();
   const [pin, setPin] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // auto-submit when 4 digits entered
   useEffect(() => {
-    if (pin.length === 4 && !loading) {
-      void handleSubmit(pin);
-    }
+    if (pin.length === 4 && !loading) void submit(pin);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pin]);
 
-  if (!state) return <Navigate to="/login" replace />;
-
-  const handleSubmit = async (currentPin: string) => {
+  const submit = async (currentPin: string) => {
     if (loading) return;
-    setError(null);
+    clearMessage();
     setLoading(true);
     try {
       const { token, user } = await loginWithPin(state.zNumber, currentPin);
       login(token, user);
       navigate('/', { replace: true });
     } catch (err) {
-      playErrorBeep();
-      const code = err instanceof Error ? err.message : 'REQUEST_FAILED';
-      setError(code === 'INVALID_PIN' ? 'Incorrect PIN. Please try again.' : 'Something went wrong. Please try again.');
+      playAlert('error');
+      const code = err instanceof Error ? err.message : '';
+      setMessage({
+        type: 'error',
+        text: code === 'INVALID_PIN' ? 'Incorrect PIN — try again' : 'Connection error — please try again',
+      });
       setPin('');
     } finally {
       setLoading(false);
     }
   };
 
-  const dots = Array.from({ length: 4 }, (_, i) => i < pin.length);
+  const handleChange = (v: string) => {
+    setPin(v);
+    clearMessage();
+  };
+
+  // 4 PIN dot boxes
+  const dots = Array.from({ length: 4 }, (_, i) => {
+    const filled = i < pin.length;
+    const isActive = i === pin.length;
+    return { filled, isActive };
+  });
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-8 p-8">
-      <h1 className="text-4xl font-bold text-white tracking-wide">PalletIQ</h1>
-
-      <p className="text-2xl text-slate-200">
-        Welcome, <span className="font-semibold text-white">{state.firstName}</span>. Enter your PIN.
-      </p>
-
-      {/* PIN dots */}
-      <div className="flex gap-4">
-        {dots.map((filled, i) => (
-          <div
-            key={i}
-            className={`w-5 h-5 rounded-full border-2 transition-colors ${
-              filled ? 'bg-blue-500 border-blue-500' : 'bg-transparent border-slate-500'
-            }`}
-          />
-        ))}
+    <div className="fixed inset-0 flex flex-col bg-black select-none">
+      {/* Back button (login-only chrome) */}
+      <div className="flex items-center px-6 pt-6">
+        <button
+          type="button"
+          onClick={() => navigate('/login')}
+          className="flex items-center justify-center h-[68px] px-5 rounded-[10px] border border-[#3A3A3A] font-ui text-[22px] font-medium text-white hover:bg-[#1A1A1A] active:bg-[#262626] transition-colors"
+        >
+          ‹ Back
+        </button>
       </div>
 
-      {error && (
-        <div className="w-64 bg-red-900/60 border border-red-500 rounded-lg px-4 py-3 text-red-200 text-sm text-center">
-          {error}
+      {/* Center content */}
+      <div className="flex-1 flex flex-col items-center justify-center gap-10">
+        {/* Greeting */}
+        <div className="flex flex-col items-center gap-2">
+          <h2 className="font-ui text-[34px] font-semibold">
+            <span className="text-white">Welcome: </span>
+            <span className="text-[#9A9A9A]">{state.firstName}</span>
+          </h2>
+          <p className="font-ui text-[24px] text-[#9A9A9A]">Enter your PIN</p>
         </div>
-      )}
 
-      <PinPad value={pin} onChange={setPin} disabled={loading} />
+        {/* PIN dot row */}
+        <div className="flex items-center gap-[22px]">
+          {dots.map(({ filled, isActive }, i) => (
+            <div
+              key={i}
+              className={[
+                'w-[96px] h-[108px] rounded-[12px] flex items-center justify-center border-2 transition-colors',
+                isActive
+                  ? 'bg-[#0D0D0D] border-[#CC0000]'
+                  : 'bg-[#0D0D0D] border-[#3A3A3A]',
+              ].join(' ')}
+            >
+              {filled ? (
+                <div className="w-[26px] h-[26px] rounded-full bg-white" />
+              ) : isActive ? (
+                <div className="w-[3px] h-[48px] bg-[#CC0000] rounded-sm animate-pulse" />
+              ) : null}
+            </div>
+          ))}
+        </div>
+
+        <PinPad value={pin} onChange={handleChange} disabled={loading} />
+      </div>
+
+      {/* Bottom: message bar (standalone) */}
+      <MessageBar standalone />
     </div>
+  );
+}
+
+/**
+ * PIN entry screen.
+ * Guards against direct URL access or stale navigation: if route state is missing, redirects
+ * immediately to /login. Otherwise renders PinContent in an isolated MessageBarProvider.
+ */
+export function PinPage() {
+  const location = useLocation();
+  const state = location.state as LocationState | null;
+  if (!state) return <Navigate to="/login" replace />;
+
+  return (
+    <MessageBarProvider>
+      <PinContent state={state} />
+    </MessageBarProvider>
   );
 }

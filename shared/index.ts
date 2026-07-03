@@ -19,11 +19,10 @@ export function hasMinRole(userRole: Role, minRole: Role): boolean {
   return ROLE_RANK[userRole] >= ROLE_RANK[minRole];
 }
 
+// HOLD_IN/HOLD_OUT/HOLD_BOTH/HOLD_PERM were removed from this union in Phase 10 — hold
+// state now lives in the independent `Location.holdCategory` field (see HoldCategory
+// below), not status. See phase-10 log for why.
 export type LocationStatus =
-  | 'HOLD_IN'
-  | 'HOLD_OUT'
-  | 'HOLD_BOTH'
-  | 'HOLD_PERM'
   | 'EMPTY'
   | 'STORED'
   | 'PULL_PENDING'
@@ -31,6 +30,8 @@ export type LocationStatus =
   | 'STAGED';
 
 export type LocationSize = 'XS' | 'HS' | 'S' | 'M' | 'L';
+
+export type HoldCategory = 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM';
 
 export type PalletStatus =
   | 'PUT_PENDING'
@@ -100,8 +101,10 @@ export interface Location {
   zone: number;
   status: LocationStatus;
   holdTypeCode: string | null;
+  holdCategory: HoldCategory | null;
   storageCode: string;
   size: LocationSize;
+  contraction: boolean;
 }
 
 export interface User {

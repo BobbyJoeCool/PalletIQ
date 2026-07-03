@@ -30,3 +30,12 @@ export function parseFullLocationBarcode(input: string): ParsedFullLocation | nu
     level: parseInt(digits.slice(6, 8), 10),
   };
 }
+
+/**
+ * Formats a location composite key as a zero-padded 8-character string.
+ * Format: AAABBBLL (aisle 3 digits, bin 3 digits, level 2 digits) — the inverse of
+ * parseFullLocationBarcode.
+ */
+export function formatLocationId(aisle: number, bin: number, level: number): string {
+  return String(aisle).padStart(3, '0') + String(bin).padStart(3, '0') + String(level).padStart(2, '0');
+}

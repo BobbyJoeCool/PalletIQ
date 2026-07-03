@@ -471,13 +471,15 @@ function buildLocationsAndPallets() {
           const vcp = randomFrom(VCP_OPTIONS)
           const ssp = Math.random() < 0.5 ? vcp : vcp / 2
           const cartons = randomInt(1, 20)
+          // 60% of locations are carton-only (pallet has been broken); 40% still have a full pallet unit.
+          const hasFullPallet = Math.random() < 0.4 ? 1 : 0
           const receivedAt = randomDate(365)
           const putAt = new Date(receivedAt.getTime() + randomInt(1, 8) * 3_600_000)
 
           pallets.push({
             pid,
             dept: itm.dept, class: itm.class, item: itm.item,
-            receivedPallets: 1, currentPallets: 1,
+            receivedPallets: hasFullPallet, currentPallets: hasFullPallet,
             receivedCartons: cartons, currentCartons: cartons,
             receivedSSPs: 0, currentSSPs: 0,
             vcp, ssp, status: 'STORED',
@@ -632,18 +634,23 @@ async function main() {
 
   const labelData = labelPallets.map((p, i) => {
     const isPurged = labelStatuses[i] === 'PURGED'
+    const qty = randomInt(1, Math.max(1, p.currentCartons - 1))
+    // Determine pull function from location attributes seeded above.
+    // The pallet's location level and size aren't directly on the pallet row here,
+    // so default to CA (most common); seed-labels.ts applies the full rule set.
     return {
       lid: genLid(store.id, p.dept, p.class, p.item, p.pid, batchToday),
       pid: p.pid,
       dept: p.dept,
       class: p.class,
       item: p.item,
-      quantity: randomInt(1, 5),
+      quantity: qty,
       sspQuantity: 0,
       batchDate: batchToday,
       purgeDate: isPurged ? pastPurge : purgeDate,
       destinationStore: store.id,
       status: labelStatuses[i],
+      pullFunction: 'CA',
     }
   })
 

@@ -18,15 +18,25 @@ classDiagram
 
     class LocationStatus {
         <<enumeration>>
-        HOLD_IN
-        HOLD_OUT
-        HOLD_BOTH
-        HOLD_PERM
         EMPTY
         STORED
         PULL_PENDING
         RESERVED
         STAGED
+        %% HOLD_IN/HOLD_OUT/HOLD_BOTH/HOLD_PERM removed Phase 10 — hold state now lives
+        %% in Location.holdCategory, independent of status (see HoldCategory below).
+        %% Phase 6's blockPut briefly wrote HOLD_BOTH into status, which clobbered the
+        %% location's real operational state; fixed to use holdCategory instead.
+    }
+
+    class HoldCategory {
+        <<enumeration>>
+        HOLD_IN
+        HOLD_OUT
+        HOLD_BOTH
+        HOLD_PERM
+        %% Stored in Location.holdCategory (nullable), independent of LocationStatus —
+        %% added Phase 10. See DevNotes/Screen-Specs/WLH.md for place/remove role rules.
     }
 
     class LocationSize {
@@ -59,8 +69,32 @@ classDiagram
         %% May expand as app is built
     }
 
+    class PullFunction {
+        <<enumeration>>
+        CA
+        CF
+        FP
+        BK
+        %% CA: Carton Air (XS-size or non-XS above level 1, non-emptying)
+        %% CF: Carton Floor (level 1, non-XS, non-emptying)
+        %% FP: Full Pallet (empties the location, non-XS)
+        %% BK: Bulk (level-00 locations — not implemented in demo)
+    }
+
     class ActionType {
         <<enumeration>>
         EDIT_PAL
-        %% Expand as features are built — max 10 chars (NVarChar(10))
+        PULL
+        RESERVE
+        PUT
+        UNASSIGN
+        BLOCK_PUT
+        RES_TMOUT
+        MNP_SCAN
+        STAGE
+        RESTAGE
+        HOLD_PLACE
+        HOLD_CLEAR
+        REINSTATE
+        %% Max 10 chars (NVarChar(10))
     }

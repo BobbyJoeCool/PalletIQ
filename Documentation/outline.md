@@ -116,11 +116,26 @@ Because handheld scanners cannot always reach upper levels, **the system reads o
 
 A single screen handles all pull types: Carton Air, Full Pallet, Bulk, and Carton Floor. Pull types differ in the physical pattern used to traverse the aisle when labels are printed (Carton Air zigzags bin-by-bin and side-to-side; Full Pallet, Bulk, and Carton Floor move straight down the aisle by bin) — this patterning happens at label-generation time and is out of scope for the pull screen's behavior itself.
 
+### Pull Functions
+
+Each label is assigned a pull function at generation time based on the physical characteristics of its source location and whether the pull will empty it:
+
+| Code | Name | Rule |
+| --- | --- | --- |
+| CA | Carton Air | XS-size locations (all levels), OR non-XS locations above Level 1 where the pull does **not** empty the location |
+| CF | Carton Floor | Level 1 non-XS locations where the pull does **not** empty the location |
+| FP | Full Pallet | Non-XS, non-BK locations where the pull takes **every** carton (empties the location) |
+| BK | Bulk | Locations designated as bulk storage — identified by **Level 00** in the location composite key |
+
+XS-size locations are always CA regardless of level. Pull function selection on the pull screen acts as a filter: only labels matching the selected function can be scanned in that session.
+
+**Bulk (BK) implementation note:** Bulk locations are flagged by level = 00 in the `Location` composite PK. The system can identify them as bulk automatically without a separate field. BK pull logic (multi-pallet moves, different label format) is out of scope for this demo and deferred to a future phase. The data model and level-00 convention are in place; no additional code is required.
+
 ### Pull Labels
 
 - One label exists per carton being pulled. Any of the labels for a multi-carton pull can be scanned to initiate that pull's transaction — for this system, all labels for a pull behave identically and the system does not currently track which physical carton diverts to which destination store. **This is a deliberate scope decision; the data model should not preclude adding individual carton/label-level divert tracking in a future iteration.**
-- A label carries: number of cartons, location, DPCI, batch date (date requested), purge date (7 days after batch date), and destination store.
-- **Label statuses:** Pending (valid, ready to pull), Pulled (completed), Canceled (manually canceled), Purged (past the 7-day purge date and automatically invalidated).
+- A label carries: pull function (CA/CF/FP), number of cartons, location, DPCI, batch date (date requested), purge date (7 days after batch date), and destination store.
+- **Label statuses:** Printed (valid, ready to pull), Pulled (completed), Canceled (manually canceled), Purged (past the 7-day purge date and automatically invalidated).
 
 ### Pull Screen Behavior
 
@@ -271,7 +286,7 @@ The worker enters an **Aisle** and a **Storage Code**. The screen shows a visual
 - **Columns:** Zone 1 through Zone 4, each split into an Odd-side column and an Even-side column (8 columns total), reflecting that every aisle has 4 zones with bins typically numbered odd on one side and even on the other.
 - **Rows:** one row per physical level in the aisle, with Level 1 (ground) at the bottom of the grid and the highest level at the top, mirroring the physical aisle.
 - **Each cell** represents one level within one zone/side and displays that location's `{Storage Code}-{Size}` designation.
-- Color coding distinguishes empty from occupied (and other statuses) at a glance.
+- The only status color-coding on the grid is **Contraction** — a Lead+ designation (managed outside this app, via Aisle Setup) that blocks staging and putting for that zone-side/level. Occupied, empty, staged, and reserved states are not reflected in the grid; the per-zone summary panel below is where empty/staged counts are surfaced.
 
 Below or alongside the grid, a **per-zone summary** (combining both odd and even sides of that zone) shows counts of each open `{Storage Code}-{Size}` combination — this is the actionable number a General Pallet Mover (GPMer) uses to decide where to stage incoming pallet stacks.
 

@@ -1,0 +1,68 @@
+---
+title: MNP — Manual Put Flow
+---
+flowchart TD
+    START([Worker opens MNP\nsrc/pages/MNPPage.tsx]) --> S1
+
+    S1[State: ready\npalletField auto-focuses\nvia useEffect on screenState]
+
+    S1 --> PALLET_SCAN{Scan Pallet ID\nhandlePalletScan}
+
+    PALLET_SCAN --> API_SCAN[POST /api/puts/manual/scan\napi/functions/puts.ts — manualScan\nwriteLog MNP_SCAN unconditionally\ncheckPalletEligibility\nreturn pallet + eligible flag]
+
+    API_SCAN --> SCAN_OK{Result?}
+    SCAN_OK -->|PALLET_NOT_FOUND| ERR_P1[Error: Pallet not found\npalletField cleared]
+    SCAN_OK -->|NO_CARTONS| ERR_P2[Error: No stored cartons\npalletField cleared]
+    SCAN_OK -->|OK| ELIG_CHECK{alreadyStored?}
+
+    ERR_P1 --> S1
+    ERR_P2 --> S1
+
+    ELIG_CHECK -->|Yes — has currentLocation| MOVE_MSG[Info: proceeding as move\nshown in message bar]
+    ELIG_CHECK -->|No| S2
+
+    MOVE_MSG --> S2
+
+    S2[State: pallet_scanned\nPallet details shown\ndestinationField auto-focuses\npendingEntryKey set in history as SCANNED]
+
+    S2 --> LOC_SCAN{Scan destination location\nhandleDestinationEnter}
+
+    LOC_SCAN --> API_LOC[GET /api/locations/:id\napi/functions/locations.ts — getLocation\nvalidate aisle+bin exists\nno level required yet]
+
+    API_LOC --> LOC_OK{Found?}
+    LOC_OK -->|Not found| ERR_L[Error: Location not found\ndestinationField cleared + re-focused]
+    LOC_OK -->|OK| S3
+
+    ERR_L --> S2
+
+    S2 --> CLR[Worker taps Clear button\nresetToReady\nback to ready]
+    CLR --> S1
+
+    S3[State: level_modal\nLevelModal overlay shown\ndestinationField value stored in pendingLocation]
+
+    S3 --> LEVEL_SEL[Worker enters level number\nLevelModal confirm button\nhandleLevelSelect called]
+
+    LEVEL_SEL --> API_CONF[POST /api/puts/manual/confirm\napi/functions/puts.ts — manualConfirm\nparse location barcode\ncheck if destination occupied non-blocking\nplacePallet atomic transaction\nwriteLog PUT\nreturn wasMove + occupiedFlag]
+
+    API_CONF --> CONF_OK{Result?}
+    CONF_OK -->|NOT_FOUND| ERR_C[Error: Location not found\nreturn to pallet_scanned\ndestinationField cleared]
+    CONF_OK -->|General error| ERR_G[Error: Confirm failed\nreturn to pallet_scanned]
+    CONF_OK -->|OK — destination was empty| PUT_SUCCESS[Success message\nhistory: SCANNED → PUT\nlocation + level shown]
+    CONF_OK -->|OK — destination was occupied| OCC_WARN[Warning: was occupied\nhistory: SCANNED → PUT\nshows WAS OCCUPIED badge]
+
+    ERR_C --> S2
+    ERR_G --> S2
+
+    PUT_SUCCESS --> RESET[resetToReady\nclear all per-put state\nreturn to ready]
+    OCC_WARN --> RESET
+
+    RESET --> S1
+
+    style START fill:#1a1a1a,stroke:#555,color:#fff
+    style PUT_SUCCESS fill:#003300,stroke:#006600,color:#fff
+    style OCC_WARN fill:#332200,stroke:#664400,color:#ffcc88
+    style ERR_P1 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_P2 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_L fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_C fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_G fill:#330000,stroke:#660000,color:#ff8080

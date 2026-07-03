@@ -1,3 +1,12 @@
 import './functions/auth.js';
 import './functions/pallets.js';
 import './functions/locations.js';
+import './functions/labels.js';
+import './functions/pulls.js';
+import './functions/puts.js';
+import './functions/staging.js';
+import './functions/samples.js';
+import './functions/reservationTimer.js';
+import './functions/activity.js';
+import './functions/items.js';
+import './functions/reporting.js';

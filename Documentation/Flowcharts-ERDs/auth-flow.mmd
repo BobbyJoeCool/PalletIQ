@@ -1,0 +1,49 @@
+---
+title: PalletIQ Authentication Flow
+---
+flowchart TD
+    A([Worker at device]) --> B[LoginPage\nsrc/pages/LoginPage.tsx]
+
+    B --> C{Input method}
+
+    C -->|Badge scan\nhardware scanner| D[AppShell detects scan\nsrc/components/shell/AppShell.tsx\ndeliverScan → label field]
+    C -->|Manual entry\nZnumPad| E[ZnumPad input\nsrc/components/ZnumPad.tsx\nbuilds zNumber string]
+
+    D --> F[identify zNumber\nsrc/lib/api.ts — identify]
+    E --> G[OK tapped\nonSubmit fires]
+    G --> F
+
+    F --> H[GET /api/auth/identify\napi/functions/auth.ts — identify\nlookup User by zNumber]
+
+    H --> I{Found?}
+    I -->|No — NOT_FOUND| J[Error: zNumber not found\nMessageBar shows error\nZnumPad cleared]
+    I -->|Yes| K[Returns firstName, lastName]
+
+    K --> L[Navigate to /pin\nroute state: zNumber + name\nsrc/pages/PinPage.tsx]
+
+    J --> B
+
+    L --> M[PinPage\nsrc/pages/PinPage.tsx\nshows name greeting]
+
+    M --> N[Worker taps PinPad\nsrc/components/PinPad.tsx\n4-digit PIN]
+
+    N --> O{pin.length === 4?}
+    O -->|Not yet| N
+    O -->|Yes — auto-submit| P[loginWithPin\nsrc/lib/api.ts — loginWithPin]
+
+    P --> Q[POST /api/auth/login\napi/functions/auth.ts — login\nverify zNumber + PIN hash\nissue 15-min JWT]
+
+    Q --> R{Valid?}
+    R -->|INVALID_PIN| S[Error: Incorrect PIN\nMessageBar shows error\nPIN cleared]
+    R -->|Yes| T[Returns JWT token + user object]
+
+    S --> N
+
+    T --> U[auth context login\nsrc/context/AuthContext.tsx\nstores token + user\nsets idle timer]
+
+    U --> V[Navigate to /\nHomePage]
+
+    style A fill:#1a1a1a,stroke:#555,color:#fff
+    style V fill:#003300,stroke:#006600,color:#fff
+    style J fill:#330000,stroke:#660000,color:#ff8080
+    style S fill:#330000,stroke:#660000,color:#ff8080

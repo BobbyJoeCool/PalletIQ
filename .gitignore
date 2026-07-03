@@ -30,6 +30,20 @@ api/obj/
 .azure/
 .swa/
 
+# ---------- Azurite (local Azure Storage emulator) ----------
+# Run with: azurite --location .azurite
+.azurite/
+__azurite_db_blob__.json
+__azurite_db_blob_extent__.json
+__azurite_db_queue__.json
+__azurite_db_queue_extent__.json
+__azurite_db_table__.json
+__azurite_db_table_extent__.json
+__blobstorage__/
+__queuestorage__/
+__tablestorage__/
+**/debug.log
+
 # ---------- Prisma ----------
 # Generated client (regenerated via `prisma generate`, no need to commit)
 api/node_modules/.prisma/
@@ -47,6 +61,12 @@ pnpm-debug.log*
 coverage/
 *.lcov
 .nyc_output/
+
+# ---------- Playwright ----------
+playwright-report/
+test-results/
+playwright/.auth/
+blob-report/
 
 # ---------- TypeScript ----------
 *.tsbuildinfo

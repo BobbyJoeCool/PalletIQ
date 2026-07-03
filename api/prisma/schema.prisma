@@ -76,14 +76,30 @@ model Location {
   level        Int
   zone         Int
   status       String  @db.NVarChar(15)
+  // holdTypeCode is a reason-code FK (1-letter dept + 2-digit reason, e.g. "B05" — see
+  // HoldType below), not the hold category. Left unpopulated per WLH.md, which states
+  // twice that the reason code is written only to the ActivityLog, not stored as a
+  // column — kept in the schema as inherited, currently-unused infrastructure rather
+  // than removed outright (Phase 10, see phase-10 log).
   holdTypeCode String? @db.NVarChar(3)
   storageCode  String  @db.NVarChar(2)
   size         String  @db.NVarChar(2)
+  // Contraction is set at zone-side+level granularity by Lead+ via Aisle Setup (out of
+  // scope for this demo — see ELZ.md); stored per-location and expected to be uniform
+  // across every location sharing a zone-side/level group. Read-only in this app.
+  contraction  Boolean @default(false)
+  // The hold *category* (HOLD_IN/HOLD_OUT/HOLD_BOTH/HOLD_PERM), independent of `status`
+  // per outline.md's original Location description ("HoldType, nullable, independent of
+  // Status"). Added Phase 10 — `status` briefly (Phase 6's blockPut) doubled as the hold
+  // indicator, which destroys the location's real operational state (EMPTY vs STORED)
+  // the moment a hold is placed; fixed to use this field instead. See phase-10 log.
+  holdCategory String? @db.NVarChar(10)
 
   holdType   HoldType?   @relation(fields: [holdTypeCode], references: [code])
   storageRef StorageCode @relation(fields: [storageCode], references: [id])
 
   pallets      Pallet[]
+  reservations Reservation[]
   activityLogs ActivityLog[]
 
   @@id([aisle, bin, level], name: "LocationID")
@@ -102,6 +118,7 @@ model User {
   receivedPallets Pallet[]      @relation("PalletReceivedBy")
   putPallets      Pallet[]      @relation("PalletPutBy")
   pulledPallets   Pallet[]      @relation("PalletLastPulledBy")
+  reservations    Reservation[]
   activityLogs    ActivityLog[]
 }
 
@@ -136,6 +153,7 @@ model Pallet {
   lastPulledBy User?     @relation("PalletLastPulledBy", fields: [lastPulledByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
 
   labels       Label[]
+  reservations Reservation[]
   activityLogs ActivityLog[]
 }
 
@@ -151,10 +169,34 @@ model Label {
   purgeDate        DateTime  @db.Date
   destinationStore Int
   status           String    @db.NVarChar(15)
+  pullFunction     String    @db.NVarChar(2)
 
   pallet  Pallet @relation(fields: [pid], references: [pid], onDelete: NoAction, onUpdate: NoAction)
   itemRef Item   @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
   store   Store  @relation(fields: [destinationStore], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+// Tracks active SDP reservations. One row per in-flight reservation; deleted on resolution.
+model Reservation {
+  id            Int      @id @default(autoincrement())
+  locationAisle Int
+  locationBin   Int
+  locationLevel Int
+  palletId      Int
+  workerZ       String   @db.NVarChar(7)
+  // Original search criteria — preserved so block/find-next can re-run the same query.
+  targetAisle   Int
+  targetSize    String?  @db.NVarChar(2)
+  targetStorage String?  @db.NVarChar(2)
+  targetZone    Int?
+  // Preserved from the original directedPut call so a Blocked Put re-search (blockPut)
+  // honors the same STAGED-exclusion preference as the initial search.
+  consolidating Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  location Location @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
+  pallet   Pallet   @relation(fields: [palletId], references: [pid], onDelete: NoAction, onUpdate: NoAction)
+  worker   User     @relation(fields: [workerZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
 }
 
 model ActivityLog {

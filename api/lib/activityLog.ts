@@ -13,6 +13,16 @@ export interface LogEntry {
   details?: Record<string, unknown>;
 }
 
+/**
+ * Writes a single entry to the ActivityLog table.
+ * All optional fields (palletId, location components, DPCI components, details)
+ * default to null when not supplied. The details object is JSON-serialized if present.
+ *
+ * This is the only function that writes to the activity log — all state-changing
+ * endpoints call it so the log is complete and consistent.
+ *
+ * @param entry - Log entry requiring at minimum userId and actionType; all other fields are optional
+ */
 export async function writeLog(entry: LogEntry): Promise<void> {
   await prisma.activityLog.create({
     data: {
