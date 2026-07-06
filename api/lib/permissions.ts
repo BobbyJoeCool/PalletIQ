@@ -41,8 +41,11 @@ export async function requireAuth(req: HttpRequest): Promise<JwtPayload> {
   try {
     const { payload } = await jwtVerify(token, getSecret());
     return { zNumber: payload.zNumber as string, role: payload.role as Role };
-  } catch {
-    throw Object.assign(new Error('UNAUTHORIZED'), { status: 401 });
+  } catch (e) {
+    // TEMPORARY diagnostic — surfaces the real jose error instead of swallowing it.
+    // Revert to plain UNAUTHORIZED once the production auth issue is root-caused.
+    const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    throw Object.assign(new Error(`UNAUTHORIZED_DEBUG: ${detail}`), { status: 401 });
   }
 }
 
