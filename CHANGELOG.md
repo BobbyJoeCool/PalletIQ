@@ -144,3 +144,14 @@ and clearing the Unreleased fix backlog above.
 - 21 items from the latest full Playwright run — see Unreleased above
 - `playAlert()` in `src/lib/audio.ts` is still a no-op stub (Phase 11.1)
 - Not yet deployed (Phase 11.2)
+
+---
+
+## [0.9.1] — 2026-07-06
+
+### Added
+
+- **Scale-to-fit rendering** (`src/components/shell/ScaleToFit.tsx`) — the app renders at its
+  native 1366×1024 iPad Pro canvas and scales it with a CSS transform to fit whatever device
+  it's actually running on (e.g. a regular iPad's smaller landscape resolution), recomputed on
+  resize/orientation change, rather than clipping off-screen. Wired in at `src/main.tsx`.
