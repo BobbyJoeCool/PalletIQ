@@ -42,10 +42,12 @@ export async function requireAuth(req: HttpRequest): Promise<JwtPayload> {
     const { payload } = await jwtVerify(token, getSecret());
     return { zNumber: payload.zNumber as string, role: payload.role as Role };
   } catch (e) {
-    // TEMPORARY diagnostic — surfaces the real jose error instead of swallowing it.
-    // Revert to plain UNAUTHORIZED once the production auth issue is root-caused.
+    // TEMPORARY diagnostic — surfaces the real jose error plus a secret fingerprint
+    // instead of swallowing it. Revert once the production auth issue is root-caused.
     const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-    throw Object.assign(new Error(`UNAUTHORIZED_DEBUG: ${detail}`), { status: 401 });
+    const raw = process.env.JWT_SECRET ?? '';
+    const fingerprint = `len=${raw.length} start=${raw.slice(0, 6)} end=${raw.slice(-4)}`;
+    throw Object.assign(new Error(`UNAUTHORIZED_DEBUG: ${detail} | verifySecret[${fingerprint}]`), { status: 401 });
   }
 }
 

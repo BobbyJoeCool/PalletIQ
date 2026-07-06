@@ -59,8 +59,14 @@ async function login(req: HttpRequest, _ctx: InvocationContext): Promise<unknown
 
   const token = await signToken({ zNumber: user.zNumber, role: user.role as Role });
 
+  // TEMPORARY diagnostic — fingerprint of the secret used to sign, to compare against
+  // the one requireAuth reads at verify time. Revert once root-caused.
+  const raw = process.env.JWT_SECRET ?? '';
+  const signSecretDebug = `len=${raw.length} start=${raw.slice(0, 6)} end=${raw.slice(-4)}`;
+
   return {
     token,
+    signSecretDebug,
     user: {
       zNumber: user.zNumber,
       firstName: user.firstName,
