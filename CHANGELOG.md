@@ -4,7 +4,9 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 ## Table of Contents
 
-- [Unreleased — Planned Fixes](#unreleased--planned-fixes)
+- [Future Versions — Major Features](#future-versions--major-features)
+- [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.0.0 — 2026-07-06](#100--2026-07-06)
 - [0.9.7 — 2026-07-06](#097--2026-07-06)
 - [0.9.6 — 2026-07-06](#096--2026-07-06)
 - [0.9.5 — 2026-07-06](#095--2026-07-06)
@@ -16,11 +18,32 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 ---
 
-## Unreleased — Planned Fixes
+## Future Versions — Major Features
 
-Every item below was found during the 2026-07-05 full Playwright run (61 passed / 21 failed) —
-see [DevNotes/TestLogs/playwright-run-2026-07-05.md](DevNotes/TestLogs/playwright-run-2026-07-05.md)
-for full detail, error text, and reproduction steps. Grouped by screen.
+Not yet designed or scheduled to a phase — placeholder codes reserved in `HomePage.tsx`/
+`App.tsx` (rendering as `PlaceholderPage` today) or newly proposed. Each gets its own design
+conversation and build plan when picked up.
+
+- **IRP — Individual Reporting.** Personal productivity dashboard for the logged-in worker:
+  pull/put performance by function (units, units/hour, time in function, goal progress), or a
+  staging summary for GPMers. Leads/Managers get a separate cross-worker reporting screen; IRP
+  always shows only the logged-in user's own data.
+- **ISI — Item Storage Inquiry.** Looks up an item by DPCI or UPC (like IID) and lists every
+  location currently storing it, ordered by location. Selecting a row jumps to that location's
+  LII screen, or to the pallet's PII screen.
+- **PRQ — Pull Request by Label.** Not yet designed.
+
+---
+
+## Unreleased — Reported Issues
+
+Grouped by screen. Each item is either a bug (something's broken) or a feature change (works
+today, wanted differently) — tagged `[Bug]` or `[Feature Change]`. Reports filed via
+[DevNotes/Bug-Reports/ReportTemplate.md](DevNotes/Bug-Reports/ReportTemplate.md) land here. Items without a tag below
+predate that convention and were found during the 2026-07-05 full Playwright run (61 passed / 21
+failed) — see
+[DevNotes/TestLogs/playwright-run-2026-07-05.md](DevNotes/TestLogs/playwright-run-2026-07-05.md)
+for full detail, error text, and reproduction steps.
 
 ### Empty Locations (ELA / ELZ)
 
@@ -83,7 +106,7 @@ for full detail, error text, and reproduction steps. Grouped by screen.
       same text (`stg.spec.ts:111`)
 - **Note:** the two items above are against STG's *old* layout. STG is mid-redesign as of this
   writing (pallet-rider-triple graphic, Master Control restructure — see
-  `DevNotes/Logs/phase-11.md`'s 11.2 entry); the follow-up work for that redesign is tracked
+  `DevNotes/Logs/version-1_0_0.md`'s 11.2 entry); the follow-up work for that redesign is tracked
   separately right below rather than folded into the old-layout items above.
 
 ### STG Redesign Follow-Ups
@@ -94,27 +117,26 @@ for full detail, error text, and reproduction steps. Grouped by screen.
       above rather than fixing them in place; add new coverage for Master Control's Aisle field
       feeding "Fill All" and for the zone map's idle → loaded states
 
-The two groups below aren't test failures or redesign follow-ups — they're the remaining
-`Documentation/tasks.md` Phase 11 work items needed before a 1.0 release.
+---
 
-### Audio System (Phase 11.1)
+## [1.0.0] — 2026-07-06
 
-- [ ] Design the audio tone system: at minimum an error tone (loud, repeated) and an
-      informational tone; finalize actual audio clips (sourcing macOS `.aiff` files) vs. a Web
-      Audio API generation approach
-- [ ] Replace the `playAlert()` no-op stub in `src/lib/audio.ts` with the real implementation
-- [ ] Verify every audio call site (Incorrect Pallet ID, Invalid Alternate ID, invalid label
-      status, zNumber not found, PIN mismatch, hold actions) fires the correct tone
+### 1.0.0 — Added
 
-### Deployment (Phase 11.2)
+- **Real audio alert system (Phase 11.1)** — `playAlert()` in `src/lib/audio.ts` no longer a
+  no-op stub. Plays a distinct mp3 per severity (`src/assets/Error.mp3`, `Warning.mp3`,
+  `Info.mp3`), each at its own fixed volume (Error 1.0, Warning 0.7, Info 0.5) so the tones read
+  as loudest-to-quietest by severity. No call site changes needed — every existing
+  `playAlert('error' | 'warning' | 'info')` call across Login/PIN/MNP/PAR/STG/PII/PIP/IID/WLH/
+  SDP and `HoldPanel` already passed the correct tone; verified in-browser via Playwright against
+  the real dev server (each tone resolves to the right file, the right volume, and plays without
+  a decode error).
 
-- [ ] Configure a GitHub Actions workflow for Azure Static Web Apps deployment
-- [ ] Set production environment variables and secrets in Azure
-- [ ] Run the production Prisma migration against production Azure SQL
-- [ ] Run the production seed (or a trimmed demo-safe version)
-- [ ] Verify `/api/*` routing works end-to-end in the deployed environment
-- [ ] Smoke-test each major flow in production: login, pull, directed put, manual put, pallet
-      lookup, location lookup, hold, empty locations by aisle, empty locations by zone
+This closes out `Documentation/tasks.md`'s Phase 11.1, the last unchecked item in the original
+11-phase build plan — Phases 1–11 are now complete. That build plan is archived as-is at
+[`Documentation/Development/initialBuildTasks.md`](Documentation/Development/initialBuildTasks.md)
+for history. There is no replacement `tasks.md`: from here on, this changelog's
+**Unreleased — Reported Issues** section above is the live list of what's left to do.
 
 ---
 

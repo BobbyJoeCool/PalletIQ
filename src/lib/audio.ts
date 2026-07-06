@@ -1,15 +1,34 @@
+import errorSound from '../assets/Error.mp3';
+import infoSound from '../assets/Info.mp3';
+import warningSound from '../assets/Warning.mp3';
+
 export type AlertTone = 'error' | 'info' | 'warning';
+
+/** Per-tone playback volume (0.0–1.0). Error is loudest, Info is quietest. */
+const TONE_VOLUME: Record<AlertTone, number> = {
+  error: 1.0,
+  warning: 0.7,
+  info: 0.5,
+};
+
+const TONE_SRC: Record<AlertTone, string> = {
+  error: errorSound,
+  warning: warningSound,
+  info: infoSound,
+};
 
 /**
  * Plays an audio alert tone for the given severity level.
- * Currently a no-op stub — the real tone system (distinct error vs. informational tones)
- * is deferred to Phase 11.1 where actual audio clips or Web Audio API generation will be wired in.
  *
- * @param _tone - The tone to play: "error" for failures, "info" for success/informational,
+ * @param tone - The tone to play: "error" for failures, "info" for success/informational,
  *   "warning" for non-blocking cautions (occupied location, already-stored pallet, etc.)
  */
-export function playAlert(_tone: AlertTone): void {
-  // intentional no-op — audio system to be designed separately
+export function playAlert(tone: AlertTone): void {
+  const audio = new Audio(TONE_SRC[tone]);
+  audio.volume = TONE_VOLUME[tone];
+  void audio.play().catch(() => {
+    // Autoplay can be blocked before the user has interacted with the page; ignore.
+  });
 }
 
 /**

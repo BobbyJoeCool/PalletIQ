@@ -40,7 +40,7 @@ It's also built around a few opinionated design decisions that came directly fro
 - **Numeric input first.** There's no physical keyboard on the device, so almost everything — pallet IDs, locations, quantities — is entered on an on-screen numpad rather than a full keyboard.
 - **A real permission hierarchy.** Four roles (Worker, Inventory Manager, Lead Worker, System Admin), strictly inheriting upward, with field-level and action-level gating rather than hiding whole screens from people who can't use every feature on them.
 
-The full functional specification lives in [`outline.md`](./outline.md).
+The full functional specification lives in [`outline.md`](Documentation/outline.md).
 
 ---
 
@@ -50,7 +50,7 @@ This is intentionally **not** a full WMS. It excludes inbound receiving, outboun
 
 Warehouse setup (creating aisles and locations) and user account management are also out of scope for the same reason — they're administrative CRUD that doesn't showcase the interesting domain logic, so this project seeds that data directly instead of building screens for it.
 
-See the **Explicitly Out of Scope** section of [`outline.md`](./outline.md) for the full list, including a couple of forward-looking notes on what the data model intentionally leaves room for later.
+See the **Explicitly Out of Scope** section of [`outline.md`](Documentation/outline.md) for the full list, including a couple of forward-looking notes on what the data model intentionally leaves room for later.
 
 ---
 
@@ -63,7 +63,7 @@ See the **Explicitly Out of Scope** section of [`outline.md`](./outline.md) for 
 | Hosting | Azure Static Web Apps |
 | Database | Azure SQL |
 | ORM | Prisma |
-| Auth | Badge + PIN login, backed by Azure AD B2C token issuance |
+| Auth | Badge + PIN login, custom DB-backed flow issuing signed JWTs (Azure AD B2C is not used) |
 
 This is an intentionally all-TypeScript stack. A `shared/` package defines types once — a `Pallet` or a `Location` — and both the React frontend and the Azure Functions backend import the same definitions. A change to a data shape is a compile error in both places at once, not a runtime surprise.
 
@@ -90,7 +90,7 @@ A few architectural decisions worth calling out for anyone reviewing this as a p
 
 ## How This Was Built
 
-This project was designed and built in close collaboration with Claude (Anthropic), working through the functional design conversationally before any code was written — starting from the existing Target System's behavior, identifying what to keep and what to improve, and only then translating that into a tech stack, a data model, and a build plan. The full design conversation is reflected in [`outline.md`](./outline.md), which was written before implementation began.
+This project was designed and built in close collaboration with Claude (Anthropic), working through the functional design conversationally before any code was written — starting from the existing Target System's behavior, identifying what to keep and what to improve, and only then translating that into a tech stack, a data model, and a build plan. The full design conversation is reflected in [`outline.md`](Documentation/outline.md), which was written before implementation began.
 
 ---
 
@@ -122,16 +122,18 @@ palletiq/
 
 ## Documentation
 
-- [`outline.md`](./outline.md) — the full functional specification: every screen, every rule, every edge case
-- [`tasks.md`](./tasks.md) — the build plan, broken into phases, features, and steps
-- [`database.mmd`](./database.mmd) — entity-relationship diagram
-- [`ui-flow.mmd`](./ui-flow.mmd) — top-level screen-to-screen navigation map
-- `putaway-flow.mmd` — put-away/move task lifecycle (planned — built alongside Put implementation, not yet created)
-- `pull-flow.mmd` — pull task lifecycle (planned — built alongside Pull implementation, not yet created)
-- Per-screen functional `.md` docs — planned, one created as each function is individually designed in detail, not yet created
+- [`Documentation/outline.md`](Documentation/outline.md) — the full functional specification: every screen, every rule, every edge case
+- [`Documentation/Development/initialBuildTasks.md`](Documentation/Development/initialBuildTasks.md) — the original 11-phase build plan, archived as of v1.0.0. There's no live `tasks.md` — ongoing work (bug fixes, feature-change requests) is tracked directly in [`CHANGELOG.md`](CHANGELOG.md)'s `Unreleased — Reported Issues` section instead
+- [`Documentation/Flowcharts-ERDs/database.mmd`](Documentation/Flowcharts-ERDs/database.mmd) — entity-relationship diagram
+- [`Documentation/Flowcharts-ERDs/uiFlow.mmd`](Documentation/Flowcharts-ERDs/uiFlow.mmd) — top-level screen-to-screen navigation map
+- [`Documentation/Flowcharts-ERDs/auth-flow.mmd`](Documentation/Flowcharts-ERDs/auth-flow.mmd), [`mnp-flow.mmd`](Documentation/Flowcharts-ERDs/mnp-flow.mmd), [`sdp-flow.mmd`](Documentation/Flowcharts-ERDs/sdp-flow.mmd), [`pip-flow.mmd`](Documentation/Flowcharts-ERDs/pip-flow.mmd) — task-lifecycle flow diagrams for login, manual put, directed put, and pull
+- [`Documentation/Flowcharts-ERDs/enums.mmd`](Documentation/Flowcharts-ERDs/enums.mmd) — enum/status value reference
+- [`DevNotes/Screen-Specs/`](DevNotes/Screen-Specs/) — one functional design doc per screen (ELA, ELZ, IID, LII, MNP, PAR, PII, PIP, SAR, SDP, STG, WLH built; ARP/IRP reserved codes not yet built — see each doc's own status note)
+- [`Documentation/seed-reference.md`](Documentation/seed-reference.md) — demo seed data reference
+- [`Documentation/UI_Wireframes/UI_Design_Guide.md`](Documentation/UI_Wireframes/UI_Design_Guide.md) — UI design conventions
 
 ---
 
 ## Status
 
-In active design. `outline.md`, `tasks.md`, `database.mmd`, and `ui-flow.mmd` are in place and current. `putaway-flow.mmd`, `pull-flow.mmd`, and per-screen docs are intentionally deferred until each corresponding function gets a dedicated design pass. Stage Aisle (a new feature not present in the legacy system this project improves on) is left as a documented stub pending its own design session — see the relevant section of `outline.md`.
+**v1.0.0 — feature-complete.** All 11 phases of the original build plan are done: every core screen is built, the app is deployed to Azure Static Web Apps, and the audio alert system (the last open item) shipped in this release. `Documentation/Development/initialBuildTasks.md` is kept as a historical record of that build plan; it's no longer updated. Ongoing work — bugs and feature-change requests surfaced during testing — is tracked in [`CHANGELOG.md`](CHANGELOG.md)'s `Unreleased — Reported Issues` section, grouped by screen.

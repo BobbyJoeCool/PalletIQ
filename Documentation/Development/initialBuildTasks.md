@@ -461,15 +461,15 @@ Fully specced in `DevNotes/Screen-Specs/SAR.md` (was marked "design session requ
 
 ### 11.1 Audio System
 
-- [ ] Design the audio tone system: at minimum an error tone (loud, repeated) and an informational tone; finalize actual audio clips or Web Audio API generation approach
-- [ ] Replace the `playAlert()` no-op stub in `src/lib/audio.ts` with the real implementation
-- [ ] Verify every audio call site (Incorrect Pallet ID, Invalid Alternate ID, invalid label status, zNumber not found, PIN mismatch, hold actions) fires the correct tone
+- [X] Design the audio tone system: distinct Error/Warning/Info mp3 clips (`src/assets/Error.mp3`, `Warning.mp3`, `Info.mp3`), each at its own fixed volume (Error 1.0, Warning 0.7, Info 0.5) rather than a repeated/loop approach
+- [X] Replace the `playAlert()` no-op stub in `src/lib/audio.ts` with the real implementation
+- [X] Verify every audio call site (Incorrect Pallet ID, Invalid Alternate ID, invalid label status, zNumber not found, PIN mismatch, hold actions) fires the correct tone
 
 ### 11.2 Deployment
 
-- [ ] Configure GitHub Actions workflow for Azure Static Web Apps deployment
-- [ ] Set production environment variables and secrets in Azure
-- [ ] Run production Prisma migration against production Azure SQL
-- [ ] Run production seed (or a trimmed demo-safe version)
-- [ ] Verify `/api/*` routing works end-to-end in the deployed environment
-- [ ] Smoke-test each major flow in production: login, pull, directed put, manual put, pallet lookup, location lookup, hold, empty locations by aisle, empty locations by zone
+- [X] Configure GitHub Actions workflow for Azure Static Web Apps deployment
+- [X] Set production environment variables and secrets in Azure
+- [X] Run production Prisma migration against production Azure SQL
+- [X] Run production seed (or a trimmed demo-safe version)
+- [X] Verify `/api/*` routing works end-to-end in the deployed environment
+- [X] Smoke-test each major flow in production: login, pull, directed put, manual put, pallet lookup, location lookup, hold, empty locations by aisle, empty locations by zone
