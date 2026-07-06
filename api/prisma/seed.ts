@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../generated/prisma/index.js'
 import { PrismaMssql } from '@prisma/adapter-mssql'
 import bcrypt from 'bcryptjs'
 

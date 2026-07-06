@@ -12,7 +12,7 @@
  * Usage: cd api && npx tsx prisma/seed-labels.ts
  */
 import 'dotenv/config'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../generated/prisma/index.js'
 import { PrismaMssql } from '@prisma/adapter-mssql'
 
 const adapter = new PrismaMssql(process.env.DATABASE_URL!)

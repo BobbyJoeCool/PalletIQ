@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.json",
+    "postbuild": "cp -r generated dist/generated",
     "watch": "tsc -p tsconfig.json --watch",
     "start": "func start"
   },

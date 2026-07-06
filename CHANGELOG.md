@@ -5,6 +5,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 ## Table of Contents
 
 - [Unreleased — Planned Fixes](#unreleased--planned-fixes)
+- [0.9.6 — 2026-07-06](#096--2026-07-06)
 - [0.9.5 — 2026-07-06](#095--2026-07-06)
 - [0.9.4 — 2026-07-06](#094--2026-07-06)
 - [0.9.3 — 2026-07-06](#093--2026-07-06)
@@ -115,6 +116,41 @@ The two groups below aren't test failures or redesign follow-ups — they're the
       lookup, location lookup, hold, empty locations by aisle, empty locations by zone
 
 ---
+
+## [0.9.6] — 2026-07-06
+
+### 0.9.6 — Fixed
+
+- **The actual, final root cause — `[0.9.5]`'s fix worked at build time but was silently
+  discarded before deploy.** Got the real API build log for the `[0.9.5]` deploy and found that
+  Oryx, as its very last packaging step for Azure Functions apps, overwrites `api/node_modules`
+  with an earlier snapshot captured *before* the build ran (`Copying production dependencies
+  from '.../api/.oryx_prod_node_modules/node_modules' to '.../api/node_modules'`) — a
+  hardcoded step to strip devDependencies from the deployed bundle, not something controllable
+  from `package.json`. Since that snapshot predates `prisma generate`, the generated client
+  never survives into the actual deployed artifact, even though the build itself succeeds.
+  Confirmed via the Azure Portal's Functions blade (still empty after `[0.9.5]`) and by
+  reproducing Oryx's exact multi-phase install/build/swap sequence in an isolated copy of
+  `api/` — proved the swap really does erase `node_modules/.prisma/client`.
+  - Fix: generate the Prisma Client to a custom path outside `node_modules`
+    (`prisma/schema.prisma`'s `generator client` block now has `output = "../generated/prisma"`)
+    since Oryx's swap only touches `node_modules`, never sibling directories. Updated all 5
+    import sites (`lib/prisma.ts`, `prisma/seed.ts`, `prisma/fix-pallet-counts.ts`,
+    `prisma/seed-labels.ts`, `prisma/seed-pending-pallets.ts`) from `'@prisma/client'` to
+    `'../generated/prisma/index.js'`.
+  - This surfaced a second issue: `tsc`'s `outDir` nests compiled output one level deeper than
+    source (`api/lib/prisma.ts` → `api/dist/lib/prisma.js`), so a relative import correct at the
+    source level resolves to the wrong location once compiled (`dist/generated/...` instead of
+    the real `api/generated/...`). Added `"postbuild": "cp -r generated dist/generated"` to
+    `api/package.json` so the compiled output has its own copy at the depth its compiled imports
+    actually expect.
+  - Verified with a full reproduction of Oryx's real pipeline in an isolated copy: production
+    install → copy → full install → build → **the destructive swap** → `node -e
+    "import('./dist/index.js')"` — all 12 function files imported cleanly post-swap, and a live
+    query against the production database (`prisma.user.findUnique({ where: { zNumber:
+    'z002p25' } })`) succeeded end-to-end through the exact post-swap runtime state.
+  - Both `.gitignore` files already had `generated/prisma` entries from a prior session that
+    anticipated this exact fix but never wired it up.
 
 ## [0.9.5] — 2026-07-06
 
