@@ -5,6 +5,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 ## Table of Contents
 
 - [Unreleased — Planned Fixes](#unreleased--planned-fixes)
+- [0.9.4 — 2026-07-06](#094--2026-07-06)
 - [0.9.3 — 2026-07-06](#093--2026-07-06)
 - [0.9.2 — 2026-07-06](#092--2026-07-06)
 - [0.9.1 — 2026-07-06](#091--2026-07-06)
@@ -113,6 +114,23 @@ The two groups below aren't test failures or redesign follow-ups — they're the
       lookup, location lookup, hold, empty locations by aisle, empty locations by zone
 
 ---
+
+## [0.9.4] — 2026-07-06
+
+### 0.9.4 — Fixed
+
+- **Reverted `[0.9.3]`'s `postinstall` fix — it was wrong and broke the production deploy.**
+  Oryx (Azure's build system) runs a separate, isolated `npm install --production` into
+  `api/.oryx_prod_node_modules` — a side directory containing only `node_modules`, not the
+  project's `prisma/` source folder. The `postinstall: prisma generate` script added in
+  `[0.9.3]` fired during that isolated install and failed outright
+  (`Error: Could not find Prisma Schema`), aborting the whole build. Confirmed via the actual
+  GitHub Actions build log (local reproduction with a plain `npm install` had missed this,
+  since it doesn't replicate Oryx's two-phase install). Oryx has its own native Prisma
+  detection and generates the client itself, in the correct directory, as a build snippet
+  separate from any npm script — which is why the API built successfully for months with no
+  explicit generate step at all. Removed `postinstall` from `api/package.json`; the
+  environment-variable fix from `[0.9.3]` was the actual (and only) fix needed.
 
 ## [0.9.3] — 2026-07-06
 
