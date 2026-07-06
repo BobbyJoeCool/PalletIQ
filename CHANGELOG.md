@@ -5,6 +5,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 ## Table of Contents
 
 - [Unreleased — Planned Fixes](#unreleased--planned-fixes)
+- [0.9.5 — 2026-07-06](#095--2026-07-06)
 - [0.9.4 — 2026-07-06](#094--2026-07-06)
 - [0.9.3 — 2026-07-06](#093--2026-07-06)
 - [0.9.2 — 2026-07-06](#092--2026-07-06)
@@ -114,6 +115,32 @@ The two groups below aren't test failures or redesign follow-ups — they're the
       lookup, location lookup, hold, empty locations by aisle, empty locations by zone
 
 ---
+
+## [0.9.5] — 2026-07-06
+
+### 0.9.5 — Fixed
+
+- **The real, complete root cause of the production API being down.** Got the actual Azure
+  build log for the first time (previously only visible via the GitHub Actions UI, not the
+  REST API, which 403s without auth) and it showed `tsc -p tsconfig.json` failing outright
+  during the API's build step — `Module '"@prisma/client"' has no exported member
+  'PrismaClient'` in `lib/prisma.ts`, plus real `noImplicitAny` errors. Oryx does **not** fail
+  the deploy when this happens — it logs "Oryx was unable to determine the build steps.
+  Continuing assuming the assets in this folder are already built," then zips up and deploys
+  whatever's there anyway, with no working `dist/`. That's why every prior deploy reported
+  "success" in GitHub Actions despite shipping a non-functional API, confirmed by the Azure
+  Portal's Functions blade showing zero registered functions.
+  - Fix: added `prisma generate` to the `build` script itself
+    (`"build": "prisma generate && tsc -p tsconfig.json"`), not `postinstall` — this runs
+    during the second, full `npm install` phase (in `api/` proper, where `prisma/schema.prisma`
+    is actually present), not the isolated `.oryx_prod_node_modules` production-only install
+    from `[0.9.4]`.
+  - The `noImplicitAny` errors on `functions/activity.ts:71`, `functions/reporting.ts:27`, and
+    the one-off `api/prisma/{fix-pallet-counts,seed-labels,seed-pending-pallets}.ts` scripts
+    were all downstream artifacts of the missing Prisma Client (an unresolved `any`-typed
+    `prisma` client cascades into `noImplicitAny` failures on its query results) — verified by
+    a clean, zero-error, isolated build once the client is generated. No `tsconfig.json` or
+    `functions/*.ts` changes were needed.
 
 ## [0.9.4] — 2026-07-06
 
