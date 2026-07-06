@@ -22,6 +22,7 @@ export function hasMinRole(userRole: Role, minRole: Role): boolean {
   return ROLE_RANK[userRole] >= ROLE_RANK[minRole];
 }
 
+/** Reads the JWT signing secret from the environment as a Buffer for jose to consume. */
 const getSecret = () => Buffer.from(process.env.JWT_SECRET!, 'utf-8');
 
 /**

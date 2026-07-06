@@ -191,14 +191,17 @@ export function PIPPage() {
     setTimeout(() => focusLabelField(), 60);
   }
 
+  /** Registers the Label field's numpad handler, wired to handleLabelScan on confirm. */
   const focusLabelField = useCallback(() => {
     labelField.focus(handleLabelScan);
   }, [labelField]);
 
+  /** Registers the Pallet ID field's numpad handler, wired to handlePidVerify on confirm. */
   const focusPidField = useCallback(() => {
     pidField.focus(handlePidVerify);
   }, [pidField]);
 
+  /** Registers the Alternate ID field's numpad handler, wired to handleAltVerify on confirm. */
   const focusAltField = useCallback(() => {
     altField.focus(handleAltVerify);
   }, [altField]);
@@ -356,6 +359,7 @@ export function PIPPage() {
 
   // ── Demo buttons ──────────────────────────────────────────────────────────
 
+  /** Fetches a real label id (matching the selected pull function) and delivers it as a simulated scan. */
   const demoScanLabel = useCallback(async () => {
     try {
       const fnParam = pullFunction ? `?fn=${pullFunction}` : '';
@@ -366,24 +370,29 @@ export function PIPPage() {
     }
   }, [token, deliverScan, setMessage, pullFunction]);
 
+  /** Delivers a label id that doesn't exist, simulating a not-found scan. */
   const demoBadLabel = useCallback(() => {
     deliverScan('INVALID-LABEL-000');
   }, [deliverScan]);
 
+  /** Delivers the current label's actual pallet id, simulating a correct verification scan. */
   const demoScanPid = useCallback(() => {
     const ld = labelDataRef.current;
     if (ld) deliverScan(String(ld.pallet.id));
   }, [deliverScan]);
 
+  /** Delivers a pallet id that won't match the current label, simulating a mismatch. */
   const demoBadPid = useCallback(() => {
     deliverScan('INVALID-PID-000');
   }, [deliverScan]);
 
+  /** Delivers the current label's resolved location barcode, simulating a correct alternate-ID verification scan. */
   const demoScanAlt = useCallback(() => {
     const ld = labelDataRef.current;
     if (ld?.location.id) deliverScan(ld.location.id); // raw 8-digit barcode, no dashes
   }, [deliverScan]);
 
+  /** Delivers an alternate id that won't match the current label, simulating a mismatch. */
   const demoBadAlt = useCallback(() => {
     deliverScan('000000000');
   }, [deliverScan]);

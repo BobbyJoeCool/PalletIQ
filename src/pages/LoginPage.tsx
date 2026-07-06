@@ -22,6 +22,7 @@ function LoginContent() {
   const [znumber, setZnumber] = useState('z');
   const [loading, setLoading] = useState(false);
 
+  /** Submits the entered zNumber via identify(); on success advances to the PIN screen. */
   const handleSubmit = async () => {
     if (znumber.length < 3 || loading) return;
     clearMessage();
@@ -44,6 +45,7 @@ function LoginContent() {
     }
   };
 
+  /** Updates the zNumber field and clears any error message from a previous attempt. */
   const handleChange = (v: string) => {
     setZnumber(v);
     clearMessage();

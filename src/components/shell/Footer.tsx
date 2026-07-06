@@ -27,7 +27,9 @@ export function Footer() {
   const keyboardActive = activePanel === 'keyboard';
 
   // Toggle behavior: clicking the active panel button closes it; clicking the inactive one opens it.
+  /** Toggles the numpad panel: closes it if already open, opens it otherwise. */
   const toggleNumpad = () => (numpadActive ? hidePanel() : showNumpad());
+  /** Toggles the keyboard panel: closes it if already open, opens it otherwise. */
   const toggleKeyboard = () => (keyboardActive ? hidePanel() : showKeyboard());
 
   const activeBtn =

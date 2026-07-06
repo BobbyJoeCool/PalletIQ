@@ -18,12 +18,14 @@ import { PrismaMssql } from '@prisma/adapter-mssql'
 const adapter = new PrismaMssql(process.env.DATABASE_URL!)
 const prisma = new PrismaClient({ adapter })
 
+/** Converts a Date to a Julian-style date int (YYYY + zero-padded day-of-year), e.g. 2026175. */
 function julianDate(d: Date): number {
   const start = new Date(d.getFullYear(), 0, 0)
   const diff = d.getTime() - start.getTime()
   return d.getFullYear() * 1000 + Math.floor(diff / 86_400_000)
 }
 
+/** Builds a Label ID string: store(4) + DPCI(9) + pid(8) + random(8) + batchDate. */
 function genLid(storeId: number, dept: number, cls: number, item: number, pid: number, batchDate: number): string {
   const rnd = Math.random().toString(36).substring(2, 10).padEnd(8, '0')
   return (
@@ -37,10 +39,12 @@ function genLid(storeId: number, dept: number, cls: number, item: number, pid: n
   )
 }
 
+/** Returns a random integer in the inclusive range [min, max]. */
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
+/** Applies the pull-function rules documented in this file's header comment. */
 function assignPullFunction(level: number, size: string, qty: number, totalCartons: number): string {
   if (level === 0) return 'BK'
   if (size === 'XS') return 'CA'
@@ -49,6 +53,7 @@ function assignPullFunction(level: number, size: string, qty: number, totalCarto
   return level === 1 ? 'CF' : 'CA'
 }
 
+/** Entry point: creates two PRINTED labels (one non-emptying, one emptying) for up to 20 stored pallets. */
 async function main() {
   const today = new Date()
   const batchDate = julianDate(today)

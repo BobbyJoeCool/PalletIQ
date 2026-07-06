@@ -44,6 +44,7 @@ export function IIDPage() {
   const [item, setItem] = useState<ItemData | null>(null);
   const [loading, setLoading] = useState(false);
 
+  /** Looks up an item by DPCI via the API, clearing the UPC field on success (or the DPCI field on failure). */
   const loadByDpci = useCallback(async (v: string) => {
     const trimmed = v.trim();
     if (!trimmed) return;
@@ -65,6 +66,7 @@ export function IIDPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, hidePanel]);
 
+  /** Looks up an item by UPC via the API, clearing the DPCI field on success (or the UPC field on failure). */
   const loadByUpc = useCallback(async (v: string) => {
     const trimmed = v.trim();
     if (!trimmed) return;
@@ -86,11 +88,14 @@ export function IIDPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, hidePanel]);
 
+  /** Registers the DPCI field's numpad handler, wired to loadByDpci on confirm. */
   const focusDpciField = useCallback(() => dpciField.focus(loadByDpci), [dpciField, loadByDpci]);
+  /** Registers the UPC field's keyboard handler, wired to loadByUpc on confirm. */
   const focusUpcField = useCallback(() => upcField.focus(loadByUpc), [upcField, loadByUpc]);
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
+  /** Fetches a random real DPCI from the API and looks it up, simulating a successful scan. */
   const demoScan = useCallback(async () => {
     try {
       const { dpci } = await apiFetch<{ dpci: string }>('/api/items/sample', token!);
@@ -101,8 +106,10 @@ export function IIDPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  /** Looks up a DPCI that doesn't exist, simulating a not-found scan. */
   const demoBad = useCallback(() => void loadByDpci('999-99-9999'), [loadByDpci]);
 
+  /** Footer demo-button slot content: a good scan and a bad scan trigger. */
   const demoSlot = useMemo(() => (
     <>
       <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">

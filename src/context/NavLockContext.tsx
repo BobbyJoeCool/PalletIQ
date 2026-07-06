@@ -15,6 +15,7 @@ const NavLockContext = createContext<NavLockContextValue | null>(null);
 export function NavLockProvider({ children }: { children: React.ReactNode }) {
   const [locked, setLockedState] = useState(false);
 
+  /** Updates the shell-wide navigation lock flag. */
   const setLocked = useCallback((v: boolean) => setLockedState(v), []);
 
   return (

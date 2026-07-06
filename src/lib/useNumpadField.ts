@@ -14,6 +14,7 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad') {
   const valueRef = useRef('');
   const submitRef = useRef<((v: string) => void) | null>(null);
 
+  /** Applies a single key event to the accumulated value: backspace, clear, submit, or append. */
   const handler = useCallback((key: string) => {
     if (key === '⌫' || key === 'Backspace') {
       const next = valueRef.current.slice(0, -1);
@@ -31,6 +32,7 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad') {
     }
   }, []);
 
+  /** Registers this field as the active numpad/keyboard target and opens the matching panel. */
   const focus = useCallback(
     (onSubmit: (v: string) => void) => {
       submitRef.current = onSubmit;
@@ -43,11 +45,13 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad') {
     [handler, panel, setKeyHandler, showNumpad, showKeyboard],
   );
 
+  /** Resets the field's value to empty. */
   const clear = useCallback(() => {
     valueRef.current = '';
     setValue('');
   }, []);
 
+  /** Sets the field's value directly, bypassing key-by-key input (e.g. for pre-population). */
   const set = useCallback((v: string) => {
     valueRef.current = v;
     setValue(v);

@@ -31,6 +31,7 @@ interface Props {
 export function ZnumPad({ value, onChange, onSubmit, disabled = false }: Props) {
   const hasInput = value.length > 1;
 
+  /** Applies a single keypad press: backspace (never past the 'z' prefix), or appends a lowercased character. */
   const handleKey = (key: string) => {
     if (disabled) return;
     if (key === '⌫') {

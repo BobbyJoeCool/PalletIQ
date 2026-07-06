@@ -1,83 +1,98 @@
-erDiagram
-    USER {
-        string id PK "zNumber, e.g. z002p25"
-        string pinHash
-        string role "enum: Worker, IM, LeadWorker, SysAdmin"
-    }
+---
+title: PalletIQ Screen Map — All Screens and Navigation
+---
+flowchart TD
 
-    ITEM {
-        int department PK "3 digits"
-        int class PK "2 digits"
-        int item PK "4 digits"
-        string upc
-        string name
-        string desc
-        string descShort
-    }
+    %% ============================================================
+    %% Detailed step-by-step flows for individual functions live in
+    %% their own files: auth-flow.mmd, mnp-flow.mmd, pip-flow.mmd, sdp-flow.mmd.
+    %% This diagram is the site map — every screen and how a worker moves between them.
+    %% ============================================================
+    %% Header (rendered on every authenticated screen) provides four controls:
+    %%   ‹ Back    — browser history back (not modeled as edges below — returns to
+    %%               whichever screen was previously visited, so the destination varies)
+    %%   ⌂ Home    — navigate to HomePage (/)
+    %%   ›_ Jump   — opens the HotJump overlay (src/components/shell/HotJump.tsx)
+    %%   Logout    — src/context/AuthContext.tsx logout(), returns to LoginPage
+    %% Back/Home are dimmed on the Home screen itself (disableNav); all four are
+    %% dimmed whenever NavLockContext reports a locked screen (e.g. SDP mid-reservation,
+    %% src/context/NavLockContext.tsx) so a worker can't abandon an in-flight transaction.
+    %% ============================================================
 
-    PALLET {
-        int palletId PK "8 digits"
-        int dept FK
-        int class FK
-        int item FK
-        int palletQuant
-        int cartonQuant
-        int sspQuant
-        int vcp "vendor case pack, set at receiving"
-        int ssp "store ship pack, set at receiving"
-        string status "enum, TBD"
-        string receivedByUserId FK
-        datetime receivedAt
-        string putByUserId FK
-        datetime putAt
-        string lastPulledByUserId FK
-        datetime lastPulledAt
-    }
+    Start([Device idle]) --> LGN["LoginPage — /login\nsrc/pages/LoginPage.tsx"]
+    LGN --> PIN["PinPage — /pin\nsrc/pages/PinPage.tsx"]
+    PIN --> HOM
 
-    LOCATION {
-        int aisle PK
-        int bin PK
-        int level PK
-        int zone
-        string status "enum: Empty, Stored, Reserved, PullPending, etc"
-        string holdType "nullable enum: Inbound, Outbound, Both, Permanent"
-        string storageCode
-        string size
-        int palletId FK "nullable"
-    }
+    HOM{{"HomePage — MMN — /\nsrc/pages/HomePage.tsx\n15-button function grid, 5 columns"}}
 
-    LABEL {
-        int labelId PK
-        int palletId FK
-        int dept FK
-        int class FK
-        int item FK
-        int quantity
-        date batchDate
-        date purgeDate
-        string destinationStore
-        string status "enum: Pending, Pulled, Canceled, Purged"
-    }
+    subgraph PROD["Production"]
+        PIP["PIP — Pallet ID Pull\n/pull — PIPPage.tsx"]
+        SDP["SDP — System Directed Put\n/put/directed — SDPPage.tsx"]
+        MNP["MNP — Manual Put\n/put/manual — MNPPage.tsx"]
+    end
 
-    ACTIVITYLOG {
-        int id PK
-        datetime timestamp
-        string userId FK
-        string actionType
-        int palletId FK "nullable"
-        string locationId FK "nullable"
-        int dpci FK "nullable"
-        string details "flexible JSON"
-    }
+    subgraph INV["Inventory Management"]
+        PII["PII — Pallet ID Info\n/pallet — PIIPage.tsx"]
+        IID["IID — Item ID Lookup\n/item — IIDPage.tsx"]
+        PAR["PAR — Pallet Reinstate\n/pallet/reinstate — PARPage.tsx"]
+    end
 
-    ITEM ||--o{ PALLET : "identifies"
-    ITEM ||--o{ LABEL : "identifies"
-    PALLET ||--o| LOCATION : "currently stored in"
-    PALLET ||--o{ LABEL : "generates"
-    USER ||--o{ PALLET : "received"
-    USER ||--o{ PALLET : "put"
-    USER ||--o{ PALLET : "last pulled"
-    USER ||--o{ ACTIVITYLOG : "performed"
-    PALLET ||--o{ ACTIVITYLOG : "referenced in"
-    LOCATION ||--o{ ACTIVITYLOG : "referenced in"
-    ITEM ||--o{ ACTIVITYLOG : "referenced in"
+    subgraph LOC["Location Management"]
+        LII["LII — Location ID Info\n/location — LIIPage.tsx"]
+        WLH["WLH — Warehouse Location Hold\n/hold — WLHPage.tsx"]
+        SAR["SAR — Staged Aisle Report\n/staged-aisle — SARPage.tsx"]
+    end
+
+    subgraph GPM["GPM Functions"]
+        ELA["ELA — Empty Locations by Aisle\n/empty/aisle — ELAPage.tsx"]
+        ELZ["ELZ — Empty Locations by Zone\n/empty/zone — ELZPage.tsx"]
+        STG["STG — Stage Aisle\n/stage — STGPage.tsx"]
+    end
+
+    subgraph RPTG["Reporting Functions — not built in this demo"]
+        IRP["IRP — Individual Reporting\n/reporting/individual — PlaceholderPage"]
+        PRQ["PRQ — Pull Request by Label\n/reporting/pull-request — PlaceholderPage"]
+        RPT["RPT — Other Reporting\n/reporting/other — PlaceholderPage"]
+    end
+
+    %% Home screen function grid — tapping a button navigates directly
+    HOM -->|tap button| PROD
+    HOM -->|tap button| INV
+    HOM -->|tap button| LOC
+    HOM -->|tap button| GPM
+    HOM -.->|"tap button — built:false in JUMP_CODES\nMessageBar error, stays on Home"| RPTG
+
+    %% Header "Home" button from any built screen
+    PROD -.->|"Header ⌂ Home"| HOM
+    INV -.->|"Header ⌂ Home"| HOM
+    LOC -.->|"Header ⌂ Home"| HOM
+    GPM -.->|"Header ⌂ Home"| HOM
+
+    JMP{{"HotJump overlay\nsrc/components/shell/HotJump.tsx\ntype a 3-letter jump code"}}
+
+    %% Header "Jump" button opens the overlay from any authenticated screen, including Home
+    HOM ---|"Header ›_ Jump"| JMP
+    PROD ---|"Header ›_ Jump"| JMP
+    INV ---|"Header ›_ Jump"| JMP
+    LOC ---|"Header ›_ Jump"| JMP
+    GPM ---|"Header ›_ Jump"| JMP
+
+    %% From HotJump, a valid built code navigates immediately, closing the overlay
+    JMP -->|"resolved code, built:true"| HOM
+    JMP -->|"resolved code, built:true"| PROD
+    JMP -->|"resolved code, built:true"| INV
+    JMP -->|"resolved code, built:true"| LOC
+    JMP -->|"resolved code, built:true"| GPM
+    JMP -.->|"resolved code, built:false\nMessageBar error, overlay stays open"| RPTG
+
+    %% Header "Logout" button from any authenticated screen, including Home
+    HOM -.->|"Header Logout"| LGN
+    PROD -.->|"Header Logout"| LGN
+    INV -.->|"Header Logout"| LGN
+    LOC -.->|"Header Logout"| LGN
+    GPM -.->|"Header Logout"| LGN
+
+    style HOM fill:#1a1a1a,stroke:#CC0000,color:#fff
+    style JMP fill:#1a1a1a,stroke:#CC0000,color:#fff
+    style LGN fill:#1a1a1a,stroke:#555,color:#fff
+    style RPTG fill:#330000,stroke:#660000,color:#ff8080

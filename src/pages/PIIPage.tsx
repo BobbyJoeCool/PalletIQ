@@ -34,14 +34,17 @@ interface PalletData {
   lastPulledAt: string | null;
 }
 
+/** Formats a DPCI object as `DDD-CC-IIII`. */
 function fmtDpci(dpci: { dept: number; class: number; item: number }): string {
   return `${String(dpci.dept).padStart(3, '0')}-${String(dpci.class).padStart(2, '0')}-${String(dpci.item).padStart(4, '0')}`;
 }
 
+/** Formats a location object as its canonical 8-digit id (Aisle+Bin+Level). */
 function location8(loc: { aisle: number; bin: number; level: number }): string {
   return String(loc.aisle).padStart(3, '0') + String(loc.bin).padStart(3, '0') + String(loc.level).padStart(2, '0');
 }
 
+/** Formats a "who/when" audit stamp for display, or an em dash if the pallet hasn't reached that stage yet. */
 function fmtUser(u: UserStamp | null, at: string | null): string {
   if (!u || !at) return '—';
   return `${u.firstName} ${u.lastName.charAt(0)}. — ${new Date(at).toLocaleString()}`;
@@ -76,6 +79,7 @@ export function PIIPage() {
   const [editSSPs, setEditSSPs] = useState('');
   const [saving, setSaving] = useState(false);
 
+  /** Looks up a pallet by id via the API and transitions to the loaded state; resets to ready on failure. */
   const loadPallet = useCallback(async (idStr: string) => {
     const pid = parseInt(idStr, 10);
     if (isNaN(pid)) {
@@ -102,6 +106,7 @@ export function PIIPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  /** Registers the Pallet ID field's numpad handler; a scan while editing discards unsaved changes and re-loads. */
   const focusPalletField = useCallback(() => {
     palletField.focus((v) => {
       const trimmed = v.trim();
@@ -125,10 +130,12 @@ export function PIIPage() {
   // Pre-population via ?id= (LiveId taps navigate to /pallet?id=<pid>).
   const idParam = searchParams.get('id');
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount effect (URL ?id= pre-population)
     if (idParam) void loadPallet(idParam);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idParam]);
 
+  /** Seeds the edit-mode fields from the currently loaded pallet and switches to the edit state. */
   function enterEditMode() {
     if (!pallet) return;
     setEditDpci(fmtDpci(pallet.dpci));
@@ -139,10 +146,12 @@ export function PIIPage() {
     setScreenState('edit');
   }
 
+  /** Discards edit-mode changes and returns to the loaded (read-only) state. */
   function cancelEdit() {
     setScreenState('loaded');
   }
 
+  /** Submits only the edit-mode fields that actually changed via PATCH /api/pallets/:pid, then re-loads the pallet. */
   async function saveEdit() {
     if (!pallet || saving) return;
     setSaving(true);
@@ -185,6 +194,7 @@ export function PIIPage() {
     }
   }
 
+  /** Navigates to LII for the pallet's current location. */
   function goToLocation() {
     if (!pallet?.location) return;
     navigate(`/location?id=${location8(pallet.location)}`);
@@ -192,6 +202,7 @@ export function PIIPage() {
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
+  /** Fetches a random real pallet id from the API and loads it, simulating a successful scan. */
   const demoScan = useCallback(async () => {
     try {
       const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet', token!);
@@ -202,8 +213,10 @@ export function PIIPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  /** Looks up a pallet id that doesn't exist, simulating a not-found scan. */
   const demoBad = useCallback(() => void loadPallet('999999999'), [loadPallet]);
 
+  /** Footer demo-button slot content: a good scan and a bad scan trigger. */
   const demoSlot = useMemo(() => (
     <>
       <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">
@@ -244,23 +257,23 @@ export function PIIPage() {
             <>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
-                <input value={editDpci} onChange={(e) => setEditDpci(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] focus:outline-none focus:border-[#CC0000]" />
+                <input aria-label="DPCI" value={editDpci} onChange={(e) => setEditDpci(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] focus:outline-none focus:border-[#CC0000]" />
               </div>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">VCP</span>
-                <input type="number" value={editVcp} onChange={(e) => setEditVcp(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
+                <input aria-label="VCP" type="number" value={editVcp} onChange={(e) => setEditVcp(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
               </div>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">SSP</span>
-                <input type="number" value={editSsp} onChange={(e) => setEditSsp(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
+                <input aria-label="SSP" type="number" value={editSsp} onChange={(e) => setEditSsp(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
               </div>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Cartons on Pallet</span>
-                <input type="number" value={editCartons} onChange={(e) => setEditCartons(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
+                <input aria-label="Cartons on Pallet" type="number" value={editCartons} onChange={(e) => setEditCartons(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
               </div>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">SSPs on Pallet</span>
-                <input type="number" value={editSSPs} onChange={(e) => setEditSSPs(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
+                <input aria-label="SSPs on Pallet" type="number" value={editSSPs} onChange={(e) => setEditSSPs(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
               </div>
             </>
           ) : (

@@ -16,14 +16,17 @@ const prisma = new PrismaClient({ adapter })
 const PALLETS_PER_COMBO = 5
 const VCP_OPTIONS = [6, 8, 10, 12, 16, 20, 24]
 
+/** Returns a random integer in the inclusive range [min, max]. */
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
+/** Returns a random element from an array. */
 function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
+/** Entry point: creates PALLETS_PER_COMBO PUT_PENDING pallets for every distinct (storageCode, size) pair. */
 async function main() {
   // All distinct (storageCode, size) pairs that exist in the warehouse.
   const locationCombos = await prisma.location.findMany({
@@ -37,6 +40,7 @@ async function main() {
   // Reserve existing PIDs so we don't collide.
   const existingPids = new Set((await prisma.pallet.findMany({ select: { pid: true } })).map(p => p.pid))
 
+  /** Generates a random 8-digit Pallet ID, retrying on collision against `existingPids`. */
   function genPid(): number {
     let pid: number
     do { pid = randomInt(10_000_000, 99_999_999) } while (existingPids.has(pid))
@@ -49,6 +53,7 @@ async function main() {
   // randomly generated per pallet here the same way the main seed does.
   const itemCache = new Map<string, { dept: number; class: number; item: number }[]>()
 
+  /** Fetches (and caches) up to 10 items for a storage code, so each combo is only queried once. */
   async function getItems(storageCode: string) {
     if (!itemCache.has(storageCode)) {
       const rows = await prisma.item.findMany({

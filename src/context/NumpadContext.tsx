@@ -30,8 +30,11 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const keyHandlerRef = useRef<((key: string) => void) | null>(null);
 
+  /** Opens the numeric numpad panel. */
   const showNumpad = useCallback(() => setActivePanel('numpad'), []);
+  /** Opens the full QWERTY keyboard panel. */
   const showKeyboard = useCallback(() => setActivePanel('keyboard'), []);
+  /** Closes whichever input panel is currently open. */
   const hidePanel = useCallback(() => setActivePanel('none'), []);
 
   /**

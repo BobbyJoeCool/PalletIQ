@@ -64,6 +64,7 @@ function ShellInner() {
   const lastKeyTimeRef = useRef(0);
 
   useEffect(() => {
+    /** Buffers rapid keypresses as a hardware scan; delivers the buffered string on Enter. */
     function onKeyDown(e: KeyboardEvent) {
       const now = Date.now();
       const gap = now - lastKeyTimeRef.current;

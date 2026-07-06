@@ -25,16 +25,20 @@ export function LocationEntryFields({ onResolved, autoFocus = true }: LocationEn
   const binField = useNumpadField();
   const levelField = useNumpadField();
 
+  /** Registers the Aisle field's numpad handler and opens the panel. */
   function focusAisleField() {
     aisleField.focus(handleAisleConfirm);
   }
+  /** Registers the Bin field's numpad handler and opens the panel. */
   function focusBinField() {
     binField.focus(handleBinConfirm);
   }
+  /** Registers the Level field's numpad handler and opens the panel. */
   function focusLevelField() {
     levelField.focus(handleLevelConfirm);
   }
 
+  /** Aisle field submit: an 8-digit value is a full-barcode override (resolves immediately); a 3-digit value advances to Bin. */
   function handleAisleConfirm(value: string) {
     const v = value.trim();
     if (v.length === 8) {
@@ -46,6 +50,7 @@ export function LocationEntryFields({ onResolved, autoFocus = true }: LocationEn
     setTimeout(() => focusBinField(), 50);
   }
 
+  /** Bin field submit: an 8-digit value is a full-barcode override (resolves immediately); a 3-digit value advances to Level. */
   function handleBinConfirm(value: string) {
     const v = value.trim();
     if (v.length === 8) {
@@ -57,6 +62,7 @@ export function LocationEntryFields({ onResolved, autoFocus = true }: LocationEn
     setTimeout(() => focusLevelField(), 50);
   }
 
+  /** Level field submit: an 8-digit value is a full-barcode override; a 2-digit value completes Aisle+Bin+Level and resolves. */
   function handleLevelConfirm(value: string) {
     const v = value.trim();
     if (v.length === 8) {

@@ -19,10 +19,12 @@ const FooterDemoContext = createContext<FooterDemoContextValue | null>(null);
 export function FooterDemoProvider({ children }: { children: React.ReactNode }) {
   const [demoSlot, setDemoSlotState] = useState<React.ReactNode>(null);
 
+  /** Replaces the footer's demo-button slot content. */
   const setDemoSlot = useCallback((content: React.ReactNode) => {
     setDemoSlotState(content);
   }, []);
 
+  /** Clears the footer's demo-button slot back to empty. */
   const clearDemoSlot = useCallback(() => {
     setDemoSlotState(null);
   }, []);

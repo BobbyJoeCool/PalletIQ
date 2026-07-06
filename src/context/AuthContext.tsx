@@ -97,6 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!token) return;
 
+    /** Records the current time as the last user-activity timestamp. */
     const bump = () => { lastActivityRef.current = Date.now(); };
     window.addEventListener('click', bump);
     window.addEventListener('keydown', bump);

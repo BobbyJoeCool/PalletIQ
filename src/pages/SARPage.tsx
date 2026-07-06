@@ -18,6 +18,7 @@ function fmtAge(seconds: number): string {
   return `${minutes}m`;
 }
 
+/** One ranked list panel (Most Staged / Staged Longest), sharing row layout but not sort order or displayed value. */
 function Column({
   title, list, loading, valueFor,
 }: { title: string; list: AisleStagedRow[]; loading: boolean; valueFor: (r: AisleStagedRow) => string }) {

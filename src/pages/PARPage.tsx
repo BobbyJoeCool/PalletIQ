@@ -11,6 +11,7 @@ import { useNumpadField } from '../lib/useNumpadField';
 interface ReinstateResult { palletId: number; status: 'PUT_PENDING' | 'STORED'; locationId: string | null }
 interface SampleReinstate { dpci: string; vcp: number; ssp: number; pallets: number; cartons: number; ssps: number }
 
+/** Labeled input display box; `highlight` renders a red border to flag a field the server rejected. */
 function FieldDisplay({
   label, value, onFocus, active = false, highlight = false, width = 'w-[200px]',
 }: { label: string; value: string; onFocus: () => void; active?: boolean; highlight?: boolean; width?: string }) {
@@ -55,6 +56,7 @@ export function PARPage() {
   const [locationHighlight, setLocationHighlight] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  /** Registers the DPCI field's keyboard handler; on confirm, validates format and confirms the DPCI exists via the API (no pre-fill — Item has no vcp/ssp). */
   const focusDpci = useCallback(() => {
     dpciField.focus(async (v) => {
       const trimmed = v.trim().toUpperCase();
@@ -73,11 +75,17 @@ export function PARPage() {
     });
   }, [dpciField, hidePanel, token, setMessage]);
 
+  /** Registers the VCP field's numpad handler. */
   const focusVcp = useCallback(() => vcpField.focus((v) => { vcpField.set(v.trim()); hidePanel(); }), [vcpField, hidePanel]);
+  /** Registers the SSP field's numpad handler. */
   const focusSsp = useCallback(() => sspField.focus((v) => { sspField.set(v.trim()); hidePanel(); }), [sspField, hidePanel]);
+  /** Registers the Pallets quantity field's numpad handler. */
   const focusPallets = useCallback(() => palletsField.focus((v) => { palletsField.set(v.trim()); hidePanel(); }), [palletsField, hidePanel]);
+  /** Registers the Cartons quantity field's numpad handler. */
   const focusCartons = useCallback(() => cartonsField.focus((v) => { cartonsField.set(v.trim()); hidePanel(); }), [cartonsField, hidePanel]);
+  /** Registers the SSPs quantity field's numpad handler. */
   const focusSspsQty = useCallback(() => sspsQtyField.focus((v) => { sspsQtyField.set(v.trim()); hidePanel(); }), [sspsQtyField, hidePanel]);
+  /** Registers the optional Location field's numpad handler; clears any prior "not empty" highlight on confirm. */
   const focusLocation = useCallback(() => {
     locationField.focus((v) => { locationField.set(v.trim()); setLocationHighlight(false); hidePanel(); });
   }, [locationField, hidePanel]);
@@ -91,6 +99,7 @@ export function PARPage() {
     cartonsField.value.trim() !== '' &&
     sspsQtyField.value.trim() !== '';
 
+  /** Resets every field on the form and clears the location "not empty" highlight. */
   function clearForm() {
     dpciField.clear();
     vcpField.clear();
@@ -102,6 +111,7 @@ export function PARPage() {
     setLocationHighlight(false);
   }
 
+  /** Submits the new pallet via POST /api/pallets/reinstate; highlights the location field if the server reports it's not empty. */
   async function submit() {
     if (!canSubmit || submitting) return;
     setSubmitting(true);
@@ -146,6 +156,7 @@ export function PARPage() {
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
+  /** Fetches a randomized sample reinstate payload from the API for the demo buttons to fill in. */
   const fillSample = useCallback(async (): Promise<SampleReinstate | null> => {
     try {
       return await apiFetch<SampleReinstate>('/api/pallets/sample-reinstate', token!);
@@ -155,6 +166,7 @@ export function PARPage() {
     }
   }, [token, setMessage]);
 
+  /** Fills the form with a sample pallet, leaving Location blank (PUT_PENDING outcome). */
   const demoCreate = useCallback(async () => {
     const sample = await fillSample();
     if (!sample) return;
@@ -168,6 +180,7 @@ export function PARPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fillSample]);
 
+  /** Fills the form with a sample pallet and a real empty location, simulating a successful direct-to-location create. */
   const demoToLocation = useCallback(async () => {
     const sample = await fillSample();
     if (!sample) return;
@@ -186,6 +199,7 @@ export function PARPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fillSample, token]);
 
+  /** Fills the form with a DPCI that doesn't exist, simulating a rejected create. */
   const demoBadDpci = useCallback(() => {
     dpciField.set('999999000');
     vcpField.set('12');
@@ -197,6 +211,7 @@ export function PARPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Fills the form with a sample pallet and a real occupied location, simulating a "not empty" rejection. */
   const demoBadLocation = useCallback(async () => {
     const sample = await fillSample();
     if (!sample) return;
@@ -215,6 +230,7 @@ export function PARPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fillSample, token]);
 
+  /** Footer demo-button slot content: create, create-to-location, bad DPCI, and bad location triggers. */
   const demoSlot = useMemo(() => (
     <>
       <button type="button" onClick={demoCreate} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">

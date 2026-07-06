@@ -17,6 +17,7 @@ function stackField(page: Page, stackIndex: 0 | 1 | 2, label: string) {
   return page.locator('div.flex.flex-col.gap-1', { hasText: label }).nth(stackIndex).getByRole('button');
 }
 
+/** Scopes the "Stage" button to one of the three stack columns by DOM order. */
 function stageButton(page: Page, stackIndex: 0 | 1 | 2) {
   return page.getByRole('button', { name: 'Stage', exact: true }).nth(stackIndex);
 }

@@ -8,18 +8,22 @@ const prisma = new PrismaClient({ adapter })
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/** Returns a random integer in the inclusive range [min, max]. */
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
+/** Returns a random element from an array. */
 function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
+/** Returns a random Date within the last `daysBack` days (inclusive of today). */
 function randomDate(daysBack: number): Date {
   return new Date(Date.now() - randomInt(0, daysBack) * 86_400_000)
 }
 
+/** Converts a Date to a Julian-style date int (YYYY + zero-padded day-of-year), e.g. 2026175. */
 function julianDate(d: Date): number {
   const start = new Date(d.getFullYear(), 0, 0)
   const diff = d.getTime() - start.getTime()
@@ -28,7 +32,10 @@ function julianDate(d: Date): number {
   return d.getFullYear() * 1000 + doy
 }
 
+// Tracks pids already generated this run so genPid() never hands out a duplicate —
+// safe only because this script holds all state in memory for a single execution.
 const usedPids = new Set<number>()
+/** Generates a random 8-digit Pallet ID, retrying on collision against `usedPids`. */
 function genPid(): number {
   let pid: number
   do { pid = randomInt(10_000_000, 99_999_999) } while (usedPids.has(pid))
@@ -36,6 +43,7 @@ function genPid(): number {
   return pid
 }
 
+/** Builds a Label ID string: store(4) + DPCI(9) + pid(8) + random(8) + batchDate. */
 function genLid(storeId: number, dept: number, cls: number, item: number, pid: number, batchDate: number): string {
   const store = String(storeId).padStart(4, '0')
   const dpci = String(dept).padStart(3, '0') + String(cls).padStart(2, '0') + String(item).padStart(4, '0')
@@ -63,10 +71,12 @@ function getZone192(bin: number): number {
 const AISLE_PATTERN = ['L', 'L', 'M', 'S', 'L', 'M', 'HS'] as const
 type AisleType = typeof AISLE_PATTERN[number]
 
+/** Maps an aisle number (304+) onto the repeating 7-aisle size pattern. */
 function getAisleType(aisle: number): AisleType {
   return AISLE_PATTERN[(aisle - 304) % 7]
 }
 
+/** Returns the highest physical level for an aisle, based on its special-case or type. */
 function getMaxLevel(aisle: number): number {
   if (aisle === 301 || aisle === 302) return 13
   if (aisle === 303 || aisle === 701 || aisle === 702) return 6
@@ -75,6 +85,7 @@ function getMaxLevel(aisle: number): number {
   return t === 'L' ? 5 : t === 'M' ? 6 : t === 'S' ? 8 : 10
 }
 
+/** Returns the LocationSize designation for a level, with per-aisle special cases. */
 function getSize(aisle: number, level: number): string {
   if (aisle === 301 || aisle === 302 || aisle === 801 || aisle === 802 || aisle === 803) return 'XS'
   if (aisle === 303) {
@@ -97,6 +108,7 @@ function getSize(aisle: number, level: number): string {
   return 'M' // Medium aisles all M
 }
 
+/** Returns the StorageCode for a location, with per-aisle and zone-based special cases. */
 function getStorageCode(aisle: number, bin: number, level: number): string {
   if (aisle === 301) return level <= 9 ? 'CR' : 'FD'
   if (aisle === 302) {
@@ -442,10 +454,12 @@ type PalletRow = {
 
 const VCP_OPTIONS = [6, 8, 10, 12, 16, 20, 24]
 
+/** Generates every Location row (and a STORED Pallet for ~90% of them) across all aisles. */
 function buildLocationsAndPallets() {
   const locations: LocationRow[] = []
   const pallets: PalletRow[] = []
 
+  /** Generates every (bin, level) Location in one aisle, plus a Pallet for stored ones. */
   function addAisle(
     aisle: number,
     bins: number[],
@@ -566,6 +580,7 @@ async function insertInChunks<T extends object>(
   }
 }
 
+/** Entry point: clears all tables and reseeds the full demo dataset from scratch. */
 async function main() {
   // Clear all tables in reverse FK order so the seed is safe to re-run
   console.log('Clearing existing data...')

@@ -34,6 +34,7 @@ function PinContent({ state }: { state: LocationState }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pin]);
 
+  /** Verifies the 4-digit PIN via loginWithPin(); on success logs in and navigates to Home. */
   const submit = async (currentPin: string) => {
     if (loading) return;
     clearMessage();
@@ -55,6 +56,7 @@ function PinContent({ state }: { state: LocationState }) {
     }
   };
 
+  /** Updates the PIN field and clears any error message from a previous attempt. */
   const handleChange = (v: string) => {
     setPin(v);
     clearMessage();

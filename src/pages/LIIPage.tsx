@@ -55,6 +55,7 @@ export function LIIPage() {
   const [loading, setLoading] = useState(false);
   const [entryKey, setEntryKey] = useState(0);
 
+  /** Looks up a location (by 6- or 8-digit id) via the API and reconstructs the canonical 8-digit id from the resolved fields. */
   const loadLocation = useCallback(async (id: string) => {
     setLoading(true);
     try {
@@ -82,15 +83,18 @@ export function LIIPage() {
   // Pre-population via ?id= (LiveId taps navigate to /location?id=<8-digit>).
   const idParam = searchParams.get('id');
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount effect (URL ?id= pre-population)
     if (idParam) void loadLocation(idParam);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idParam]);
 
+  /** Navigates to PII for the location's occupying pallet. */
   function goToPallet() {
     if (!location?.pallet) return;
     navigate(`/pallet?id=${location.pallet.id}`);
   }
 
+  /** Navigates to WLH for the currently loaded location. */
   function goToHold() {
     if (!locationId) return;
     navigate(`/hold?id=${locationId}`);
@@ -98,6 +102,7 @@ export function LIIPage() {
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
+  /** Fetches a random real location id from the API and looks it up, simulating a successful scan. */
   const demoScan = useCallback(async () => {
     try {
       const { locationId: id } = await apiFetch<{ locationId: string }>('/api/demo/location', token!);
@@ -108,8 +113,10 @@ export function LIIPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  /** Looks up a location id that doesn't exist, simulating a not-found scan. */
   const demoBad = useCallback(() => void loadLocation('99999999'), [loadLocation]);
 
+  /** Footer demo-button slot content: a good scan and a bad scan trigger. */
   const demoSlot = useMemo(() => (
     <>
       <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">

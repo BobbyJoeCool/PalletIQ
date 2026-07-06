@@ -130,6 +130,7 @@ function ActionBtn({
   );
 }
 
+/** Colored footer demo button; `color` selects a background from a small fixed palette. */
 function DemoBtn({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
   const colors: Record<string, string> = {
     green: 'bg-[#006600] hover:bg-[#007700] text-white',
@@ -227,22 +228,27 @@ export function SDPPage() {
 
   // ── Focus management ────────────────────────────────────────────────────────
 
+  /** Registers the Aisle field's numpad handler, wired to handleAisleConfirm on confirm. */
   const focusAisleField = useCallback(() => {
     aisleField.focus(handleAisleConfirm);
   }, [aisleField]);
 
+  /** Registers the Pallet ID field's numpad handler, wired to handlePalletScan on confirm. */
   const focusPalletField = useCallback(() => {
     palletField.focus(handlePalletScan);
   }, [palletField]);
 
+  /** Registers the Confirm Location field's numpad handler, wired to handleLocationConfirm on confirm. */
   const focusConfirmField = useCallback(() => {
     confirmField.focus(handleLocationConfirm);
   }, [confirmField]);
 
+  /** Registers the IM+ Size override field's keyboard handler; just dismisses the panel on confirm. */
   const focusSizeField = useCallback(() => {
     sizeField.focus(() => hidePanel());
   }, [sizeField, hidePanel]);
 
+  /** Registers the IM+ Storage Code override field's keyboard handler; just dismisses the panel on confirm. */
   const focusStorageField = useCallback(() => {
     storageField.focus(() => hidePanel());
   }, [storageField, hidePanel]);
@@ -542,6 +548,7 @@ export function SDPPage() {
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
+  /** Fetches a real unlocated pallet id and delivers it as a simulated Pallet ID scan. */
   const demoPut = useCallback(async () => {
     try {
       const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet?status=unlocated', token!);
@@ -551,6 +558,7 @@ export function SDPPage() {
     }
   }, [token, deliverScan, setMessage]);
 
+  /** Fetches a real already-stored pallet id and delivers it as a simulated Pallet ID scan, simulating a move. */
   const demoMove = useCallback(async () => {
     try {
       const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet?status=stored', token!);
@@ -560,12 +568,15 @@ export function SDPPage() {
     }
   }, [token, deliverScan, setMessage]);
 
+  /** Delivers a Pallet ID that doesn't exist, simulating a not-found scan. */
   const demoBadPid = useCallback(() => deliverScan('INVALID-PID-000'), [deliverScan]);
 
+  /** Delivers the currently directed location, simulating a correct confirm scan. */
   const demoConfirmOk = useCallback(() => {
     if (directedRef.current) deliverScan(directedRef.current.directedLocation);
   }, []);
 
+  /** Delivers a location that won't match the directed location, simulating a mismatch. */
   const demoConfirmBad = useCallback(() => deliverScan('999999'), [deliverScan]);
 
   // Memoized so the JSX reference is stable across renders that don't change screen

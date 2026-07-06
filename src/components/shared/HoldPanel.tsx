@@ -58,6 +58,7 @@ export function HoldPanel({ locationId, onDone, showClose = false }: HoldPanelPr
   const [confirmReplace, setConfirmReplace] = useState<HoldCategory | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  /** Fetches the location's current status/hold info via GET /api/locations/:id. */
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -71,8 +72,12 @@ export function HoldPanel({ locationId, onDone, showClose = false }: HoldPanelPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationId, token]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount effect (loads hold state for locationId)
+    void load();
+  }, [load]);
 
+  /** Tapping a hold-type button: goes straight to reason-code entry, or via a replace-confirmation first if a hold is already active. */
   function startPlace(type: HoldCategory) {
     if (info?.holdCategory) {
       setConfirmReplace(type);
@@ -81,6 +86,7 @@ export function HoldPanel({ locationId, onDone, showClose = false }: HoldPanelPr
     }
   }
 
+  /** Submits the reason code and calls PATCH /api/locations/:id/hold to place/replace the hold. */
   async function confirmPlace(type: HoldCategory) {
     const finalReason = reasonCode === 'OTHER' ? customReason.trim() : reasonCode;
     if (!finalReason || submitting) return;
@@ -106,6 +112,7 @@ export function HoldPanel({ locationId, onDone, showClose = false }: HoldPanelPr
     }
   }
 
+  /** Calls DELETE /api/locations/:id/hold to clear the current hold — no reason code needed. */
   async function removeHold() {
     if (!info?.holdCategory || submitting) return;
     setSubmitting(true);

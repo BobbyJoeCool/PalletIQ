@@ -91,6 +91,7 @@ function FieldDisplay({
   );
 }
 
+/** Colored footer demo button; `color` selects a background from a small fixed palette. */
 function DemoBtn({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
   const colors: Record<string, string> = {
     green: 'bg-[#006600] hover:bg-[#007700] text-white',
@@ -125,14 +126,17 @@ function LevelModal({
 }) {
   const [input, setInput] = useState('');
 
+  /** Appends a digit to the level input, capped at 2 digits. */
   function pressDigit(d: string) {
     setInput(v => (v.length >= 2 ? v : v + d));
   }
 
+  /** Removes the last digit from the level input. */
   function backspace() {
     setInput(v => v.slice(0, -1));
   }
 
+  /** Validates the entered level is a positive number and reports it via onSelect. */
   function confirm() {
     const level = parseInt(input, 10);
     if (!input || isNaN(level) || level <= 0) return;
@@ -253,10 +257,12 @@ export function MNPPage() {
 
   // ── Focus management ─────────────────────────────────────────────────────────
 
+  /** Registers the Pallet ID field's numpad handler, wired to handlePalletScan on confirm. */
   const focusPalletField = useCallback(() => {
     palletField.focus(handlePalletScan);
   }, [palletField]);
 
+  /** Registers the Destination Location field's numpad handler, wired to handleDestinationEnter on confirm. */
   const focusDestinationField = useCallback(() => {
     destinationField.focus(handleDestinationEnter);
   }, [destinationField]);
@@ -422,6 +428,7 @@ export function MNPPage() {
 
   // ── Demo buttons ──────────────────────────────────────────────────────────────
 
+  /** Fetches a real unlocated pallet id and delivers it as a simulated Pallet ID scan. */
   const demoPut = useCallback(async () => {
     try {
       const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet?status=unlocated', token!);
@@ -431,6 +438,7 @@ export function MNPPage() {
     }
   }, [token, deliverScan, setMessage]);
 
+  /** Fetches a real already-stored pallet id and delivers it as a simulated Pallet ID scan, simulating a move. */
   const demoMove = useCallback(async () => {
     try {
       const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet?status=stored', token!);
@@ -440,8 +448,10 @@ export function MNPPage() {
     }
   }, [token, deliverScan, setMessage]);
 
+  /** Delivers a Pallet ID that doesn't exist, simulating a not-found scan. */
   const demoBadPid = useCallback(() => deliverScan('INVALID-PID-000'), [deliverScan]);
 
+  /** Fetches a real empty location id and delivers it as a simulated destination scan. */
   const demoEmptyLoc = useCallback(async () => {
     try {
       const { locationId } = await apiFetch<{ locationId: string }>('/api/demo/location?status=empty', token!);
@@ -451,6 +461,7 @@ export function MNPPage() {
     }
   }, [token, deliverScan, setMessage]);
 
+  /** Fetches a real already-occupied location id and delivers it as a simulated destination scan. */
   const demoOccupiedLoc = useCallback(async () => {
     try {
       const { locationId } = await apiFetch<{ locationId: string }>('/api/demo/location?status=occupied', token!);

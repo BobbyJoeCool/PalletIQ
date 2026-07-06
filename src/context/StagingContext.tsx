@@ -16,6 +16,7 @@ export interface StagingLogEntry {
   timestamp: Date;
 }
 
+/** Returns a fresh, fully-cleared StackState — used to initialize and reset each fork stack. */
 function emptyStack(): StackState {
   return { aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0 };
 }
@@ -27,8 +28,8 @@ interface StagingContextValue {
    *  persist (per STG.md's Stack Independence section) so the next stage into the same
    *  aisle/type only needs a new Quantity. */
   resetStackAfterStage: (index: 0 | 1 | 2) => void;
-  master: { storageCode: string; size: string };
-  setMaster: (patch: Partial<{ storageCode: string; size: string }>) => void;
+  master: { aisle: string; storageCode: string; size: string };
+  setMaster: (patch: Partial<{ aisle: string; storageCode: string; size: string }>) => void;
   log: StagingLogEntry[];
   addLogEntry: (text: string, warning?: boolean) => void;
   logExpanded: boolean;
@@ -52,10 +53,11 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
   const [stacks, setStacks] = useState<[StackState, StackState, StackState]>([
     emptyStack(), emptyStack(), emptyStack(),
   ]);
-  const [master, setMasterState] = useState({ storageCode: '', size: '' });
+  const [master, setMasterState] = useState({ aisle: '', storageCode: '', size: '' });
   const [log, setLog] = useState<StagingLogEntry[]>([]);
   const [logExpanded, setLogExpanded] = useState(false);
 
+  /** Merges a partial patch into one stack's state, by index. */
   const updateStack = useCallback((index: 0 | 1 | 2, patch: Partial<StackState>) => {
     setStacks((prev) => {
       const next = [...prev] as [StackState, StackState, StackState];
@@ -64,6 +66,7 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  /** Resets one stack to empty pallet slots after a successful stage, keeping Aisle/StorageCode/Size. */
   const resetStackAfterStage = useCallback((index: 0 | 1 | 2) => {
     setStacks((prev) => {
       const next = [...prev] as [StackState, StackState, StackState];
@@ -73,10 +76,12 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const setMaster = useCallback((patch: Partial<{ storageCode: string; size: string }>) => {
+  /** Merges a partial patch into the master control bar's state. */
+  const setMaster = useCallback((patch: Partial<{ aisle: string; storageCode: string; size: string }>) => {
     setMasterState((prev) => ({ ...prev, ...patch }));
   }, []);
 
+  /** Prepends a new entry to the staging log. */
   const addLogEntry = useCallback((text: string, warning = false) => {
     setLog((prev) => [{ id: ++logIdCounter, text, warning, timestamp: new Date() }, ...prev]);
   }, []);

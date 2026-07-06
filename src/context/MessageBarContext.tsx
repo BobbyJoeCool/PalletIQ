@@ -28,7 +28,9 @@ const MessageBarContext = createContext<MessageBarContextValue | null>(null);
 export function MessageBarProvider({ children }: { children: React.ReactNode }) {
   const [message, setMessageState] = useState<MessageBarState>(IDLE);
 
+  /** Replaces the current message bar state with a new one. */
   const setMessage = (msg: MessageBarState) => setMessageState(msg);
+  /** Resets the message bar back to its idle placeholder state. */
   const clearMessage = () => setMessageState(IDLE);
 
   return (

@@ -75,6 +75,7 @@ export function ELZPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Registers the Aisle field's numpad handler; on confirm, parses the value and dismisses the panel. */
   const focusAisleField = useCallback(() => {
     aisleField.focus((v) => {
       const trimmed = v.trim();
@@ -85,6 +86,7 @@ export function ELZPage() {
     });
   }, [aisleField, hidePanel]);
 
+  /** Registers the Storage Code field's keyboard handler; on confirm, uppercases the value and dismisses the panel. */
   const focusStorageField = useCallback(() => {
     storageField.focus((v) => {
       const trimmed = v.trim().toUpperCase();
@@ -122,6 +124,7 @@ export function ELZPage() {
     return () => { cancelled = true; };
   }, [aisle, storageCode, token, setMessage]);
 
+  /** Navigates to STG, pre-populated with the currently queried aisle. */
   function stageAisle() {
     if (aisle == null) return;
     navigate('/stage', { state: { aisle } });

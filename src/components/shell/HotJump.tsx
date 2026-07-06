@@ -64,6 +64,7 @@ export function HotJump({ onClose }: HotJumpProps) {
     navigate(entry.route);
   };
 
+  /** Handles the "Go" button tap: navigates to the currently resolved jump-code entry, if any. */
   const handleGo = () => { if (resolved) go(resolved); };
 
   /**

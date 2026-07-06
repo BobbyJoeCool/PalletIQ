@@ -20,6 +20,7 @@ interface AisleGridProps {
 const ZONES = [1, 2, 3, 4] as const;
 const SIDES: GridSide[] = ['odd', 'even'];
 
+/** Builds the lookup key for a grid cell's zone-side position, e.g. "2-odd". */
 function cellKey(zone: number, side: GridSide): string {
   return `${zone}-${side}`;
 }

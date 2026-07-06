@@ -12,6 +12,7 @@ import { PrismaMssql } from '@prisma/adapter-mssql'
 const adapter = new PrismaMssql(process.env.DATABASE_URL!)
 const prisma = new PrismaClient({ adapter })
 
+/** Entry point: zeroes out currentPallets/receivedPallets on every pallet in the table. */
 async function main() {
   const result = await prisma.pallet.updateMany({
     data: { currentPallets: 0, receivedPallets: 0 },

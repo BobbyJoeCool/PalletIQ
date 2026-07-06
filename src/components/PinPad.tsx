@@ -27,6 +27,7 @@ interface Props {
 export function PinPad({ value, onChange, disabled = false }: Props) {
   const hasInput = value.length > 0;
 
+  /** Applies a single keypad press: backspace, or appends a digit up to the 4-digit cap. */
   const handleKey = (key: string) => {
     if (disabled) return;
     if (key === '⌫') { if (value.length > 0) onChange(value.slice(0, -1)); return; }

@@ -4,6 +4,7 @@ interface Props {
   code: string;
 }
 
+/** Fallback screen for a jump code that hasn't been built yet — shows its code and label. */
 export function PlaceholderPage({ code }: Props) {
   const entry = JUMP_CODES[code];
   return (

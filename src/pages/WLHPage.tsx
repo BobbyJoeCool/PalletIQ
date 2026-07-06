@@ -25,6 +25,7 @@ export function WLHPage() {
   const [checking, setChecking] = useState(false);
   const [entryKey, setEntryKey] = useState(0);
 
+  /** Looks up a location (by 6- or 8-digit id) via the API and reconstructs the canonical 8-digit id from the resolved fields. */
   const resolveLocation = useCallback(async (id: string) => {
     setChecking(true);
     try {
@@ -49,12 +50,14 @@ export function WLHPage() {
   // Pre-population via ?id= (LII's "Hold" button, or a future quick-hold navigation).
   const idParam = searchParams.get('id');
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount effect (URL ?id= pre-population)
     if (idParam) void resolveLocation(idParam);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idParam]);
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
+  /** Fetches a random real location id from the API and resolves it, simulating a successful scan. */
   const demoLoad = useCallback(async () => {
     try {
       const { locationId: id } = await apiFetch<{ locationId: string }>('/api/demo/location', token!);
@@ -65,8 +68,10 @@ export function WLHPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  /** Looks up a location id that doesn't exist, simulating a not-found scan. */
   const demoBad = useCallback(() => void resolveLocation('99999999'), [resolveLocation]);
 
+  /** Footer demo-button slot content: a good load and a bad location trigger. */
   const demoSlot = useMemo(() => (
     <>
       <button type="button" onClick={demoLoad} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">

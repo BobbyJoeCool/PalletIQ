@@ -51,6 +51,7 @@ export function ELAPage() {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
 
+  /** Registers the Storage Code field's keyboard handler; on confirm, uppercases the value and clears the current row selection. */
   const focusStorageField = useCallback(() => {
     storageField.focus((v) => {
       const trimmed = v.trim().toUpperCase();
@@ -91,15 +92,18 @@ export function ELAPage() {
     return [...set];
   }, [rows]);
 
+  /** Selects a result row, or deselects it if it's already the selected row. */
   function toggleRow(aisle: number) {
     setSelected((s) => (s === aisle ? null : aisle));
   }
 
+  /** Navigates to ELZ, pre-populated with the selected row's aisle and the current Storage Code. */
   function viewZoneMap() {
     if (!selectedRow) return;
     navigate('/empty/zone', { state: { aisle: selectedRow.aisle, storageCode } });
   }
 
+  /** Navigates to STG, pre-populated with the selected row's aisle. */
   function stageAisle() {
     if (!selectedRow) return;
     navigate('/stage', { state: { aisle: selectedRow.aisle } });
