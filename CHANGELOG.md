@@ -5,6 +5,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 ## Table of Contents
 
 - [Unreleased — Planned Fixes](#unreleased--planned-fixes)
+- [0.9.1 — 2026-07-06](#091--2026-07-06)
 - [0.9.0 — 2026-07-05](#090--2026-07-05)
 
 ---
@@ -111,13 +112,24 @@ The two groups below aren't test failures or redesign follow-ups — they're the
 
 ---
 
+## [0.9.1] — 2026-07-06
+
+### 0.9.1 — Added
+
+- **Scale-to-fit rendering** (`src/components/shell/ScaleToFit.tsx`) — the app renders at its
+  native 1366×1024 iPad Pro canvas and scales it with a CSS transform to fit whatever device
+  it's actually running on (e.g. a regular iPad's smaller landscape resolution), recomputed on
+  resize/orientation change, rather than clipping off-screen. Wired in at `src/main.tsx`.
+
+---
+
 ## [0.9.0] — 2026-07-05
 
 Feature-complete core application (Phases 1–10 of `Documentation/tasks.md`, plus Phase 11.0's
 documentation pass). Remaining before 1.0: the audio alert implementation, production deployment,
 and clearing the Unreleased fix backlog above.
 
-### Added
+### 0.9.0 — Added
 
 - Full authentication flow: badge/zNumber identify → PIN entry → session, 15-minute idle timeout,
   role-based access (Worker, IM, Lead, Admin)
@@ -139,19 +151,8 @@ and clearing the Unreleased fix backlog above.
   on-screen numpad/keyboard input system, hot-jump-by-code overlay
 - 82-test Playwright e2e suite covering every built screen
 
-### Known Issues
+### 0.9.0 — Known Issues
 
 - 21 items from the latest full Playwright run — see Unreleased above
 - `playAlert()` in `src/lib/audio.ts` is still a no-op stub (Phase 11.1)
 - Not yet deployed (Phase 11.2)
-
----
-
-## [0.9.1] — 2026-07-06
-
-### Added
-
-- **Scale-to-fit rendering** (`src/components/shell/ScaleToFit.tsx`) — the app renders at its
-  native 1366×1024 iPad Pro canvas and scales it with a CSS transform to fit whatever device
-  it's actually running on (e.g. a regular iPad's smaller landscape resolution), recomputed on
-  resize/orientation change, rather than clipping off-screen. Wired in at `src/main.tsx`.
