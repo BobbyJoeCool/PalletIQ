@@ -5,6 +5,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 ## Table of Contents
 
 - [Unreleased — Planned Fixes](#unreleased--planned-fixes)
+- [0.9.7 — 2026-07-06](#097--2026-07-06)
 - [0.9.6 — 2026-07-06](#096--2026-07-06)
 - [0.9.5 — 2026-07-06](#095--2026-07-06)
 - [0.9.4 — 2026-07-06](#094--2026-07-06)
@@ -116,6 +117,29 @@ The two groups below aren't test failures or redesign follow-ups — they're the
       lookup, location lookup, hold, empty locations by aisle, empty locations by zone
 
 ---
+
+## [0.9.7] — 2026-07-06
+
+### 0.9.7 — Fixed
+
+- **Every authenticated action in production returned "unauthorized," even immediately after a
+  successful login.** With the API finally up and running (`[0.9.6]`), this was the next
+  blocker. Root-caused by temporarily dumping the raw `Authorization` header value inside
+  `requireAuth` in production: the header Azure delivered to our code wasn't our token at all —
+  it was a completely different JWT, issued by `scm.azurewebsites.net` with audience
+  `azurefunctions`. Azure Static Web Apps' Managed Functions proxy uses the `Authorization`
+  header for its own internal system-to-system auth (from the SWA edge to the hidden backing
+  Function App) and overwrites whatever the client sends before the request reaches our code —
+  our own Bearer token never arrives. Confirmed with full SHA-256 hashes that the JWT signing
+  secret was identical between sign-time and verify-time throughout, and that a production-signed
+  token verified successfully when checked locally — ruling out every other theory (secret
+  mismatch, stale instances, bad secret value) before landing on this one.
+  - Fix: use a custom `X-Auth-Token` header instead of `Authorization` for the app's own session
+    token, on both sides — `api/lib/permissions.ts`'s `requireAuth` now reads
+    `req.headers.get('x-auth-token')`, and `src/lib/api.ts`'s `apiFetch` now sends
+    `'X-Auth-Token': token` instead of `Authorization: Bearer ${token}`.
+  - Removed all temporary diagnostic code (secret hashes, raw header dumps) added while
+    root-causing this.
 
 ## [0.9.6] — 2026-07-06
 

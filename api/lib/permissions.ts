@@ -1,5 +1,4 @@
 import { jwtVerify } from 'jose';
-import { createHash } from 'node:crypto';
 import type { HttpRequest } from '@azure/functions';
 import type { JwtPayload, Role } from './jwt.js';
 
@@ -27,28 +26,30 @@ export function hasMinRole(userRole: Role, minRole: Role): boolean {
 const getSecret = () => Buffer.from(process.env.JWT_SECRET!, 'utf-8');
 
 /**
- * Extracts and verifies the Bearer JWT from the Authorization header.
+ * Extracts and verifies the app's JWT from the `X-Auth-Token` header.
  * Returns the decoded payload (zNumber + role) for use in handler logic.
+ *
+ * Uses a custom header rather than the standard `Authorization` header because Azure
+ * Static Web Apps' Managed Functions proxy overwrites `Authorization` with its own
+ * internal system token (issued by `scm.azurewebsites.net`, audience `azurefunctions`)
+ * before forwarding the request to the Functions runtime — our own Bearer token never
+ * arrives if sent that way. Confirmed by dumping the raw header value in production and
+ * finding Azure's own service JWT there instead of ours. See phase-11 log 11.7 for the
+ * full investigation.
  *
  * @param req - Incoming Azure Functions HTTP request
  * @returns Decoded JWT payload `{ zNumber, role }`
- * @throws 401 UNAUTHORIZED if the Authorization header is missing or the token is invalid/expired
+ * @throws 401 UNAUTHORIZED if the header is missing or the token is invalid/expired
  */
 export async function requireAuth(req: HttpRequest): Promise<JwtPayload> {
-  const auth = req.headers.get('authorization') ?? '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  const token = req.headers.get('x-auth-token');
   if (!token) throw Object.assign(new Error('UNAUTHORIZED'), { status: 401 });
 
   try {
     const { payload } = await jwtVerify(token, getSecret());
     return { zNumber: payload.zNumber as string, role: payload.role as Role };
-  } catch (e) {
-    // TEMPORARY diagnostic — surfaces the real jose error plus a secret fingerprint
-    // instead of swallowing it. Revert once the production auth issue is root-caused.
-    const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-    const raw = process.env.JWT_SECRET ?? '';
-    const hash = createHash('sha256').update(raw, 'utf-8').digest('hex');
-    throw Object.assign(new Error(`UNAUTHORIZED_DEBUG: ${detail} | verifySecretHash=${hash} | rawAuthHeader=${JSON.stringify(auth)}`), { status: 401 });
+  } catch {
+    throw Object.assign(new Error('UNAUTHORIZED'), { status: 401 });
   }
 }
 

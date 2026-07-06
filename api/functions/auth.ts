@@ -1,7 +1,6 @@
 import { app } from '@azure/functions';
 import type { HttpRequest, InvocationContext } from '@azure/functions';
 import bcrypt from 'bcryptjs';
-import { createHash } from 'node:crypto';
 import prisma from '../lib/prisma.js';
 import { signToken, type Role } from '../lib/jwt.js';
 import { withHandler } from '../lib/response.js';
@@ -60,14 +59,8 @@ async function login(req: HttpRequest, _ctx: InvocationContext): Promise<unknown
 
   const token = await signToken({ zNumber: user.zNumber, role: user.role as Role });
 
-  // TEMPORARY diagnostic — hash of the secret used to sign, to compare against
-  // the one requireAuth reads at verify time. Revert once root-caused.
-  const raw = process.env.JWT_SECRET ?? '';
-  const signSecretDebug = `hash=${createHash('sha256').update(raw, 'utf-8').digest('hex')} tokenLen=${token.length}`;
-
   return {
     token,
-    signSecretDebug,
     user: {
       zNumber: user.zNumber,
       firstName: user.firstName,

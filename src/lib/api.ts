@@ -1,10 +1,15 @@
 /**
- * Generic authenticated API call helper. Attaches a Bearer token to every request
+ * Generic authenticated API call helper. Attaches the session token to every request
  * and throws an Error with the server's error code as its message on non-OK responses.
  * The thrown error's message is the string callers check (e.g. "PALLET_MISMATCH").
  *
+ * Sent as `X-Auth-Token` rather than the standard `Authorization` header — Azure Static
+ * Web Apps' Managed Functions proxy overwrites `Authorization` with its own internal
+ * system token before forwarding to the Functions runtime, so our own token never
+ * arrives if sent that way. See api/lib/permissions.ts's requireAuth for the full story.
+ *
  * @param path - API path relative to origin (e.g. "/api/labels/123")
- * @param token - JWT Bearer token from the current session
+ * @param token - Session token from the current login
  * @param opts - Optional fetch options (method, body, additional headers)
  * @returns Parsed JSON response body typed as T
  * @throws Error whose message is the server's `error` field, or "REQUEST_FAILED" for parse errors
@@ -18,7 +23,7 @@ export async function apiFetch<T>(
     ...opts,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      'X-Auth-Token': token,
       ...(opts?.headers ?? {}),
     },
   });
