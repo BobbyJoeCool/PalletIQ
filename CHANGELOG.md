@@ -5,6 +5,8 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 ## Table of Contents
 
 - [Unreleased — Planned Fixes](#unreleased--planned-fixes)
+- [0.9.3 — 2026-07-06](#093--2026-07-06)
+- [0.9.2 — 2026-07-06](#092--2026-07-06)
 - [0.9.1 — 2026-07-06](#091--2026-07-06)
 - [0.9.0 — 2026-07-05](#090--2026-07-05)
 
@@ -109,6 +111,49 @@ The two groups below aren't test failures or redesign follow-ups — they're the
 - [ ] Verify `/api/*` routing works end-to-end in the deployed environment
 - [ ] Smoke-test each major flow in production: login, pull, directed put, manual put, pallet
       lookup, location lookup, hold, empty locations by aisle, empty locations by zone
+
+---
+
+## [0.9.3] — 2026-07-06
+
+### 0.9.3 — Fixed
+
+- **Production API was completely non-functional** — every `/api/*` route 404'd on the live
+  site. Root-caused to two compounding gaps in Phase 11.2's deployment checklist, neither of
+  which had actually been done despite being listed:
+  - The Static Web App's Production environment variables (`DATABASE_URL`, `JWT_SECRET`) were
+    never set in Azure, and `api/lib/prisma.ts` constructs its Prisma client eagerly at module
+    load time — with `DATABASE_URL` unset, every function file's import of `lib/prisma.js`
+    (chained through `api/index.ts`, which imports all function files in one shot) throws
+    during Functions host startup, so no routes ever get registered. Fixed by the user adding
+    both settings in the Azure Portal.
+  - `api/package.json` had no `postinstall` script, so a plain `npm install` (what Azure's Oryx
+    build runs) never generates the Prisma Client — confirmed by reproducing a clean install in
+    an isolated copy of `api/`, which left `node_modules/.prisma/client` missing and made
+    `npm run build` fail with `Module '"@prisma/client"' has no exported member 'PrismaClient'`.
+    Added `"postinstall": "prisma generate"` to `api/package.json`'s scripts — the standard
+    Prisma-recommended pattern for this exact scenario. Re-verified in a second clean install:
+    Prisma Client now generates automatically and `npm run build` succeeds.
+- Production database was also never seeded (`Documentation/tasks.md`'s Phase 11.2 checklist —
+  see `[0.9.2]` above for the seed script changes made first). All three gaps together are why
+  logging in with `z002p25` on the live site returned "znumber not found."
+
+## [0.9.2] — 2026-07-06
+
+### 0.9.2 — Added
+
+- **Demo staging data** — the Prisma seed script (`api/prisma/seed.ts`) now stages a portion
+  of 8 non-XS aisles' empty locations (`STAGED` status) instead of leaving them all `EMPTY`,
+  filling back-to-front the same way `POST /api/staging/stage` does, so ELZ/STG have
+  realistic staged aisles to show immediately after a reseed. Aisle 304 is fully staged; the
+  other 7 are staged at varied percentages.
+
+### 0.9.2 — Fixed
+
+- `Documentation/outline.md`'s "Stage Aisle" section still described it as *Design Pending*
+  and listed it under "Explicitly Out of Scope" — stale since Phase 7 actually built and
+  shipped it (`tasks.md` had already flagged this drift but the fix was never applied).
+  Rewritten to describe the shipped behavior and reference `DevNotes/Screen-Specs/STG.md`.
 
 ---
 

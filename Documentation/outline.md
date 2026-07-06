@@ -15,7 +15,7 @@
 - [Location Hold](#location-hold)
 - [Empty Locations by Aisle](#empty-locations-by-aisle)
 - [Empty Locations by Zone](#empty-locations-by-zone)
-- [Stage Aisle — Design Pending](#stage-aisle--design-pending)
+- [Stage Aisle](#stage-aisle)
 - [Activity Log](#activity-log)
 - [Explicitly Out of Scope (This Demo)](#explicitly-out-of-scope-this-demo)
 
@@ -294,17 +294,15 @@ Below or alongside the grid, a **per-zone summary** (combining both odd and even
 
 ---
 
-## Stage Aisle — *Design Pending*
+## Stage Aisle
 
-**New feature, not present in the legacy system being improved upon.** Full design deferred to a dedicated design session; documented here at the level currently understood so the rest of the system can reference it.
-
-**Known basics:**
+**New feature, not present in the legacy system being improved upon.** Fully designed and built (Phase 7; redesigned to a pallet-rider-triple graphic in Phase 11.2) — see `DevNotes/Screen-Specs/STG.md` for the complete spec.
 
 - Entry points: Home menu, Empty Locations by Aisle (per-aisle button), Empty Locations by Zone (per-aisle button) — all pre-populate the aisle.
-- Purpose: a General Pallet Mover (GPMer) brings multiple pallet stacks into an aisle at once (commonly 3 stacks at a time). The worker enters how many pallets of a given Storage Code and Size they are bringing, and the system tells them where to place each individual pallet within the stacks, accounting for the zone-by-zone, one-direction staging constraint already described under Directed Put.
-- Depends directly on the zone-fill logic and the visual aisle grid established in Empty Locations by Zone.
-
-**Explicitly not yet designed:** how multi-pallet stacks are represented and sequenced, what the worker-facing screen looks like, how partial-stack placement or running out of matching locations mid-stage is handled, and how this interacts with the Reserved-location/timeout mechanics used elsewhere in Put.
+- Purpose: a General Pallet Mover (GPMer) brings multiple pallet stacks into an aisle at once (three stacks at a time via a fork-truck graphic). The worker enters the Storage Code, Size, and quantity for each stack, and the system assigns each pallet a destination location, marking it `STAGED` rather than `STORED` — a placeholder reservation that a subsequent Put confirms.
+- Staging always fills an aisle from the back forward (highest bin, lowest level first) — the reverse of Directed Put's front-to-back zone fill — so the two workflows can operate on the same aisle from opposite ends without colliding.
+- `STAGED` locations are valid Directed Put candidates alongside `EMPTY` ones (excluded only when the putting worker has Consolidating mode on). A Manual Put onto a `STAGED` location is allowed but shows a non-blocking warning.
+- IM and above can Unstage (clear) or Restage an aisle's `STAGED` locations via a modal on the Stage Aisle screen.
 
 ---
 
@@ -329,4 +327,3 @@ Each entry captures, at minimum: timestamp, acting user, action type, and the re
 - Warehouse/aisle/location setup (seeded directly into the database instead)
 - User account creation and role assignment (seeded directly into the database instead)
 - Individual carton/label-level divert tracking within a multi-carton pull
-- Full design and implementation of Stage Aisle (see above)

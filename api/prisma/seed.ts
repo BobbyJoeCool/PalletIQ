@@ -563,7 +563,43 @@ function buildLocationsAndPallets() {
   const bins1to84 = Array.from({ length: 84 }, (_, i) => i + 1)
   addAisle(803, bins1to84, 10, () => 1, () => 'XS', () => 'BS')
 
+  applyStaging(locations)
+
   return { locations, pallets }
+}
+
+/**
+ * Demo staging data: converts a portion of each designated aisle's EMPTY locations to
+ * STAGED, so the STG/ELZ screens have something realistic to show out of the box. XS
+ * aisles (301/302/801/802/803) are excluded — XS is always CA pull regardless of level
+ * and isn't part of the staging workflow. One aisle (304) is staged 100% (fully staged);
+ * the rest are staged at varied percentages for visual variety across a demo.
+ *
+ * Fill order matches `findNextStagingLocation` (api/lib/stagingLogic.ts) exactly — highest
+ * bin first, then lowest level within a bin — since that's the real order a GPMer would
+ * fill an aisle from the back, not a random scatter.
+ */
+function applyStaging(locations: LocationRow[]) {
+  const STAGED_AISLES: Record<number, number> = {
+    304: 1.00, // L / CR — fully staged
+    306: 0.25, // M / CR
+    307: 0.40, // S / CR
+    310: 0.55, // HS / CR
+    313: 0.70, // M / FD
+    318: 0.85, // L / BK
+    303: 0.35, // mixed L/M/S/HS / BS
+    701: 0.60, // mixed / RF
+  }
+
+  for (const [aisleStr, pct] of Object.entries(STAGED_AISLES)) {
+    const aisle = Number(aisleStr)
+    const empties = locations
+      .filter((l) => l.aisle === aisle && l.status === 'EMPTY')
+      .sort((a, b) => b.bin - a.bin || a.level - b.level)
+
+    const stageCount = Math.round(empties.length * pct)
+    for (let i = 0; i < stageCount; i++) empties[i].status = 'STAGED'
+  }
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
