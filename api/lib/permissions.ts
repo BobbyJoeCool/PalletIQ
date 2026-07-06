@@ -48,7 +48,7 @@ export async function requireAuth(req: HttpRequest): Promise<JwtPayload> {
     const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
     const raw = process.env.JWT_SECRET ?? '';
     const hash = createHash('sha256').update(raw, 'utf-8').digest('hex');
-    throw Object.assign(new Error(`UNAUTHORIZED_DEBUG: ${detail} | verifySecretHash=${hash} verifyTokenLen=${token.length}`), { status: 401 });
+    throw Object.assign(new Error(`UNAUTHORIZED_DEBUG: ${detail} | verifySecretHash=${hash} | rawAuthHeader=${JSON.stringify(auth)}`), { status: 401 });
   }
 }
 
