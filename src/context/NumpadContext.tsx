@@ -34,6 +34,10 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   const [activePanel, setActivePanel] = useState<InputPanel>('none');
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const keyHandlerRef = useRef<((key: string) => void) | null>(null);
+  // Mirrors activeFieldId synchronously — setKeyHandler needs to read "who was active a
+  // moment ago" mid-call (see the auto-submit block below), and a state variable read through
+  // a useCallback closure would be stale for that purpose.
+  const activeFieldIdRef = useRef<string | null>(null);
   const isScanningRef = useRef(false);
 
   /** Opens the numeric numpad panel. */
@@ -49,11 +53,29 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
    * of the two. Individual screens' own hidePanel() calls rely on this: they mean "we're done
    * with input here," which should always also drop the stale active-field highlight.
    *
+   * Before installing the new field, if a *different* field was previously active, its handler
+   * is sent a synthetic 'Enter' — moving focus to another field (tab-out/click-away) commits
+   * whatever the field you're leaving currently holds, the same as pressing OK on it (bug
+   * report V1.0.5, "Tab-out/blur on filled field should trigger OK action"). This must run
+   * before keyHandlerRef/activeFieldIdRef are overwritten with the new field: the old field's
+   * own submit callback typically calls hidePanel() (a reentrant setKeyHandler(null, null)
+   * call), and running it first means that reentrant clear happens before — not after — the
+   * new field's registration, so the new field ends up active rather than clobbered back to
+   * none. The reentrant call is harmless: its own fieldId is null, which fails the `fieldId
+   * != null` guard, so it can't recurse into another auto-submit.
+   *
    * @param handler - Function that receives individual key strings ('0'–'9', '⌫', 'Enter', 'OK', etc.)
    * @param fieldId - Stable ID for the field (from useId); used to track which field is active
    */
   const setKeyHandler = useCallback((handler: ((key: string) => void) | null, fieldId: string | null = null) => {
+    const prevHandler = keyHandlerRef.current;
+    const prevFieldId = activeFieldIdRef.current;
+    if (fieldId != null && prevFieldId != null && prevFieldId !== fieldId && prevHandler) {
+      prevHandler('Enter');
+    }
+
     keyHandlerRef.current = handler;
+    activeFieldIdRef.current = fieldId;
     setActiveFieldId(fieldId);
     if (handler == null) setActivePanel('none');
   }, []);

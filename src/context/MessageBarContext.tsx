@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 export type MessageBarType = 'idle' | 'info' | 'warning' | 'error' | 'success';
 
@@ -29,12 +29,18 @@ export function MessageBarProvider({ children }: { children: React.ReactNode }) 
   const [message, setMessageState] = useState<MessageBarState>(IDLE);
 
   /** Replaces the current message bar state with a new one. */
-  const setMessage = (msg: MessageBarState) => setMessageState(msg);
+  const setMessage = useCallback((msg: MessageBarState) => setMessageState(msg), []);
   /** Resets the message bar back to its idle placeholder state. */
-  const clearMessage = () => setMessageState(IDLE);
+  const clearMessage = useCallback(() => setMessageState(IDLE), []);
+
+  // setMessage/clearMessage must stay referentially stable across every message bar update —
+  // otherwise any screen with an effect that depends on setMessage (e.g. STG's zone map, see
+  // bug report V1.0.5) re-runs on every unrelated setMessage call anywhere in the app, not just
+  // when its own actual dependencies (aisle/storageCode) change.
+  const value = useMemo(() => ({ message, setMessage, clearMessage }), [message, setMessage, clearMessage]);
 
   return (
-    <MessageBarContext.Provider value={{ message, setMessage, clearMessage }}>
+    <MessageBarContext.Provider value={value}>
       {children}
     </MessageBarContext.Provider>
   );

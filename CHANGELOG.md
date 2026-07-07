@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.0.6 — 2026-07-07](#106--2026-07-07)
 - [1.0.5 — 2026-07-06](#105--2026-07-06)
 - [1.0.4 — 2026-07-06](#104--2026-07-06)
 - [1.0.3 — 2026-07-06](#103--2026-07-06)
@@ -118,6 +119,39 @@ for full detail, error text, and reproduction steps.
 - [ ] Rewrite `tests/e2e/stg.spec.ts` against the new DOM — replaces the two old-layout items
       above rather than fixing them in place; add new coverage for Master Control's Aisle field
       feeding "Fill All" and for the zone map's idle → loaded states
+
+---
+
+## [1.0.6] — 2026-07-07
+
+### 1.0.6 — Fixed
+
+All 3 items filed in `Documentation/Bug-Reports/bug-report-V1_0_5.md`:
+
+- **Tab-out/blur on a filled field now submits it, same as OK** (Feature Change). Previously,
+  moving to a different field (by tapping it) silently dropped whatever was typed into the field
+  you left, unless OK had been pressed first. Root cause: the shared on-screen-input plumbing
+  (`NumpadContext`) only ever routed key events to a *single* active field, and switching that
+  active field to a new one simply replaced the handler — the outgoing field's typed value was
+  never submitted. Fixed at the shared-infrastructure level (`NumpadContext.setKeyHandler`), so
+  it applies to every field on every screen, not just STG: switching to a different field now
+  sends the outgoing field's handler a synthetic `'Enter'` before installing the new one,
+  submitting whatever it currently holds exactly as if OK had been pressed.
+- **Zone map (and other screens) redrew more often than their inputs actually changed** (Feature
+  Change, STG-reported). Root cause: `MessageBarContext`'s `setMessage`/`clearMessage` were
+  recreated on every provider render, so any effect that listed `setMessage` as a dependency
+  (e.g. STG's `ZoneMap`, which fetches `/api/locations/empty-by-zone`) re-ran on *every* message
+  bar update anywhere in the app — not just when its own aisle/storage code changed. Fixed by
+  memoizing `setMessage`/`clearMessage` with `useCallback` and the context value with `useMemo`,
+  so their identity is now stable across renders; STG's zone map (and everything else with a
+  `setMessage` dependency) now only re-fetches when its actual inputs change.
+- **App didn't lock to landscape orientation on iPhone** (Bug). True orientation locking isn't
+  available to a plain browser tab on iOS Safari (Apple doesn't implement the Screen Orientation
+  Lock API there, install-to-homescreen or not), so there's no way to prevent the phone itself
+  from being held in portrait. `ScaleToFit` (already the single place the whole app — including
+  the login/PIN screens — gets scaled to fit the viewport) now detects a portrait viewport and
+  rotates its canvas 90° with a CSS transform, with the fit-scale math swapped accordingly, so
+  the app reads as landscape regardless of how the phone is physically oriented.
 
 ---
 
