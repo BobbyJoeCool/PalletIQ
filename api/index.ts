@@ -1,4 +1,5 @@
 import './functions/auth.js';
+import './functions/health.js';
 import './functions/pallets.js';
 import './functions/locations.js';
 import './functions/labels.js';

@@ -124,10 +124,10 @@ export function ELZPage() {
     return () => { cancelled = true; };
   }, [aisle, storageCode, token, setMessage]);
 
-  /** Navigates to STG, pre-populated with the currently queried aisle. */
+  /** Navigates to STG, pre-populated with the currently queried aisle and Storage Code. */
   function stageAisle() {
     if (aisle == null) return;
-    navigate('/stage', { state: { aisle } });
+    navigate('/stage', { state: { aisle, storageCode } });
   }
 
   return (
@@ -141,11 +141,12 @@ export function ELZPage() {
           <button
             type="button"
             onClick={focusAisleField}
-            className="flex items-center h-[64px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] transition-colors"
+            className={`flex items-center h-[64px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${aisleField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
           >
             <span className="font-data text-[26px] font-medium text-white">
               {aisleField.value || <span className="text-[#444]">—</span>}
             </span>
+            {aisleField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
           </button>
         </div>
         <div className="w-[220px] flex flex-col gap-1">
@@ -155,11 +156,12 @@ export function ELZPage() {
           <button
             type="button"
             onClick={focusStorageField}
-            className="flex items-center h-[64px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] transition-colors"
+            className={`flex items-center h-[64px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${storageField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
           >
             <span className="font-data text-[26px] font-medium text-white tracking-[0.04em]">
               {storageField.value || <span className="text-[#444]">—</span>}
             </span>
+            {storageField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
           </button>
         </div>
       </div>

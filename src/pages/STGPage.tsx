@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Triple from '../assets/Triple.png';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
@@ -37,11 +37,27 @@ interface ZoneMapResult {
   levels: GridLevel[];
 }
 
+/** Stable, referentially-constant empty exclude set — used by Stack 0, which has no lower-
+ *  priority sibling to yield to, so its dependency never wastefully changes identity. */
+const EMPTY_EXCLUDE_SET = new Set<string>();
+
+/** Stable, referentially-constant empty array — stands in for "this sibling isn't a
+ *  lower-priority stack relative to me" in priorLocations' dependency array below, so that
+ *  array never accidentally depends on a stack's own `locations` (see priorLocations' comment). */
+const EMPTY_LOCATIONS: string[] = [];
+
 /**
  * Repeatedly calls GET /api/staging/next-location, walking the bin/level cursor
  * forward each time, to build a list of up to `count` destination locations. The
  * public API only returns one location per call (see api/functions/staging.ts), so
  * building an N-location list is inherently N sequential round trips.
+ *
+ * `exclude` skips locations already claimed by a higher-priority sibling stack's
+ * uncommitted preview (see StackPanel's `priorLocations`) — the backend only knows about
+ * locations actually STAGED in the DB, not another stack's still-in-progress UI state, so
+ * this is the client's only way to keep two stacks from showing the same destination.
+ * Skipped locations must not count against `count`, or `shortfall` would be inflated by
+ * exclusions alone — the loop is bounded by how many results were actually kept.
  */
 async function fetchStagingLocations(
   token: string,
@@ -49,11 +65,15 @@ async function fetchStagingLocations(
   storageCode: string,
   size: string,
   count: number,
+  exclude: Set<string> = EMPTY_EXCLUDE_SET,
 ): Promise<string[]> {
   const results: string[] = [];
   let afterBin: number | undefined;
   let afterLevel: number | undefined;
-  for (let i = 0; i < count; i++) {
+  let attempts = 0;
+  const maxAttempts = count + exclude.size + 20; // defensive cap against a pathological aisle
+  while (results.length < count && attempts < maxAttempts) {
+    attempts++;
     const params = new URLSearchParams({ aisle, storageCode, size });
     if (afterBin != null) params.set('afterBin', String(afterBin));
     if (afterLevel != null) params.set('afterLevel', String(afterLevel));
@@ -62,9 +82,10 @@ async function fetchStagingLocations(
       token,
     );
     if (!nextLocation) break;
-    results.push(nextLocation);
     afterBin = parseInt(nextLocation.slice(3, 6), 10);
     afterLevel = parseInt(nextLocation.slice(6, 8), 10);
+    if (exclude.has(nextLocation)) continue; // claimed by a sibling — cursor already advanced past it
+    results.push(nextLocation);
   }
   return results;
 }
@@ -82,7 +103,7 @@ function FieldDisplay({
       <button
         type="button"
         onClick={onFocus}
-        className="flex items-center justify-center h-[52px] px-3 rounded-[10px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] transition-colors"
+        className={`flex items-center justify-center h-[52px] px-3 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
       >
         <span className="font-data text-[20px] font-medium text-white">
           {value || <span className="text-[#444]">—</span>}
@@ -107,6 +128,8 @@ function PalletBox({
       className={`relative flex items-center justify-between px-2 rounded-[5px] border-2 transition-colors min-h-0 ${
         emphasize
           ? 'flex-[1.6] bg-[#1A0D0D] border-[#CC0000]'
+          : active
+          ? 'flex-1 bg-[#0D0D0D] border-[#CC0000]'
           : 'flex-1 bg-[#0D0D0D] border-[#3A3A3A] hover:border-[#555]'
       }`}
     >
@@ -192,13 +215,39 @@ function StackPanel({ index, label }: { index: 0 | 1 | 2; label: string }) {
     });
   }, [quantityField, hidePanel, index, updateStack]);
 
+  // Locations already claimed by a higher-priority sibling's uncommitted preview (Stack 0
+  // outranks Stack 1 outranks Stack 2, matching the fork graphic's left-to-right layout).
+  // One-directional on purpose: a bidirectional exclusion would let two stacks' effects
+  // invalidate each other back and forth. Known accepted limitation: if a lower-indexed
+  // stack's fields change *after* a higher one already computed its list, the higher one
+  // won't know until something re-triggers it — display-only, since the stage endpoint
+  // re-validates each location as still EMPTY at write time and never double-books.
+  //
+  // lowerLocationsN must never resolve to *this* stack's own locations — depending on
+  // stacks[index].locations here would self-trigger: this stack's own fetch resolving
+  // changes stacks[index].locations, which would recompute this memo to a new Set identity
+  // even with identical contents, re-firing the fetch effect below, which resolves and
+  // changes stacks[index].locations again — forever. EMPTY_LOCATIONS stands in for "not a
+  // lower sibling" so both slots stay referentially stable when not applicable to this index.
+  const lowerLocations0 = index > 0 ? stacks[0].locations : EMPTY_LOCATIONS;
+  const lowerLocations1 = index > 1 ? stacks[1].locations : EMPTY_LOCATIONS;
+  const priorLocations = useMemo(() => {
+    if (lowerLocations0.length === 0 && lowerLocations1.length === 0) return EMPTY_EXCLUDE_SET;
+    const set = new Set<string>();
+    lowerLocations0.forEach((loc) => set.add(loc));
+    lowerLocations1.forEach((loc) => set.add(loc));
+    return set;
+  }, [lowerLocations0, lowerLocations1]);
+
   // Live destination-location list: re-fetches whenever any of the four inputs change,
-  // per STG.md's "List updates live if any input field changes."
+  // per STG.md's "List updates live if any input field changes" — also re-fetches when a
+  // higher-priority sibling's claimed locations change (including clearing to [] after that
+  // sibling stages), so "an update anywhere on the forks" actually propagates.
   useEffect(() => {
     const qty = parseInt(stack.quantity, 10);
     if (!stack.aisle || !stack.storageCode || !stack.size || !qty || qty <= 0) return;
     let cancelled = false;
-    fetchStagingLocations(token!, stack.aisle, stack.storageCode, stack.size, qty)
+    fetchStagingLocations(token!, stack.aisle, stack.storageCode, stack.size, qty, priorLocations)
       .then((locations) => {
         if (cancelled) return;
         updateStack(index, { locations, shortfall: Math.max(0, qty - locations.length) });
@@ -208,7 +257,7 @@ function StackPanel({ index, label }: { index: 0 | 1 | 2; label: string }) {
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stack.aisle, stack.storageCode, stack.size, stack.quantity]);
+  }, [stack.aisle, stack.storageCode, stack.size, stack.quantity, priorLocations]);
 
   const qty = parseInt(stack.quantity, 10) || 0;
   const canStage = !!stack.aisle && !!stack.storageCode && !!stack.size && qty > 0 && stack.locations.length > 0;
@@ -291,9 +340,23 @@ function StackPanel({ index, label }: { index: 0 | 1 | 2; label: string }) {
             {stack.locations.length === 0 && stack.shortfall === 0 && (
               <span className="font-data text-[10px] text-[#444] text-center">—</span>
             )}
-            {stack.locations.map((loc) => (
-              <span key={loc} className="font-data text-[10px] text-[#CFCFCF] text-center">{fmtLocation(loc)}</span>
-            ))}
+            {stack.locations.map((loc, i) => {
+              // Larger text when there's little else in the list to show, per the report;
+              // the final assigned location (not a shortfall placeholder) is bolded red so
+              // the GPMer can see at a glance where the last pallet in the stack is headed.
+              const big = stack.locations.length + stack.shortfall <= 4;
+              const isLast = i === stack.locations.length - 1;
+              return (
+                <span
+                  key={loc}
+                  className={`font-data text-center ${big ? 'text-[14px]' : 'text-[10px]'} ${
+                    isLast ? 'font-bold text-[#FF4444]' : 'text-[#CFCFCF]'
+                  }`}
+                >
+                  {fmtLocation(loc)}
+                </span>
+              );
+            })}
             {Array.from({ length: stack.shortfall }, (_, i) => (
               <span key={`shortfall-${i}`} className="font-ui text-[9px] text-[#CC4444] text-center font-semibold">
                 No location
@@ -404,7 +467,7 @@ function ZoneMap({ aisle, storageCode }: { aisle: string; storageCode: string })
 
   return (
     <div className="flex-1 overflow-y-auto px-5 py-3">
-      <AisleGrid levels={levels} />
+      <AisleGrid levels={levels} dense />
     </div>
   );
 }
@@ -630,6 +693,10 @@ function MasterControl({ isIM, onUnstage }: { isIM: boolean; onUnstage: () => vo
     });
   }
 
+  // Nothing left for Fill All to do once every stack already has its own Quantity — without
+  // this, the button's enabled state never reflected quantity entry at all.
+  const allStacksHaveQuantity = stacks.every((s) => !!s.quantity);
+
   // Four equal-width columns mirror ForkGraphicArea's layout below (Stack 1 / Stack 2 /
   // Stack 3 each occupy 25% of width, then the cab/mast zone takes the remaining 25%) —
   // that's what makes Aisle land centered directly above Stack 2, not a coincidence.
@@ -659,7 +726,7 @@ function MasterControl({ isIM, onUnstage }: { isIM: boolean; onUnstage: () => vo
         <button
           type="button"
           onClick={fillAll}
-          disabled={!master.aisle || !master.storageCode || !master.size}
+          disabled={!master.aisle || !master.storageCode || !master.size || allStacksHaveQuantity}
           className="h-[52px] px-5 rounded-[10px] font-ui text-[15px] font-semibold bg-[#003366] hover:bg-[#004488] text-white disabled:opacity-40 transition-colors"
         >
           Fill All
@@ -698,11 +765,16 @@ function STGScreen() {
     const aisle = String(state.aisle);
     updateStack(0, { aisle });
     setMaster({ aisle });
-    if (state.storageCode && state.size) {
-      setMaster({ storageCode: state.storageCode, size: state.size });
+    if (state.storageCode) {
+      // ELZ only ever supplies storageCode (no Size concept on that screen); ELA supplies
+      // both. Apply whichever fields are present rather than requiring both together.
+      setMaster({ storageCode: state.storageCode, ...(state.size ? { size: state.size } : {}) });
       // "Fill All" auto-triggers: every stack with no Quantity yet (all three, on entry)
-      // inherits StorageCode + Size — each still needs its own Quantity entered.
-      [0, 1, 2].forEach((i) => updateStack(i as 0 | 1 | 2, { storageCode: state.storageCode!, size: state.size! }));
+      // inherits StorageCode (+ Size if supplied) — each still needs its own Quantity entered.
+      [0, 1, 2].forEach((i) => updateStack(i as 0 | 1 | 2, {
+        storageCode: state.storageCode!,
+        ...(state.size ? { size: state.size } : {}),
+      }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routerLocation.state]);

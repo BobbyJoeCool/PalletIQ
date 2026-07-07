@@ -8,6 +8,9 @@ import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId } from
 import { sideOf } from '../lib/zoneLogic.js';
 import type { Role } from '../lib/jwt.js';
 
+// Canonical ascending size order (mirrors SIZES in src/pages/ELAPage.tsx and STGPage.tsx).
+const SIZE_ORDER = ['XS', 'HS', 'S', 'M', 'L'];
+
 // Minimum role to place / remove each hold category, per DevNotes/Screen-Specs/WLH.md's
 // hold table. Hold Both may be *placed* by any role (WORKER is the lowest rank, so this
 // is effectively "no restriction") but only removed by IM+.
@@ -220,7 +223,10 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
   }
   const zoneSummary = [...zoneMap.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([zone, breakdown]) => ({ zone, breakdown: [...breakdown.values()] }));
+    .map(([zone, breakdown]) => ({
+      zone,
+      breakdown: [...breakdown.values()].sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size)),
+    }));
 
   return { aisle, levels, zoneSummary };
 }

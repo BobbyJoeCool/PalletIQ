@@ -133,11 +133,12 @@ export function IIDPage() {
           <button
             type="button"
             onClick={focusDpciField}
-            className="flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] transition-colors"
+            className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${dpciField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
           >
             <span className="font-data text-[26px] font-medium text-white">
               {dpciField.value || <span className="text-[#444]">—</span>}
             </span>
+            {dpciField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
           </button>
         </div>
         <div className="w-[260px]">
@@ -145,11 +146,12 @@ export function IIDPage() {
           <button
             type="button"
             onClick={focusUpcField}
-            className="flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] transition-colors"
+            className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${upcField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
           >
             <span className="font-data text-[26px] font-medium text-white">
               {upcField.value || <span className="text-[#444]">—</span>}
             </span>
+            {upcField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
           </button>
         </div>
       </div>

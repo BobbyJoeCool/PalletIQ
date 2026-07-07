@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ZnumPad } from '../components/ZnumPad';
 import { MessageBar } from '../components/shell/MessageBar';
 import { MessageBarProvider } from '../context/MessageBarContext';
-import { identify } from '../lib/api';
+import { identify, wakeDatabase } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { useMessageBar } from '../context/MessageBarContext';
 
@@ -21,6 +21,7 @@ function LoginContent() {
   const { setMessage, clearMessage } = useMessageBar();
   const [znumber, setZnumber] = useState('z');
   const [loading, setLoading] = useState(false);
+  const [wakeStatus, setWakeStatus] = useState<'idle' | 'waking' | 'ready' | 'error'>('idle');
 
   /** Submits the entered zNumber via identify(); on success advances to the PIN screen. */
   const handleSubmit = async () => {
@@ -49,6 +50,22 @@ function LoginContent() {
   const handleChange = (v: string) => {
     setZnumber(v);
     clearMessage();
+  };
+
+  /**
+   * Hits the health-check endpoint to force Azure SQL out of auto-pause before the worker
+   * attempts to log in. A cold resume can take up to a minute, so this is offered as an
+   * optional pre-warm step rather than something the login flow waits on automatically.
+   */
+  const handleWakeDatabase = async () => {
+    if (wakeStatus === 'waking') return;
+    setWakeStatus('waking');
+    try {
+      await wakeDatabase();
+      setWakeStatus('ready');
+    } catch {
+      setWakeStatus('error');
+    }
   };
 
   return (
@@ -112,6 +129,30 @@ function LoginContent() {
             disabled={loading}
           />
         </div>
+      </div>
+
+      {/* Wake database — optional pre-warm for a paused Azure SQL serverless instance */}
+      <div className="flex flex-col items-center gap-1 pb-2">
+        <button
+          type="button"
+          onClick={handleWakeDatabase}
+          disabled={wakeStatus === 'waking'}
+          className="flex items-center gap-2 font-ui text-[16px] text-[#666666] underline decoration-dotted hover:text-[#999999] disabled:no-underline disabled:cursor-default"
+        >
+          {wakeStatus === 'waking' && (
+            <span className="inline-block w-[14px] h-[14px] rounded-full border-2 border-[#666666] border-t-transparent animate-spin" />
+          )}
+          {wakeStatus === 'waking' ? 'Waking up database…' : 'Wake database'}
+        </button>
+        {wakeStatus === 'waking' && (
+          <p className="font-ui text-[14px] text-[#555555]">This can take up to a minute on a cold start</p>
+        )}
+        {wakeStatus === 'ready' && (
+          <p className="font-ui text-[14px] text-[#3FA34D]">Database ready</p>
+        )}
+        {wakeStatus === 'error' && (
+          <p className="font-ui text-[14px] text-[#CC0000]">Could not reach database — try again</p>
+        )}
       </div>
 
       {/* Bottom: message bar (standalone 84 px) */}

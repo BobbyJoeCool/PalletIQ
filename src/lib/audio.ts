@@ -17,6 +17,20 @@ const TONE_SRC: Record<AlertTone, string> = {
   info: infoSound,
 };
 
+// Preloaded once per tone so playAlert() doesn't pay a fetch/decode cost on every call —
+// building `new Audio()` fresh each time caused a ~1s gap between the triggering message
+// and the sound actually starting.
+const TONE_AUDIO: Record<AlertTone, HTMLAudioElement> = {
+  error: new Audio(TONE_SRC.error),
+  warning: new Audio(TONE_SRC.warning),
+  info: new Audio(TONE_SRC.info),
+};
+
+for (const tone of Object.keys(TONE_AUDIO) as AlertTone[]) {
+  TONE_AUDIO[tone].preload = 'auto';
+  TONE_AUDIO[tone].volume = TONE_VOLUME[tone];
+}
+
 /**
  * Plays an audio alert tone for the given severity level.
  *
@@ -24,8 +38,8 @@ const TONE_SRC: Record<AlertTone, string> = {
  *   "warning" for non-blocking cautions (occupied location, already-stored pallet, etc.)
  */
 export function playAlert(tone: AlertTone): void {
-  const audio = new Audio(TONE_SRC[tone]);
-  audio.volume = TONE_VOLUME[tone];
+  const audio = TONE_AUDIO[tone];
+  audio.currentTime = 0;
   void audio.play().catch(() => {
     // Autoplay can be blocked before the user has interacted with the page; ignore.
   });

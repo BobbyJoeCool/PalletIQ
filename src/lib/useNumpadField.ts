@@ -5,9 +5,16 @@ import { useNumpad } from '../context/NumpadContext';
  * Manages a single numpad-driven input field. The handler accumulates characters
  * from numpad/keyboard/scanner keystrokes. Call `focus(onSubmit)` when the field
  * becomes active to register the handler and open the numpad.
+ *
+ * @param panel - Which on-screen panel this field opens when focused
+ * @param maxLength - When set, submits automatically the instant typed input reaches this
+ *   length instead of waiting for an explicit OK/Enter — use only for fields with a genuine
+ *   fixed length (e.g. a 2-digit Level), not variable-length ones (Pallet ID, free-form Aisle).
+ *   Ignored while a scan is being injected (see NumpadContext's isScanningRef), so a longer
+ *   scanner override value isn't cut short mid-injection by a shorter field's own maxLength.
  */
-export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad') {
-  const { setKeyHandler, showNumpad, showKeyboard, activeFieldId } = useNumpad();
+export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLength?: number) {
+  const { setKeyHandler, showNumpad, showKeyboard, activeFieldId, isScanningRef } = useNumpad();
   const fieldId = useId();
   const isActive = activeFieldId === fieldId;
   const [value, setValue] = useState('');
@@ -29,8 +36,11 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad') {
       const next = valueRef.current + key;
       valueRef.current = next;
       setValue(next);
+      if (maxLength != null && next.length >= maxLength && !isScanningRef.current) {
+        submitRef.current?.(next);
+      }
     }
-  }, []);
+  }, [maxLength, isScanningRef]);
 
   /** Registers this field as the active numpad/keyboard target and opens the matching panel. */
   const focus = useCallback(

@@ -85,3 +85,16 @@ export async function loginWithPin(
   if (!res.ok) throw new Error('REQUEST_FAILED');
   return res.json() as Promise<{ token: string; user: AuthUser }>;
 }
+
+/**
+ * Hits the unauthenticated health-check endpoint to force Azure SQL serverless to resume
+ * if it's currently auto-paused. Called from the login screen's "Wake database" link — a
+ * cold resume can take up to a minute, so this lets a worker warm the database before
+ * attempting to log in, rather than having the identify/login calls themselves time out.
+ *
+ * @throws Error with message "REQUEST_FAILED" if the health check itself fails
+ */
+export async function wakeDatabase(): Promise<void> {
+  const res = await fetch('/api/health');
+  if (!res.ok) throw new Error('REQUEST_FAILED');
+}

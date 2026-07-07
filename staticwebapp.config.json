@@ -8,6 +8,6 @@
   ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/api/*", "/*.{css,js,ico,png,jpg,gif,svg,woff,woff2}"]
+    "exclude": ["/api/*", "/*.{css,js,ico,png,jpg,gif,svg,woff,woff2,mp3}"]
   }
 }

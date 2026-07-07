@@ -85,7 +85,7 @@ function FieldDisplay({
         type="button"
         onClick={onFocus}
         disabled={disabled || locked}
-        className="flex items-center h-[72px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] disabled:opacity-40 transition-colors"
+        className={`flex items-center h-[72px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 disabled:opacity-40 transition-colors ${active && !disabled && !locked ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
       >
         <span className="font-data text-[32px] font-medium text-white tracking-[0.04em]">
           {value || <span className="text-[#444]">—</span>}
@@ -220,6 +220,13 @@ export function SDPPage() {
   const aisleValueRef = useRef(aisleField.value);
   aisleValueRef.current = aisleField.value;
 
+  // Same stale-closure hazard as aisleValueRef above: handlePalletScan is registered with
+  // palletField once per entry into 'entry' state and not re-registered when consolidating
+  // toggles, so reading `consolidating` directly there would always see its value from
+  // whenever the screen last reset (typically false) — read the ref instead.
+  const consolidatingRef = useRef(consolidating);
+  consolidatingRef.current = consolidating;
+
   // Controls which field gets focus when returning to entry state.
   const postResetFocusRef = useRef<'aisle' | 'pallet'>('aisle');
 
@@ -345,7 +352,7 @@ export function SDPPage() {
           ...(sizeVal    && { size: sizeVal }),
           ...(storageVal && { storageCode: storageVal }),
           ...(zoneOverride != null && { zone: zoneOverride }),
-          consolidating,
+          consolidating: consolidatingRef.current,
         }),
       });
 
@@ -361,7 +368,7 @@ export function SDPPage() {
       }, ...h]);
 
       if (result.alreadyStored && result.pallet.currentLocation) {
-        if (consolidating) {
+        if (consolidatingRef.current) {
           playAlert('info');
           setMessage({ type: 'info', text: `Pallet ${result.pallet.id} currently stored in ${fmtLocation(result.pallet.currentLocation)} — directing as move` });
         } else {

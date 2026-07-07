@@ -21,9 +21,12 @@ interface LocationEntryFieldsProps {
  */
 export function LocationEntryFields({ onResolved, autoFocus = true }: LocationEntryFieldsProps) {
   const { hidePanel } = useNumpad();
-  const aisleField = useNumpadField();
-  const binField = useNumpadField();
-  const levelField = useNumpadField();
+  // maxLength auto-advances once the fixed-length manual entry is complete (3/3/2 digits);
+  // a full 8-digit scanner override still lands correctly since NumpadContext's
+  // isScanningRef suppresses maxLength auto-submit while deliverScan is mid-injection.
+  const aisleField = useNumpadField('numpad', 3);
+  const binField = useNumpadField('numpad', 3);
+  const levelField = useNumpadField('numpad', 2);
 
   /** Registers the Aisle field's numpad handler and opens the panel. */
   function focusAisleField() {
@@ -86,21 +89,21 @@ export function LocationEntryFields({ onResolved, autoFocus = true }: LocationEn
     <div className="flex gap-3">
       <div className="flex flex-col gap-1 w-[120px]">
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Aisle</span>
-        <button type="button" onClick={focusAisleField} className="flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] transition-colors">
+        <button type="button" onClick={focusAisleField} className={`flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${aisleField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}>
           <span className="font-data text-[22px] font-medium text-white">{aisleField.value || <span className="text-[#444]">—</span>}</span>
           {aisleField.isActive && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
         </button>
       </div>
       <div className="flex flex-col gap-1 w-[120px]">
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Bin</span>
-        <button type="button" onClick={focusBinField} className="flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] transition-colors">
+        <button type="button" onClick={focusBinField} className={`flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${binField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}>
           <span className="font-data text-[22px] font-medium text-white">{binField.value || <span className="text-[#444]">—</span>}</span>
           {binField.isActive && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
         </button>
       </div>
       <div className="flex flex-col gap-1 w-[100px]">
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Level</span>
-        <button type="button" onClick={focusLevelField} className="flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] transition-colors">
+        <button type="button" onClick={focusLevelField} className={`flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${levelField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}>
           <span className="font-data text-[22px] font-medium text-white">{levelField.value || <span className="text-[#444]">—</span>}</span>
           {levelField.isActive && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
         </button>

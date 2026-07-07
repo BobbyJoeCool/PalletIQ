@@ -11,6 +11,11 @@ interface NumpadContextValue {
   setKeyHandler: (handler: ((key: string) => void) | null, fieldId?: string | null) => void;
   handleKey: (key: string) => void;
   deliverScan: (value: string) => void;
+  /** True while deliverScan is injecting a scanned value character-by-character. Lets
+   *  useNumpadField's maxLength auto-advance ignore keystrokes from a scan-in-progress,
+   *  so a longer scanner override (e.g. a full 8-digit barcode into a 3-digit Aisle field)
+   *  isn't cut short by a shorter field's auto-submit before the whole value lands. */
+  isScanningRef: React.RefObject<boolean>;
 }
 
 const NumpadContext = createContext<NumpadContextValue | null>(null);
@@ -29,17 +34,20 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   const [activePanel, setActivePanel] = useState<InputPanel>('none');
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const keyHandlerRef = useRef<((key: string) => void) | null>(null);
+  const isScanningRef = useRef(false);
 
   /** Opens the numeric numpad panel. */
   const showNumpad = useCallback(() => setActivePanel('numpad'), []);
   /** Opens the full QWERTY keyboard panel. */
   const showKeyboard = useCallback(() => setActivePanel('keyboard'), []);
-  /** Closes whichever input panel is currently open. */
-  const hidePanel = useCallback(() => setActivePanel('none'), []);
 
   /**
    * Registers a key handler for the currently focused field and sets the active field ID.
-   * Pass null to clear the active handler (e.g. when navigating away from a screen).
+   * Pass null to clear the active handler and close whichever panel is open — "no field is
+   * focused" and "no panel is showing" are kept as one atomic state so a page can't leave a
+   * field's highlight stuck on after the panel closes (or vice versa) by only clearing one
+   * of the two. Individual screens' own hidePanel() calls rely on this: they mean "we're done
+   * with input here," which should always also drop the stale active-field highlight.
    *
    * @param handler - Function that receives individual key strings ('0'–'9', '⌫', 'Enter', 'OK', etc.)
    * @param fieldId - Stable ID for the field (from useId); used to track which field is active
@@ -47,7 +55,11 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   const setKeyHandler = useCallback((handler: ((key: string) => void) | null, fieldId: string | null = null) => {
     keyHandlerRef.current = handler;
     setActiveFieldId(fieldId);
+    if (handler == null) setActivePanel('none');
   }, []);
+
+  /** Closes whichever input panel is currently open and clears the active field/handler. */
+  const hidePanel = useCallback(() => setKeyHandler(null), [setKeyHandler]);
 
   /**
    * Dispatches a single key string to the active field handler.
@@ -70,13 +82,15 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   const deliverScan = useCallback((value: string) => {
     const handler = keyHandlerRef.current;
     if (!handler) return;
+    isScanningRef.current = true;
     handler('CLEAR');
     for (const ch of value) handler(ch);
+    isScanningRef.current = false;
     handler('Enter');
   }, []);
 
   return (
-    <NumpadContext.Provider value={{ activePanel, activeFieldId, showNumpad, showKeyboard, hidePanel, setKeyHandler, handleKey, deliverScan }}>
+    <NumpadContext.Provider value={{ activePanel, activeFieldId, showNumpad, showKeyboard, hidePanel, setKeyHandler, handleKey, deliverScan, isScanningRef }}>
       {children}
     </NumpadContext.Provider>
   );

@@ -22,7 +22,7 @@ function FieldDisplay({
         type="button"
         onClick={onFocus}
         className={`flex items-center h-[64px] px-4 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${
-          highlight ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'
+          highlight || active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'
         }`}
       >
         <span className="font-data text-[24px] font-medium text-white">

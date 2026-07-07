@@ -15,6 +15,9 @@ export interface GridLevel {
 
 interface AisleGridProps {
   levels: GridLevel[];
+  /** Shrinks row height and header padding for panes shorter than ELZ's full-page one
+   *  (e.g. STG's bottom-half zone map). Default false keeps ELZ pixel-identical. */
+  dense?: boolean;
 }
 
 const ZONES = [1, 2, 3, 4] as const;
@@ -32,7 +35,7 @@ function cellKey(zone: number, side: GridSide): string {
  * are highlighted red. Read-only for every role — no cell interaction (per ELZ.md).
  * Shared between ELZ (built) and STG (deferred — design session required).
  */
-export function AisleGrid({ levels }: AisleGridProps) {
+export function AisleGrid({ levels, dense = false }: AisleGridProps) {
   // Level 1 at bottom, highest level at top.
   const rows = [...levels].sort((a, b) => b.level - a.level);
 
@@ -46,7 +49,7 @@ export function AisleGrid({ levels }: AisleGridProps) {
             {SIDES.map((side) => (
               <div
                 key={cellKey(zone, side)}
-                className="flex-1 py-2 text-center border-l border-[#2A2A2A] first:border-l-0"
+                className={`flex-1 text-center border-l border-[#2A2A2A] first:border-l-0 ${dense ? 'py-1' : 'py-2'}`}
               >
                 <span className="font-ui text-[13px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
                   Z{zone} {side === 'odd' ? 'Odd' : 'Even'}
@@ -75,7 +78,7 @@ export function AisleGrid({ levels }: AisleGridProps) {
                     return (
                       <div
                         key={cellKey(zone, side)}
-                        className={`flex-1 h-[46px] flex items-center justify-center border-l border-[#1A1A1A] first:border-l-0 ${
+                        className={`flex-1 flex items-center justify-center border-l border-[#1A1A1A] first:border-l-0 ${dense ? 'h-[32px]' : 'h-[46px]'} ${
                           cell?.contraction ? 'bg-[#4A0000]' : 'bg-[#0A0A0A]'
                         }`}
                       >

@@ -239,11 +239,12 @@ export function PIIPage() {
         <button
           type="button"
           onClick={focusPalletField}
-          className="flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] transition-colors"
+          className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${palletField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
         >
           <span className="font-data text-[26px] font-medium text-white">
             {palletField.value || <span className="text-[#444]">—</span>}
           </span>
+          {palletField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
         </button>
       </div>
 

@@ -120,7 +120,7 @@ function FieldDisplay({
         type="button"
         onClick={onFocus}
         disabled={disabled}
-        className="flex items-center h-[72px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#555] disabled:opacity-40 transition-colors"
+        className={`flex items-center h-[72px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 disabled:opacity-40 transition-colors ${active && !disabled ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
       >
         <span className="font-data text-[32px] font-medium text-white tracking-[0.04em]">
           {value || <span className="text-[#444]">—</span>}

@@ -6,6 +6,11 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.0.5 — 2026-07-06](#105--2026-07-06)
+- [1.0.4 — 2026-07-06](#104--2026-07-06)
+- [1.0.3 — 2026-07-06](#103--2026-07-06)
+- [1.0.2 — 2026-07-06](#102--2026-07-06)
+- [1.0.1 — 2026-07-06](#101--2026-07-06)
 - [1.0.0 — 2026-07-06](#100--2026-07-06)
 - [0.9.7 — 2026-07-06](#097--2026-07-06)
 - [0.9.6 — 2026-07-06](#096--2026-07-06)
@@ -39,7 +44,7 @@ conversation and build plan when picked up.
 
 Grouped by screen. Each item is either a bug (something's broken) or a feature change (works
 today, wanted differently) — tagged `[Bug]` or `[Feature Change]`. Reports filed via
-[DevNotes/Bug-Reports/ReportTemplate.md](DevNotes/Bug-Reports/ReportTemplate.md) land here. Items without a tag below
+[DevNotes/ReportTemplate.md](DevNotes/ReportTemplate.md) land here. Items without a tag below
 predate that convention and were found during the 2026-07-05 full Playwright run (61 passed / 21
 failed) — see
 [DevNotes/TestLogs/playwright-run-2026-07-05.md](DevNotes/TestLogs/playwright-run-2026-07-05.md)
@@ -64,7 +69,6 @@ for full detail, error text, and reproduction steps.
 
 ### Manual Put (MNP)
 
-- [ ] "Pallet not found" error message doesn't appear for an unknown pallet ID (`mnp.spec.ts:36`)
 - [ ] Strict-mode collision on the "9" numpad button — two numeric keypads appear to be mounted
       at once (`mnp.spec.ts:53`)
 
@@ -92,8 +96,6 @@ for full detail, error text, and reproduction steps.
 - [ ] "Pallet not found" error message doesn't appear for an unknown pallet ID (`sdp.spec.ts:61`)
 - [ ] Strict-mode collision on the "9" numpad button, same family as the MNP one above
       (`sdp.spec.ts:70`)
-- [ ] Consolidating-move message renders with `warning` tone instead of the spec'd `info` tone
-      (`sdp.spec.ts:96`)
 - [ ] "Wrong location — directed to …" error doesn't appear on an incorrect confirm
       (`sdp.spec.ts:105`)
 - [ ] "Put complete — …" success message doesn't appear on a correct confirm (`sdp.spec.ts:114`)
@@ -106,7 +108,7 @@ for full detail, error text, and reproduction steps.
       same text (`stg.spec.ts:111`)
 - **Note:** the two items above are against STG's *old* layout. STG is mid-redesign as of this
   writing (pallet-rider-triple graphic, Master Control restructure — see
-  `DevNotes/Logs/version-1_0_0.md`'s 11.2 entry); the follow-up work for that redesign is tracked
+  `DevNotes/Logs/Pre-V1_0_0/phase-11.md`'s 11.2 entry); the follow-up work for that redesign is tracked
   separately right below rather than folded into the old-layout items above.
 
 ### STG Redesign Follow-Ups
@@ -116,6 +118,190 @@ for full detail, error text, and reproduction steps.
 - [ ] Rewrite `tests/e2e/stg.spec.ts` against the new DOM — replaces the two old-layout items
       above rather than fixing them in place; add new coverage for Master Control's Aisle field
       feeding "Fill All" and for the zone map's idle → loaded states
+
+---
+
+## [1.0.5] — 2026-07-06
+
+### 1.0.5 — Fixed
+
+All 6 items filed against STG in `Documentation/Bug-Reports/v0.9.1-BugReport.md`'s STG section:
+
+- **Master info didn't fully pull in when navigating to STG from ELZ/ELA.** Both screens' "Stage
+  Aisle" navigation only ever passed `{ aisle }` in router state, even though ELZ already had
+  Storage Code in scope and ELA had Storage Code *and* Size — STG's own pre-population effect
+  already fully supported both, just never received them. `ELZPage.tsx` and `ELAPage.tsx` now
+  pass their Storage Code (and, for ELA, Size) along; STG's gate loosened from requiring both
+  fields together to accepting Storage Code alone (ELZ's case) or with Size (ELA's case).
+- **Second/third stacks conflicted with the first stack's location, and fork updates didn't
+  propagate to other stacks.** Both bugs shared one root cause: each fork stack's live
+  destination-location preview queried the backend independently, with no notion of "already
+  claimed by a sibling stack's uncommitted preview" — so two stacks sharing an Aisle/Storage
+  Code/Size (e.g. via Fill All) computed identical candidate lists, and neither ever refreshed
+  when a sibling changed or staged. Fixed with client-side priority-order exclusion: Stack 0
+  outranks Stack 1 outranks Stack 2 (matching the fork graphic's left-to-right layout) — each
+  stack's location fetch now excludes whatever a higher-priority sibling currently holds, and
+  re-fetches whenever that sibling's holdings change (including clearing to none after that
+  sibling stages). One-directional by design, to avoid two stacks' effects invalidating each
+  other in a loop; documented as a known, accepted limitation that a lower stack changing
+  *after* a higher one already computed its list won't retroactively invalidate the higher one
+  — display-only, since the stage endpoint re-validates every location as still empty at write
+  time and never double-books.
+  - Caught and fixed during implementation: the exclusion loop was initially bounded by attempt
+    count rather than results actually kept, which would have inflated `shortfall` by the
+    exclusion count alone — corrected to bound by results length instead.
+  - Caught and fixed during live verification: the exclusion computation's own dependency array
+    initially (and incorrectly) included a stack's *own* locations for the two higher-indexed
+    stacks, creating a self-triggering refetch loop that perpetually cancelled the lowest-priority
+    stack's fetch before it could ever apply — fixed by deriving each stack's dependency from
+    only its lower-priority siblings' locations, never its own.
+- **Fill All button never reflected quantity entry.** Its enabled state depended only on Master
+  Control's Aisle/Storage Code/Size, never on whether the stacks it fills still needed anything —
+  so it stayed identically enabled no matter how many stacks already had a Quantity, even once
+  there was nothing left for it to do. Now also disables once every stack already has a Quantity.
+- **Dynamic sizing for staging locations; bold red final location** (Feature Change). The
+  per-stack "Pallets Go To" list had no size variation and no distinction for the last entry.
+  Now renders larger when 4 or fewer total locations are requested, and bolds+reddens the final
+  assigned location.
+- **Narrower rows for the STG zone map** (Feature Change). `AisleGrid` (shared with ELZ) had a
+  single hardcoded row height that fit ELZ's full-page pane but not STG's shorter bottom-half
+  one. Added an optional `dense` prop (default off, so ELZ is pixel-identical); STG's zone map
+  now passes it for visibly narrower rows.
+
+### 1.0.5 — Notes
+
+- No API/backend or schema changes — all six fixes are frontend-only.
+- Verified live against the running dev server via scripted Playwright sessions (real login, real
+  staging data — not the full e2e suite, so no shared-live-DB mutation risk beyond the staging
+  actions themselves, which are a normal part of using the screen): confirmed Storage Code/Size
+  carryover from both ELZ and ELA, confirmed Fill All's disabled state responds to quantity entry,
+  confirmed three stacks configured identically via Fill All now get three genuinely distinct
+  destination locations with no overlap, confirmed a staged stack resets and its message bar text
+  is correct, and confirmed the zone map's rows are visibly narrower than ELZ's.
+
+---
+
+## [1.0.4] — 2026-07-06
+
+### 1.0.4 — Fixed
+
+- **Focused-field highlighting was inconsistent app-wide.** ELZ, ELA's Storage Code field, PII's
+  Pallet ID field, and IID's DPCI/UPC fields showed no active-state indicator at all — the field
+  you were about to type into looked identical to every other field. Every numpad/keyboard-driven
+  field now turns its border red (`border-[#CC0000]`) in addition to the existing blinking-cursor
+  treatment while it's the active input target, applied consistently across every screen
+  (`MNPPage.tsx`, `SDPPage.tsx`, `PARPage.tsx`, `STGPage.tsx`, `PIPPage.tsx`,
+  `LocationEntryFields.tsx`, and the four previously-missing screens above).
+- **The on-screen keyboard/numpad could stay open (or a field could stay highlighted) after a
+  screen was "done" with it.** Several submit handlers (e.g. ELZ's Aisle/Storage Code confirm)
+  called `hidePanel()` to close the panel but never cleared `NumpadContext`'s active-field
+  handler/ID, so the just-submitted field kept showing as "focused" indefinitely — the highlight
+  and the panel's open/closed state could drift out of sync depending on which of the two a given
+  screen remembered to call. Fixed at the root: `NumpadContext`'s `setKeyHandler(null)` (what
+  `hidePanel()` now calls) always clears both the active field *and* the panel together, so "no
+  field is focused" and "no panel is showing" can no longer disagree. No per-screen call sites
+  needed to change.
+- **LII/WLH's three-field Aisle/Bin/Level entry didn't actually auto-advance**, despite both
+  screens' specs (`DevNotes/Screen-Specs/LII.md`, `WLH.md`) already calling for it ("auto-advances
+  ... when the expected digit count is reached") — the existing code only checked the digit count
+  inside the OK/Enter submit handler, so a worker still had to tap OK after typing each 3-digit
+  Aisle/Bin or 2-digit Level instead of it happening automatically. Added an optional `maxLength`
+  to `useNumpadField()`: once typed input reaches that length, the field auto-submits (and the
+  screen's existing focus-chaining takes it to the next field) without waiting for OK. Applied
+  only to `LocationEntryFields.tsx`'s Aisle(3)/Bin(3)/Level(2) — the one spot in the app where a
+  field's length is already a hard contract in the code, not inferred. Guarded by a new
+  `isScanningRef` on `NumpadContext` so this doesn't clip a full 8-digit barcode scanner override
+  mid-injection: `deliverScan()` marks itself as scanning while it injects a value character by
+  character, and `maxLength` auto-submit is suppressed for the duration.
+
+### 1.0.4 — Notes
+
+- Scope was intentionally limited to fields with a length already enforced in code
+  (`LocationEntryFields.tsx`). Other fields that are *probably* fixed-length in practice (8-digit
+  location barcodes elsewhere, DPCI format) don't currently enforce that length in the frontend —
+  the API validates instead — so auto-advancing them would have been a guess rather than a known
+  contract; left alone rather than risk truncating a field that turns out to accept a different
+  length than assumed.
+- Verified all three behaviors live against the running dev server with a scripted Playwright
+  session (real login, no mocking): confirmed ELZ's Aisle field highlights on focus and
+  un-highlights when focus moves to Storage Code, confirmed the numpad panel closes on navigating
+  to Home, and confirmed LII's Bin field auto-highlights immediately after typing "123" into Aisle
+  with no OK tap. Screenshots and script discarded after verification (scratch only, not
+  committed).
+
+---
+
+## [1.0.3] — 2026-07-06
+
+### 1.0.3 — Fixed
+
+- **Alert sound delay (~1s gap between message and sound).** `playAlert()` built a fresh
+  `new Audio(src)` on every call with no preload, so the browser had to fetch/decode the mp3
+  before playback could start. Now each tone's `HTMLAudioElement` is created once at module load
+  with `preload = 'auto'` and reused — `playAlert()` just resets `currentTime` and calls `play()`
+  on the cached element.
+- **SDP: "Consolidating" toggle silently ignored on the next pallet scan**, causing the
+  already-stored move message to render with the `warning` tone instead of the spec'd `info`
+  tone whenever consolidating was on (filed as a tone bug in the Unreleased backlog, but the tone
+  was a symptom, not the cause). Root cause: `handlePalletScan` is registered with `palletField`
+  once per entry into `entry` state (`focusPalletField`'s registration effect depends only on
+  `screenState`), so it never picked up a `consolidating` toggle that happened after that
+  registration — same stale-closure hazard the file already works around for `aisleValueRef`.
+  Fixed by reading `consolidating` through a ref (`consolidatingRef`), same pattern.
+- **MNP: "✗ PID" demo button showed "Scan failed" instead of "Pallet not found."** It delivered
+  the non-numeric string `'INVALID-PID-000'`, which fails the API's `parseInt` numeric check
+  (`INVALID_INPUT`, 400) before ever reaching the not-found lookup (`PALLET_NOT_FOUND`, 404).
+  Every other "not found" demo button in the app (LII, PII, WLH, IID, PAR) uses a numeric
+  placeholder ID that simply doesn't exist in the DB instead. Changed MNP's to `'999999999'` to
+  match.
+- **ELZ: zone summary panel's StorageCode-Size rows had no defined sort order**, per a
+  previously-filed Feature Change in `Documentation/Bug-Reports/v1.0.0-BugReport.md`. The
+  `/api/locations/empty-by-zone` handler now sorts each zone's breakdown ascending by size
+  (`XS, HS, S, M, L`, matching the canonical `SIZES` order already used by `ELAPage.tsx` and
+  `STGPage.tsx`); storage code doesn't vary within a zone's breakdown since it's already scoped
+  to the queried Storage Code.
+
+---
+
+## [1.0.2] — 2026-07-06
+
+### 1.0.2 — Fixed
+
+- **Alert sounds (`playAlert()` — Error/Warning/Info tones) never played in production** (filed
+  as a Major bug in `Documentation/Bug-Reports/v1.0.0-BugReport.md`). Root-caused to
+  `staticwebapp.config.json`'s `navigationFallback.exclude` list: every other static asset
+  extension (`css, js, ico, png, jpg, gif, svg, woff, woff2`) was excluded from the SPA fallback
+  rewrite, but `mp3` wasn't. Per Azure Static Web Apps' own documented behavior, a request for a
+  path whose extension isn't in the exclude list gets rewritten to `/index.html` **even if a real
+  file exists at that path** (confirmed against Microsoft's own example, where an existing
+  `icon.svg` file is overridden by the fallback purely because `svg` isn't in that example's
+  filter) — so every request for `/assets/Error-*.mp3` etc. was silently served `index.html`
+  instead of the actual audio file. The browser then failed to decode HTML as audio, and
+  `playAlert()`'s `.catch()` swallowed the rejection silently, matching the reported symptom
+  exactly (worked in local dev, which doesn't have this SPA-fallback layer at all).
+  - Fix: added `mp3` to `staticwebapp.config.json`'s `navigationFallback.exclude` list.
+  - Verified the real built mp3 files serve correctly (`Content-Type: audio/mpeg`, `200`) via the
+    Azure Static Web Apps CLI emulator against the fixed config. Could not fully reproduce the
+    *broken* state locally — the emulator is more lenient than real production and serves
+    existing files directly regardless of the exclude list (it explicitly warns "may not match
+    the cloud environment exactly") — so the root-cause diagnosis relies on Microsoft's
+    documented routing behavior rather than a local repro of the failure. Recommend confirming
+    sound plays correctly once this is deployed to production.
+
+---
+
+## [1.0.1] — 2026-07-06
+
+### 1.0.1 — Added
+
+- **"Wake database" link on the login screen.** A small, low-emphasis link below the badge-scan/
+  zNumber panels that hits a new unauthenticated `GET /api/health` endpoint (runs a trivial
+  `SELECT 1`) to force Azure SQL serverless to resume if it's currently auto-paused. Shows a
+  spinner + "Waking up database… this can take up to a minute" while in flight (a cold resume can
+  take 15–60+ seconds), then "Database ready" or an error message. Added directly in response to
+  the Azure SQL auto-pause/resume timeouts that caused real production login failures during
+  `[0.9.0]`–`[0.9.7]`'s deployment work — this gives a worker a way to pre-warm the database
+  instead of the identify/login calls themselves timing out cold.
 
 ---
 
