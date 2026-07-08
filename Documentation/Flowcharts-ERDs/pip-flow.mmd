@@ -42,7 +42,15 @@ flowchart TD
     PID_OK -->|WRONG_PULL_FUNCTION| ERR_PID2[Error: Pull function mismatch]
     PID_OK -->|OK| SUCCESS
 
-    ALT_VERIFY --> ALT_OK{Result?}
+    ALT_VERIFY --> ALT_UPC{UPC match?}
+    ALT_UPC -->|Yes| ALT_OK
+    ALT_UPC -->|No| ALT_FN{pullFunction?}
+    ALT_FN -->|CA/CF| ALT_BINONLY[Location barcode\n6- or 8-digit\naisle+bin only — level ignored]
+    ALT_FN -->|FP| ALT_LEVEL[Location barcode\nfull 8-digit required\naisle+bin AND level must match]
+    ALT_BINONLY --> ALT_OK
+    ALT_LEVEL --> ALT_OK
+
+    ALT_OK{Result?}
     ALT_OK -->|ALTERNATE_MISMATCH| ERR_ALT[Error: Invalid Alternate ID\naltField cleared + re-focused]
     ALT_OK -->|WRONG_PULL_FUNCTION| ERR_ALT2[Error: Pull function mismatch]
     ALT_OK -->|OK| SUCCESS

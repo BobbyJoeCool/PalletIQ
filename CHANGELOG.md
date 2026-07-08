@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.0.9 — 2026-07-08](#109--2026-07-08)
 - [1.0.6 — 2026-07-07](#106--2026-07-07)
 - [1.0.5 — 2026-07-06](#105--2026-07-06)
 - [1.0.4 — 2026-07-06](#104--2026-07-06)
@@ -119,6 +120,66 @@ for full detail, error text, and reproduction steps.
 - [ ] Rewrite `tests/e2e/stg.spec.ts` against the new DOM — replaces the two old-layout items
       above rather than fixing them in place; add new coverage for Master Control's Aisle field
       feeding "Fill All" and for the zone map's idle → loaded states
+
+---
+
+## [1.0.9] — 2026-07-08
+
+### 1.0.9 — Added
+
+- **"Reseed Test Data" dev-tools control on the login screen**, above the badge scanner, alongside
+  a relocated and enlarged "Wake Database" button — both styled in amber, deliberately outside the
+  app's red/navy palette, so the row reads as a testing utility rather than normal app
+  functionality. Reseed wipes every `PUT_PENDING` pallet and not-yet-pulled label
+  (`AVAILABLE`/`PRINTED`), then regenerates 24 pending put pallets per storage-code/size combo and
+  up to 24 pull labels per storage-code/pull-function combo — labels follow the same CA/CF/FP
+  realism rules as the existing seed scripts (XS always CA; level 1 non-XS non-emptying is CF; an
+  emptying non-XS pull is FP; anything else non-XS is CA), sourced only from pallets already
+  stored at a real location.
+
+### 1.0.9 — Fixed
+
+- **LII and WLH manually typed locations always reported "location not found."** The shared
+  Aisle→Bin→Level entry component's auto-advance chain registered its handlers once, at mount, so
+  the final Aisle+Bin+Level concatenation always read stale, frozen-empty values regardless of
+  what was actually typed. Scanning a full barcode was unaffected (it resolves off a single
+  field's own value). Fixed by reading the accumulated Aisle/Bin values from refs that stay live
+  across the whole entry, instead of the stale field objects.
+- **ELA's storage code field didn't blur or dismiss the keyboard after entry.** Unlike every other
+  field in the app, its confirm handler never released the shared input panel. ELZ was already
+  correct; only ELA needed the fix.
+- **PIP's pull-verification success message could be overwritten by a spurious "Label not
+  verified" warning** even when the previous pull had already verified successfully. Root cause:
+  the screen relied on a 50ms delayed re-focus to register the next label scan, and a fast enough
+  scan of the next label could land on the just-cleared, still-registered previous field instead.
+  Now re-focuses synchronously on verification success, closing the race window.
+  ([#45](https://github.com/BobbyJoeCool/PalletIQ/issues/45))
+- **PIP's Alternate ID verification on Full Pallet (FP) pulls didn't check level** — only aisle+bin
+  were compared, same as Carton Air/Carton Floor, even though FP empties the entire location and a
+  bin can hold several stacked levels. FP now requires the full 8-digit barcode and checks level
+  too; CA/CF are unchanged. ([#48](https://github.com/BobbyJoeCool/PalletIQ/issues/48))
+- **SDP's Zone field summoned the native iPad keyboard instead of the app's on-screen numpad.**
+  It was the only field on the screen built as a raw HTML `<input>` instead of going through the
+  app's virtual-field system, which is why every other field never had this problem. Converted to
+  match every other field's pattern.
+- **SDP allowed navigating away from an active reservation via any Pallet ID/Location ID chip**
+  (the "Directed to" and "Move from" chips, and every row in the persistent Put History log),
+  bypassing the screen lock meant to prevent exactly that — Header's Back/Home/Jump/Logout were
+  already correctly disabled during an active reservation, but these chips navigate directly and
+  had no lock check at all. Fixed at the shared `LiveId` component level, so the fix applies
+  everywhere `LiveId` is used, not just SDP.
+
+### 1.0.9 — Changed
+
+- **PIP** — the currently scanned label's Location is now bolded.
+- **SDP** — Aisle now auto-submits at 3 digits (auto-advance to Pallet ID already worked once
+  submitted). Storage Code now auto-submits at 2 characters and advances to Pallet ID (previously
+  neither happened). Size gained a row of quick-pick buttons for the 5 standard sizes, in addition
+  to the field's existing free-text entry.
+- **MNP** — the "✓ Empty"/"~ Occupied" demo destination buttons now pre-fill the Level
+  Confirmation modal with the actual level of the location they fetched, since the system already
+  knows it and the worker otherwise has no way to. A real scanned destination still requires
+  manual level entry, unchanged.
 
 ---
 

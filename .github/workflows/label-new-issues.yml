@@ -1,0 +1,42 @@
+name: Label new issues by severity
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+
+            // Issue forms render each dropdown as "### <Label>\n\n<Answer>" in the body.
+            // Matches both templates' dropdown ("Severity" on Bug Report, "Priority" on
+            // Feature Change Request).
+            const match = body.match(/###\s*(?:Severity|Priority)\s*\n+\s*([^\n]+)/i);
+            if (!match) return; // not filed from either issue form (e.g. a blank issue)
+
+            const answer = match[1].trim();
+            const labelByAnswer = {
+              'Blocker': 'blocker',
+              'Major/Important': 'major',
+              'Minor': 'minor',
+              'Nice-to-have/Cosmetic': 'nice-to-have',
+              'Distant Future': 'distant-future',
+              'Not sure / needs triage': 'needs-triage',
+            };
+            const label = labelByAnswer[answer];
+            if (!label) return;
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: [label],
+            });

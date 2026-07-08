@@ -110,6 +110,8 @@ A location barcode encodes Aisle (3 digits) + Bin (3 digits) + Level (2 digits) 
 
 Because handheld scanners cannot always reach upper levels, **the system reads only the first 6 digits (Aisle + Bin) of any scanned location barcode and discards the level.** A put or pull is confirmed at the bin level, not the specific level, regardless of which level's barcode was physically scanned.
 
+**Exception — PIP Alternate ID on a Full Pallet (FP) pull.** Because FP takes every carton and empties the location entirely, and a single bin can have several stacked levels each potentially holding a different pallet/DPCI, PIP's Alternate ID verification requires the full 8-digit barcode and checks that the level matches too when the pull function is FP — a 6-digit (level-less) Alternate ID is rejected for FP. CA and CF keep the bin-level-only rule described above.
+
 ---
 
 ## Pull

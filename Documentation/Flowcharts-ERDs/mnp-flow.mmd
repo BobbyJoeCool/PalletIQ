@@ -38,7 +38,7 @@ flowchart TD
     S2 --> CLR[Worker taps Clear button\nresetToReady\nback to ready]
     CLR --> S1
 
-    S3[State: level_modal\nLevelModal overlay shown\ndestinationField value stored in pendingLocation]
+    S3[State: level_modal\nLevelModal overlay shown\ndestinationField value stored in pendingLocation\nEmpty/Occupied demo buttons pre-fill the level input\nreal scanned destinations leave it blank]
 
     S3 --> LEVEL_SEL[Worker enters level number\nLevelModal confirm button\nhandleLevelSelect called]
 

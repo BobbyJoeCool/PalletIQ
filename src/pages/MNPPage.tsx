@@ -118,13 +118,20 @@ function DemoBtn({ label, color, onClick }: { label: string; color: string; onCl
  * not call any API — level is passed up to MNPPage via onSelect for inclusion in the confirm call.
  *
  * @param onSelect - Called with the chosen level number on Enter tap
+ * @param initialLevel - Pre-fills the input when the destination came from the Empty/Occupied
+ *   demo buttons, which fetch a real location and therefore already know its exact level — a
+ *   worker triggering one of those has no way to know that level themselves. Still requires an
+ *   explicit Enter tap to confirm; a real scanned destination has no known level and leaves this
+ *   unset, same as before.
  */
 function LevelModal({
   onSelect,
+  initialLevel,
 }: {
   onSelect: (level: number) => void;
+  initialLevel?: number | null;
 }) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(initialLevel != null ? String(initialLevel) : '');
 
   /** Appends a digit to the level input, capped at 2 digits. */
   function pressDigit(d: string) {
@@ -239,6 +246,9 @@ export function MNPPage() {
   const [pendingLocation, setPendingLocation] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  // Pre-fill for LevelModal when the destination came from the Empty/Occupied demo buttons
+  // (see demoLevelHintRef below) — null for a real scanned destination, which has no known level.
+  const [levelHint, setLevelHint] = useState<number | null>(null);
 
   // Refs for async callbacks.
   const screenStateRef    = useRef(screenState);
@@ -251,6 +261,11 @@ export function MNPPage() {
   pendingLocationRef.current = pendingLocation;
 
   const pendingEntryKeyRef = useRef<number | null>(null);
+  // Set immediately before deliverScan() by the Empty/Occupied demo buttons (which already
+  // know the exact level of the location they fetched); consumed once by the very next
+  // handleDestinationEnter call and cleared regardless of outcome, so it never leaks into a
+  // later real scan.
+  const demoLevelHintRef = useRef<number | null>(null);
 
   const palletField      = useNumpadField();
   const destinationField = useNumpadField();
@@ -341,6 +356,7 @@ export function MNPPage() {
     try {
       await apiFetch(`/api/locations/${encodeURIComponent(v)}`, token!);
       setPendingLocation(v);
+      setLevelHint(demoLevelHintRef.current);
       setScreenState('level_modal');
     } catch {
       playAlert('error');
@@ -348,6 +364,7 @@ export function MNPPage() {
       destinationField.focus(handleDestinationEnter);
       setMessage({ type: 'error', text: 'Location not found' });
     } finally {
+      demoLevelHintRef.current = null;
       setLoading(false);
     }
   }
@@ -420,6 +437,7 @@ export function MNPPage() {
   function resetToReady() {
     setScannedPallet(null);
     setPendingLocation(null);
+    setLevelHint(null);
     pendingEntryKeyRef.current = null;
     setScreenState('ready');
     palletField.clear();
@@ -451,20 +469,30 @@ export function MNPPage() {
   /** Delivers a Pallet ID that doesn't exist, simulating a not-found scan. */
   const demoBadPid = useCallback(() => deliverScan('999999999'), [deliverScan]);
 
-  /** Fetches a real empty location id and delivers it as a simulated destination scan. */
+  /**
+   * Fetches a real empty location id and delivers it as a simulated destination scan.
+   * Stashes the fetched location's actual level in demoLevelHintRef so LevelModal can
+   * pre-fill it — the worker has no way to know what level a randomly-picked demo
+   * location is otherwise.
+   */
   const demoEmptyLoc = useCallback(async () => {
     try {
-      const { locationId } = await apiFetch<{ locationId: string }>('/api/demo/location?status=empty', token!);
+      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=empty', token!);
+      demoLevelHintRef.current = level;
       deliverScan(locationId);
     } catch (err) {
       setMessage({ type: 'error', text: `Demo location: ${err instanceof Error ? err.message : 'unavailable'}` });
     }
   }, [token, deliverScan, setMessage]);
 
-  /** Fetches a real already-occupied location id and delivers it as a simulated destination scan. */
+  /**
+   * Fetches a real already-occupied location id and delivers it as a simulated destination
+   * scan. Stashes the fetched location's actual level in demoLevelHintRef, same as demoEmptyLoc.
+   */
   const demoOccupiedLoc = useCallback(async () => {
     try {
-      const { locationId } = await apiFetch<{ locationId: string }>('/api/demo/location?status=occupied', token!);
+      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=occupied', token!);
+      demoLevelHintRef.current = level;
       deliverScan(locationId);
     } catch (err) {
       setMessage({ type: 'error', text: `Demo location: ${err instanceof Error ? err.message : 'unavailable'}` });
@@ -616,7 +644,7 @@ export function MNPPage() {
 
       {/* Level selection modal — State 3 */}
       {screenState === 'level_modal' && (
-        <LevelModal onSelect={handleLevelSelect} />
+        <LevelModal onSelect={handleLevelSelect} initialLevel={levelHint} />
       )}
 
       {holdOpen && scannedPallet?.currentLocation && (

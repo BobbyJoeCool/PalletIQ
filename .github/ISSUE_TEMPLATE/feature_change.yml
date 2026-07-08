@@ -1,0 +1,75 @@
+name: Feature Change Request
+description: PalletIQ works correctly today, but you want it to look or behave differently.
+title: "[Feature Change]: "
+labels: ["feature-change"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A deliberate design change, not a defect — this needs a conversation and a decision
+        before anyone touches code (per `.claude/CLAUDE.md`'s Bias Toward Asking Questions). If
+        something is actually broken instead, use [Bug Report](?template=bug_report.yml) instead.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Priority
+      options:
+        - Blocker
+        - Major/Important
+        - Minor
+        - Nice-to-have/Cosmetic
+        - Distant Future
+        - Not sure / needs triage
+    validations:
+      required: true
+
+  - type: input
+    id: screen
+    attributes:
+      label: Screen / Feature
+      placeholder: "e.g. SDP, MNP, PIP, ELA, ELZ, STG, PII, IID, PAR, LII, WLH, SAR, login, or 'not screen-specific'"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Optional — leave blank if not relevant to this change"
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current / actual behavior
+      placeholder: What does it do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired-behavior
+    attributes:
+      label: Desired / expected behavior
+      placeholder: What should it do instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: General scenario
+      placeholder: Describe the situation where this comes up (feature changes don't need numbered repro steps).
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this matters
+      placeholder: Encouraged for feature changes — what's motivating this? A real workflow friction point, matching a legacy system's behavior, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+      placeholder: Mockups, screenshots, anything else that doesn't fit above.

@@ -1,0 +1,82 @@
+name: Bug Report
+description: Something in PalletIQ is broken — it does the wrong thing.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Something broken today, not a request to change how it behaves — that's a
+        [Feature Change Request](?template=feature_change.yml) instead.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Blocker
+        - Major/Important
+        - Minor
+        - Nice-to-have/Cosmetic
+        - Not sure / needs triage
+    validations:
+      required: true
+
+  - type: input
+    id: screen
+    attributes:
+      label: Screen / Feature
+      placeholder: "e.g. SDP, MNP, PIP, ELA, ELZ, STG, PII, IID, PAR, LII, WLH, SAR, login, or 'not screen-specific'"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Local dev | Production — browser/device if relevant"
+
+  - type: input
+    id: logged-in-as
+    attributes:
+      label: Logged in as
+      placeholder: "zNumber and role, or 'not logged in'"
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current / actual behavior
+      placeholder: What happens today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired-behavior
+    attributes:
+      label: Desired / expected behavior
+      placeholder: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this matters
+      placeholder: Optional — real workflow friction, safety/compliance, etc.
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+      placeholder: Error messages, screenshots, mockups, anything else that doesn't fit above.

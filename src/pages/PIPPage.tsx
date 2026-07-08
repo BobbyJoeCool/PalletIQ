@@ -327,6 +327,18 @@ export function PIPPage() {
    * Called after a successful pull verification. Plays a success sound, appends a history entry,
    * shows the pull location and remaining quantity in the message bar, then resets all fields
    * and returns to ready state for the next label scan.
+   *
+   * Re-focuses the Label field synchronously here rather than relying solely on the 'ready'
+   * effect's 50ms-delayed focusLabelField() call below — that delay leaves a window where the
+   * PID/Alt field (just cleared, but never explicitly released as NumpadContext's active
+   * handler) is still what a scan gets delivered to. A fast barcode-scanner scan of the next
+   * label can land inside that window, hitting the stale PID/Alt handler instead of
+   * handleLabelScan — which is what was producing issue #45's spurious "Label not verified"
+   * warning even after a pull had already verified successfully: the scan silently mis-routed
+   * to the (now-empty) PID field, no-op'd there, and only the *following* real scan attempt hit
+   * handleLabelScan while still carrying leftover verifying-adjacent state. Registering the
+   * Label handler immediately closes that window; the 'ready' effect's own call afterward is a
+   * harmless redundant no-op re-registration.
    */
   function onPullSuccess(location: string, pulledQty: Qty, updatedQty: Qty) {
     playAlert('info');
@@ -337,6 +349,7 @@ export function PIPPage() {
     labelField.clear();
     pidField.clear();
     altField.clear();
+    focusLabelField();
   }
 
   // ── Focus management by screen state ─────────────────────────────────────
@@ -515,7 +528,7 @@ export function PIPPage() {
                 <div className="flex flex-col mt-1">
                   <DataRow label="Location">
                     {labelData.location.id
-                      ? <LiveId type="location" id={labelData.location.id} />
+                      ? <LiveId type="location" id={labelData.location.id} className="!font-bold" />
                       : <span className="text-[#9A9A9A]">—</span>}
                   </DataRow>
                   <DataRow label="Item">{labelData.label.descShort}</DataRow>

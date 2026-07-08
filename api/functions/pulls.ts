@@ -4,7 +4,7 @@ import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
-import { parseLocationBarcode } from '../lib/locationParser.js';
+import { parseLocationBarcode, parseFullLocationBarcode } from '../lib/locationParser.js';
 
 /**
  * Confirms a label pull via one of two verification paths: Pallet ID or Alternate ID.
@@ -14,8 +14,14 @@ import { parseLocationBarcode } from '../lib/locationParser.js';
  *
  * Alternate ID path: the submitted value is checked against two identifiers in order:
  *   1. Item UPC — looks up the item by UPC and compares its DPCI to the pallet's DPCI.
- *   2. Location barcode — parses the alternate as a 6 or 8-digit barcode and compares
- *      aisle+bin to the pallet's current location (level is intentionally ignored).
+ *   2. Location barcode — parses the alternate as a location barcode and compares to the
+ *      pallet's current location. For CA/CF, a 6- or 8-digit barcode is accepted and only
+ *      aisle+bin are compared (level is intentionally ignored, per outline.md's bin-level
+ *      confirmation rule). For FP, a full 8-digit barcode is required and level must also
+ *      match — FP takes every carton and empties the location entirely, so confirming the
+ *      exact level matters more here than for CA/CF, where a bin can have several stacked
+ *      levels each potentially holding a different pallet/DPCI; a 6-digit FP alternate ID
+ *      is rejected outright (ALTERNATE_MISMATCH) rather than falling back to aisle+bin-only.
  *
  * On success: marks the label PULLED, deducts the label's carton and SSP quantities
  * from the pallet, and writes a PULL activity log entry with before/after quantities.
@@ -92,14 +98,24 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
       itemByUpc.class === pallet.class &&
       itemByUpc.item === pallet.item;
 
-    // If UPC did not match, try matching as a location barcode (Aisle+Bin comparison only).
+    // If UPC did not match, try matching as a location barcode. FP additionally requires
+    // level to match (full 8-digit barcode only); CA/CF stay aisle+bin-only, per above.
     let locationMatch = false;
     if (!upcMatch && pallet.locationAisle != null) {
-      const parsed = parseLocationBarcode(alt);
-      locationMatch =
-        parsed !== null &&
-        parsed.aisle === pallet.locationAisle &&
-        parsed.bin === pallet.locationBin;
+      if (body.pullFunction === 'FP') {
+        const parsed = parseFullLocationBarcode(alt);
+        locationMatch =
+          parsed !== null &&
+          parsed.aisle === pallet.locationAisle &&
+          parsed.bin === pallet.locationBin &&
+          parsed.level === pallet.location?.level;
+      } else {
+        const parsed = parseLocationBarcode(alt);
+        locationMatch =
+          parsed !== null &&
+          parsed.aisle === pallet.locationAisle &&
+          parsed.bin === pallet.locationBin;
+      }
     }
 
     if (!upcMatch && !locationMatch) {

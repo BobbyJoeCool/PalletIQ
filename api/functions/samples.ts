@@ -63,16 +63,20 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
 }
 
 /**
- * Returns a random location ID for MNP's demo location buttons.
+ * Returns a random location ID for MNP's (and LII/WLH's) demo location buttons.
  * Query param `status` controls which locations are eligible:
  *   - "empty" (default) — returns an EMPTY location for the "Scan Empty Location" demo
  *   - "occupied" — returns a STORED location for the "Scan Occupied Location" demo
  *
- * Returns a 6-digit zero-padded location string (AAABBBformat) since only aisle+bin
- * is needed at this stage of the MNP flow.
+ * `locationId` is a 6-digit zero-padded string (AAABBB format) since only aisle+bin is
+ * needed to simulate a destination scan. `level` is also returned — it's the exact level
+ * of the specific Location row this call happened to pick, needed by MNP to pre-fill its
+ * Level Confirmation modal (a worker triggering the demo button has no way to know what
+ * level the randomly-picked location actually is); other callers that don't need it just
+ * ignore the extra field.
  *
  * @param req - HTTP request with query param `status` ("empty" | "occupied", default "empty")
- * @returns `{ locationId: string }` — 6-digit zero-padded string
+ * @returns `{ locationId: string, level: number }` — locationId is a 6-digit zero-padded string
  * @throws 404 NOT_FOUND if no locations match the requested status
  */
 async function sampleLocation(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
@@ -92,13 +96,13 @@ async function sampleLocation(req: HttpRequest, _ctx: InvocationContext): Promis
   const location = await prisma.location.findFirst({
     where,
     skip,
-    select: { aisle: true, bin: true },
+    select: { aisle: true, bin: true, level: true },
   });
 
   if (!location) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
   const id = String(location.aisle).padStart(3, '0') + String(location.bin).padStart(3, '0');
-  return { locationId: id };
+  return { locationId: id, level: location.level };
 }
 
 app.http('sampleLabel', {

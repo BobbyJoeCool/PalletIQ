@@ -12,6 +12,8 @@ import { playAlert } from '../lib/audio';
 import { useNumpadField } from '../lib/useNumpadField';
 import { fmtLocation } from '../lib/fmt';
 
+const SIZES = ['XS', 'HS', 'S', 'M', 'L'];
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface DirectedResult {
@@ -206,11 +208,12 @@ export function SDPPage() {
   loadingRef.current     = loading;
   directedRef.current    = directed;
 
-  const aisleField    = useNumpadField();
+  const aisleField    = useNumpadField('numpad', 3);
   const palletField   = useNumpadField();
   const confirmField  = useNumpadField();
   const sizeField     = useNumpadField('keyboard');
-  const storageField  = useNumpadField('keyboard');
+  const storageField  = useNumpadField('keyboard', 2);
+  const zoneField     = useNumpadField('numpad', 1);
 
   // handlePalletScan can run from a closure captured well before the aisle was typed —
   // the aisle-confirm → focusPalletField chain registers it once, immediately after the
@@ -255,10 +258,28 @@ export function SDPPage() {
     sizeField.focus(() => hidePanel());
   }, [sizeField, hidePanel]);
 
-  /** Registers the IM+ Storage Code override field's keyboard handler; just dismisses the panel on confirm. */
+  /** Quick-pick: sets Size directly to a tapped standard value and ends focus — the field stays typeable via focusSizeField for anything non-standard. */
+  const selectSize = useCallback((v: string) => {
+    sizeField.set(v);
+    hidePanel();
+  }, [sizeField, hidePanel]);
+
+  /** Registers the IM+ Storage Code override field's keyboard handler; dismisses the panel and advances to Pallet ID on confirm. */
   const focusStorageField = useCallback(() => {
-    storageField.focus(() => hidePanel());
-  }, [storageField, hidePanel]);
+    storageField.focus(() => {
+      hidePanel();
+      setTimeout(() => focusPalletField(), 50);
+    });
+  }, [storageField, hidePanel, focusPalletField]);
+
+  /** Registers the IM+ Zone override field's numpad handler; parses the digit and dismisses the panel on confirm. */
+  const focusZoneField = useCallback(() => {
+    zoneField.focus((v) => {
+      const n = parseInt(v.trim(), 10);
+      setZoneOverride(isNaN(n) ? null : n);
+      hidePanel();
+    });
+  }, [zoneField, hidePanel]);
 
   useEffect(() => {
     if (screenState === 'entry') {
@@ -544,12 +565,13 @@ export function SDPPage() {
       aisleField.clear();
       sizeField.clear();
       storageField.clear();
+      zoneField.clear();
       setZoneOverride(null);
     } else {
       postResetFocusRef.current = 'pallet';
       if (!sizeLocked)    sizeField.clear();
       if (!storageLocked) storageField.clear();
-      if (!zoneLocked)    setZoneOverride(null);
+      if (!zoneLocked)    { zoneField.clear(); setZoneOverride(null); }
     }
   }
 
@@ -636,6 +658,19 @@ export function SDPPage() {
                   active={sizeField.isActive}
                   locked={locked}
                 />
+                <div className="flex gap-1">
+                  {SIZES.map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => selectSize(s)}
+                      disabled={locked}
+                      className="flex-1 h-[26px] rounded-[6px] border border-[#3A3A3A] font-ui text-[11px] font-medium text-[#9A9A9A] hover:border-[#555] hover:text-white disabled:opacity-40 transition-colors"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
                 <button
                   type="button"
                   onClick={() => setSizeLocked(l => !l)}
@@ -663,16 +698,12 @@ export function SDPPage() {
                 </button>
               </div>
               <div className="w-[140px] flex flex-col gap-1">
-                <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">Zone</span>
-                <input
-                  type="number"
-                  value={zoneOverride ?? ''}
-                  onChange={e => setZoneOverride(e.target.value ? parseInt(e.target.value) : null)}
-                  disabled={locked}
-                  placeholder="Auto"
-                  min={1}
-                  max={4}
-                  className="h-[72px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] font-data text-[28px] text-white disabled:opacity-40 focus:outline-none focus:border-[#CC0000]"
+                <FieldDisplay
+                  label="Zone"
+                  value={zoneField.value}
+                  onFocus={focusZoneField}
+                  active={zoneField.isActive}
+                  locked={locked}
                 />
                 <button
                   type="button"
