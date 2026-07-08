@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ZnumPad } from '../components/ZnumPad';
 import { MessageBar } from '../components/shell/MessageBar';
 import { MessageBarProvider } from '../context/MessageBarContext';
-import { identify, wakeDatabase } from '../lib/api';
+import { identify, reseedTestData, wakeDatabase } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { useMessageBar } from '../context/MessageBarContext';
 
@@ -22,6 +22,8 @@ function LoginContent() {
   const [znumber, setZnumber] = useState('z');
   const [loading, setLoading] = useState(false);
   const [wakeStatus, setWakeStatus] = useState<'idle' | 'waking' | 'ready' | 'error'>('idle');
+  const [reseedStatus, setReseedStatus] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
+  const [reseedSummary, setReseedSummary] = useState('');
 
   /** Submits the entered zNumber via identify(); on success advances to the PIN screen. */
   const handleSubmit = async () => {
@@ -68,6 +70,25 @@ function LoginContent() {
     }
   };
 
+  /**
+   * Dev-tools control: wipes every PUT_PENDING pallet and not-yet-pulled label
+   * (AVAILABLE/PRINTED) and regenerates a fresh, randomized set of both — see
+   * api/functions/demo-reseed.ts for exactly what's touched. Destructive against the
+   * live database by design; this is a testing utility, not app functionality, which is
+   * why it's styled apart from the rest of the screen.
+   */
+  const handleReseed = async () => {
+    if (reseedStatus === 'working') return;
+    setReseedStatus('working');
+    try {
+      const result = await reseedTestData();
+      setReseedSummary(`${result.putPalletsCreated} put pallets, ${result.labelsCreated} labels`);
+      setReseedStatus('done');
+    } catch {
+      setReseedStatus('error');
+    }
+  };
+
   return (
     <div className="fixed inset-0 flex flex-col bg-black select-none">
       {/* Top: wordmark + headlines */}
@@ -80,6 +101,51 @@ function LoginContent() {
         <p className="font-ui text-[24px] text-[#9A9A9A]">
           Please scan your badge or enter your zNumber
         </p>
+      </div>
+
+      {/* Dev tools — test-data utilities, not part of the normal app flow. Deliberately
+          styled in amber (not the app's red/navy accent palette) so it reads as a
+          utility control rather than app functionality. */}
+      <div className="flex flex-col items-center gap-2 pt-6">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={handleReseed}
+            disabled={reseedStatus === 'working'}
+            className="flex items-center gap-2 h-[56px] px-6 rounded-[10px] border-2 border-[#B8860B] font-ui text-[18px] font-bold bg-[#F5A623] hover:bg-[#FFB84D] text-black disabled:opacity-60 disabled:cursor-default transition-colors"
+          >
+            {reseedStatus === 'working' && (
+              <span className="inline-block w-[16px] h-[16px] rounded-full border-2 border-black border-t-transparent animate-spin" />
+            )}
+            ⚠ {reseedStatus === 'working' ? 'Reseeding test data…' : 'Reseed Test Data'}
+          </button>
+          <button
+            type="button"
+            onClick={handleWakeDatabase}
+            disabled={wakeStatus === 'waking'}
+            className="flex items-center gap-2 h-[56px] px-6 rounded-[10px] border-2 border-[#B8860B] font-ui text-[18px] font-bold bg-[#F5A623] hover:bg-[#FFB84D] text-black disabled:opacity-60 disabled:cursor-default transition-colors"
+          >
+            {wakeStatus === 'waking' && (
+              <span className="inline-block w-[16px] h-[16px] rounded-full border-2 border-black border-t-transparent animate-spin" />
+            )}
+            ⚠ {wakeStatus === 'waking' ? 'Waking up database…' : 'Wake Database'}
+          </button>
+        </div>
+        {wakeStatus === 'waking' && (
+          <p className="font-ui text-[14px] text-[#555555]">This can take up to a minute on a cold start</p>
+        )}
+        {wakeStatus === 'ready' && (
+          <p className="font-ui text-[14px] text-[#3FA34D]">Database ready</p>
+        )}
+        {wakeStatus === 'error' && (
+          <p className="font-ui text-[14px] text-[#CC0000]">Could not reach database — try again</p>
+        )}
+        {reseedStatus === 'done' && (
+          <p className="font-ui text-[14px] text-[#3FA34D]">Reseeded: {reseedSummary}</p>
+        )}
+        {reseedStatus === 'error' && (
+          <p className="font-ui text-[14px] text-[#CC0000]">Reseed failed — try again</p>
+        )}
       </div>
 
       {/* Middle: badge scanner | OR | zNumber pad */}
@@ -129,30 +195,6 @@ function LoginContent() {
             disabled={loading}
           />
         </div>
-      </div>
-
-      {/* Wake database — optional pre-warm for a paused Azure SQL serverless instance */}
-      <div className="flex flex-col items-center gap-1 pb-2">
-        <button
-          type="button"
-          onClick={handleWakeDatabase}
-          disabled={wakeStatus === 'waking'}
-          className="flex items-center gap-2 font-ui text-[16px] text-[#666666] underline decoration-dotted hover:text-[#999999] disabled:no-underline disabled:cursor-default"
-        >
-          {wakeStatus === 'waking' && (
-            <span className="inline-block w-[14px] h-[14px] rounded-full border-2 border-[#666666] border-t-transparent animate-spin" />
-          )}
-          {wakeStatus === 'waking' ? 'Waking up database…' : 'Wake database'}
-        </button>
-        {wakeStatus === 'waking' && (
-          <p className="font-ui text-[14px] text-[#555555]">This can take up to a minute on a cold start</p>
-        )}
-        {wakeStatus === 'ready' && (
-          <p className="font-ui text-[14px] text-[#3FA34D]">Database ready</p>
-        )}
-        {wakeStatus === 'error' && (
-          <p className="font-ui text-[14px] text-[#CC0000]">Could not reach database — try again</p>
-        )}
       </div>
 
       {/* Bottom: message bar (standalone 84 px) */}

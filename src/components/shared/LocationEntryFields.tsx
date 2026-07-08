@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNumpad } from '../../context/NumpadContext';
 import { useNumpadField } from '../../lib/useNumpadField';
 
@@ -28,6 +28,16 @@ export function LocationEntryFields({ onResolved, autoFocus = true }: LocationEn
   const binField = useNumpadField('numpad', 3);
   const levelField = useNumpadField('numpad', 2);
 
+  // The Aisle→Bin→Level auto-advance chain below only ever registers its handlers once,
+  // at mount (see the effect at the bottom) — handleBinConfirm/handleLevelConfirm are
+  // therefore always the closures captured on that first render, which close over
+  // aisleField/binField as they were at that render (both still ''). Reading
+  // aisleField.value/binField.value directly from those stale closures would silently
+  // resolve every manual entry as just the 2-digit Level value. These refs are mutated
+  // in place instead, so they stay live regardless of which render's closure reads them.
+  const aisleValueRef = useRef('');
+  const binValueRef = useRef('');
+
   /** Registers the Aisle field's numpad handler and opens the panel. */
   function focusAisleField() {
     aisleField.focus(handleAisleConfirm);
@@ -50,6 +60,7 @@ export function LocationEntryFields({ onResolved, autoFocus = true }: LocationEn
       return;
     }
     if (v.length !== 3) return;
+    aisleValueRef.current = v;
     setTimeout(() => focusBinField(), 50);
   }
 
@@ -62,6 +73,7 @@ export function LocationEntryFields({ onResolved, autoFocus = true }: LocationEn
       return;
     }
     if (v.length !== 3) return;
+    binValueRef.current = v;
     setTimeout(() => focusLevelField(), 50);
   }
 
@@ -75,7 +87,7 @@ export function LocationEntryFields({ onResolved, autoFocus = true }: LocationEn
     }
     if (v.length !== 2) return;
     hidePanel();
-    onResolved(aisleField.value.trim() + binField.value.trim() + v);
+    onResolved(aisleValueRef.current + binValueRef.current + v);
   }
 
   useEffect(() => {

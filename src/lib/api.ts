@@ -98,3 +98,23 @@ export async function wakeDatabase(): Promise<void> {
   const res = await fetch('/api/health');
   if (!res.ok) throw new Error('REQUEST_FAILED');
 }
+
+export interface ReseedResult {
+  putPalletsCreated: number;
+  labelsCreated: number;
+  labelsByStorageCodeAndFunction: Record<string, number>;
+}
+
+/**
+ * Hits the unauthenticated test-data reseed endpoint, called from the login screen's
+ * dev-tools strip. Wipes all PUT_PENDING pallets and not-yet-pulled labels (AVAILABLE/
+ * PRINTED) and regenerates a fresh, randomized set of both. Destructive — see
+ * `api/functions/demo-reseed.ts` for exactly what's deleted and recreated.
+ *
+ * @throws Error with message "REQUEST_FAILED" if the request itself fails
+ */
+export async function reseedTestData(): Promise<ReseedResult> {
+  const res = await fetch('/api/demo/reseed', { method: 'POST' });
+  if (!res.ok) throw new Error('REQUEST_FAILED');
+  return res.json() as Promise<ReseedResult>;
+}

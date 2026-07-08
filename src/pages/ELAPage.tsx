@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
+import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { useNumpadField } from '../lib/useNumpadField';
 
@@ -42,6 +43,7 @@ function CellValue({ empty, staged }: { empty: number; staged: number }) {
 export function ELAPage() {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
+  const { hidePanel } = useNumpad();
   const navigate = useNavigate();
 
   const storageField = useNumpadField('keyboard');
@@ -58,8 +60,9 @@ export function ELAPage() {
       storageField.set(trimmed);
       setStorageCode(trimmed);
       setSelected(null);
+      hidePanel();
     });
-  }, [storageField]);
+  }, [storageField, hidePanel]);
 
   // Query trigger: auto-run once both fields have values. Selection is cleared by the field
   // handlers themselves (see focusStorageField and the Size <select> onChange) whenever a
