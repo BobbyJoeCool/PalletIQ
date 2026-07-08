@@ -62,7 +62,10 @@ test.describe('PIP — Pallet ID Pull flow', () => {
   });
 
   // Node RESCAN {New label scanned while verifying?} -> Yes
-  test('rescanning while verifying warns and reloads instead of advancing', async ({ page }) => {
+  // Issue #45: this used to show a "Label not verified" warning that could stomp on a
+  // still-relevant previous message — removed entirely (no status-bar update on a plain
+  // rescan, only on an actual error) rather than fixed to fire at the "right" time.
+  test('rescanning while verifying reloads with the new label and shows no warning', async ({ page }) => {
     await selectFunction(page, 'Carton Air');
     const [resp] = await Promise.all([
       page.waitForResponse((r) => r.url().includes('/api/demo/label') && r.ok()),
@@ -75,7 +78,7 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     await page.getByRole('button', { name: labelId, exact: true }).click();
     await page.getByRole('button', { name: '✓ Scan Label' }).click();
 
-    await expect(page.getByText('Label not verified')).toBeVisible();
+    await expect(page.getByText('Label not verified')).not.toBeVisible();
     // Still showing verifying-state data (reloaded, not kicked back to ready).
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
   });
@@ -113,6 +116,9 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     await page.getByRole('button', { name: '✓ Scan Label' }).click();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
 
+    // The Alt ID demo buttons only render once the Alternate ID field is focused
+    // (PID auto-focuses on entering verifying; Alt ID doesn't) — tap it first.
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Alternate ID' }).getByRole('button').click();
     await page.getByRole('button', { name: '✗ Alt ID' }).click();
 
     await expect(page.getByText('Invalid Alternate ID')).toBeVisible();
@@ -125,6 +131,7 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     await page.getByRole('button', { name: '✓ Scan Label' }).click();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
 
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Alternate ID' }).getByRole('button').click();
     await page.getByRole('button', { name: '✓ Alt ID' }).click();
 
     await expect(page.getByText(/^Last Pull .* — /)).toBeVisible();
@@ -146,5 +153,44 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     await hardwareScan(page, labelId);
 
     await expect(page.getByText('Invalid status: PULLED')).toBeVisible();
+  });
+
+  // Issues #48/#49: FP Alt-ID level mismatch prompts a confirm dialog instead of rejecting
+  // outright. Mocked at the API layer — crafting real seed data where a pallet's actual
+  // level is known to differ from a scannable one would be too flaky to rely on.
+  test('an FP level mismatch on Alt ID prompts a confirm dialog; confirming completes the pull', async ({ page }) => {
+    let verifyCalls = 0;
+    await page.route('**/api/pulls/verify', async (route) => {
+      verifyCalls++;
+      const body = route.request().postDataJSON() as { confirmLevelMismatch?: boolean };
+      if (!body.confirmLevelMismatch) {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'LEVEL_MISMATCH', scannedLevel: 1, actualLevel: 4 }),
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ location: '30105604', updatedQuantity: { pallets: 0, cartons: 0, ssps: 0 } }),
+        });
+      }
+    });
+
+    await selectFunction(page, 'Full Pallet');
+    await page.getByRole('button', { name: '✓ Scan Label' }).click();
+    await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
+
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Alternate ID' }).getByRole('button').click();
+    await page.getByRole('button', { name: '✓ Alt ID' }).click();
+
+    await expect(page.getByText("Level doesn't match")).toBeVisible();
+    await expect(page.getByText(/You scanned Level 1.*Level 4/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Confirm Pull' }).click();
+
+    await expect(page.getByText(/^Last Pull .* — /)).toBeVisible();
+    expect(verifyCalls).toBe(2);
   });
 });

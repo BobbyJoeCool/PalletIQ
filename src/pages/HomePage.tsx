@@ -32,7 +32,7 @@ const COLUMNS: { heading: string; buttons: FunctionButton[] }[] = [
     buttons: [
       { code: 'LII', label: 'Location ID Info',         route: '/location' },
       { code: 'WLH', label: 'Warehouse Location Hold',  route: '/hold' },
-      { code: 'SAR', label: 'Staged Aisle Report',      route: '/staged-aisle' },
+      { code: 'ISI', label: 'Item Storage Inquiry',     route: '/storage-inquiry' },
     ],
   },
   {
@@ -46,9 +46,9 @@ const COLUMNS: { heading: string; buttons: FunctionButton[] }[] = [
   {
     heading: 'Reporting Functions',
     buttons: [
+      { code: 'SAR', label: 'Staged Aisle Report',         route: '/staged-aisle' },
       { code: 'IRP', label: 'Individual Reporting',        route: '/reporting/individual' },
       { code: 'PRQ', label: 'Pull Request by Label',       route: '/reporting/pull-request' },
-      { code: 'RPT', label: 'Other Reporting Functions',   route: '/reporting/other' },
     ],
   },
 ];

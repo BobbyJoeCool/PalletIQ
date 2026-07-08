@@ -12,15 +12,16 @@ import { requireAuth } from '../lib/permissions.js';
  * rather than once per action). Falls back to age 0 for a STAGED location with no
  * matching log entry (e.g. pre-existing seed data), rather than failing the request.
  *
- * @returns Array of `{ aisle, stagedCount, oldestStagedAge }` (age in seconds),
- *   unsorted — the client sorts each of its two lists independently
+ * @returns Array of `{ aisle, stagedCount, oldestStagedAge, freightTypes }` (age in seconds,
+ *   freightTypes as sorted "StorageCode-Size" strings, e.g. "CR-M"), unsorted — the client
+ *   sorts each of its two lists independently
  */
 async function getStagedAisleReport(req: HttpRequest): Promise<unknown> {
   await requireAuth(req);
 
   const stagedLocations = await prisma.location.findMany({
     where: { status: 'STAGED' },
-    select: { aisle: true, bin: true, level: true },
+    select: { aisle: true, bin: true, level: true, storageCode: true, size: true },
   });
   if (stagedLocations.length === 0) return [];
 
@@ -41,21 +42,23 @@ async function getStagedAisleReport(req: HttpRequest): Promise<unknown> {
   }
 
   const now = Date.now();
-  const byAisle = new Map<number, { count: number; oldestMs: number }>();
+  const byAisle = new Map<number, { count: number; oldestMs: number; freightTypes: Set<string> }>();
   for (const loc of stagedLocations) {
     const key = `${loc.aisle}-${loc.bin}-${loc.level}`;
     const since = stagedSince.get(key);
     const ageMs = since ? now - since.getTime() : 0;
-    const entry = byAisle.get(loc.aisle) ?? { count: 0, oldestMs: 0 };
+    const entry = byAisle.get(loc.aisle) ?? { count: 0, oldestMs: 0, freightTypes: new Set<string>() };
     entry.count++;
     entry.oldestMs = Math.max(entry.oldestMs, ageMs);
+    entry.freightTypes.add(`${loc.storageCode}-${loc.size}`);
     byAisle.set(loc.aisle, entry);
   }
 
-  return [...byAisle.entries()].map(([aisle, { count, oldestMs }]) => ({
+  return [...byAisle.entries()].map(([aisle, { count, oldestMs, freightTypes }]) => ({
     aisle,
     stagedCount: count,
     oldestStagedAge: Math.floor(oldestMs / 1000),
+    freightTypes: [...freightTypes].sort(),
   }));
 }
 

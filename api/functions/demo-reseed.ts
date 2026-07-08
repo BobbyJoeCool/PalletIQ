@@ -100,6 +100,14 @@ function assignPullFunction(level: number, size: string, qty: number, totalCarto
 async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
   return prisma.$transaction(async (tx) => {
     await tx.label.deleteMany({ where: { status: { in: ['AVAILABLE', 'PRINTED'] } } });
+    // A PUT_PENDING pallet can have an open SDP reservation (Reservation.palletId is a
+    // required FK) and/or ActivityLog rows referencing it — clear both first or the pallet
+    // delete below fails with a foreign key violation (see issue #51: an abandoned reservation
+    // or a routine "received"/"put" log entry from a prior session blocks every future reseed
+    // until manually cleared). Scoped to just the pallets being deleted, not a full-table wipe,
+    // since this endpoint only regenerates disposable put-pending test data.
+    await tx.reservation.deleteMany({ where: { pallet: { status: 'PUT_PENDING' } } });
+    await tx.activityLog.deleteMany({ where: { pallet: { status: 'PUT_PENDING' } } });
     await tx.pallet.deleteMany({ where: { status: 'PUT_PENDING' } });
 
     // ── Put pallets: ROWS_PER_COMBO per (storageCode, size) combo ─────────────────

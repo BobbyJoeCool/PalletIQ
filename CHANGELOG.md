@@ -6,6 +6,9 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [Legacy — Playwright-Run Findings (2026-07-05)](#legacy--playwright-run-findings-2026-07-05)
+- [1.1.0 — 2026-07-08](#110--2026-07-08)
+- [1.0.10 — 2026-07-08](#1010--2026-07-08)
 - [1.0.9 — 2026-07-08](#109--2026-07-08)
 - [1.0.6 — 2026-07-07](#106--2026-07-07)
 - [1.0.5 — 2026-07-06](#105--2026-07-06)
@@ -35,22 +38,46 @@ conversation and build plan when picked up.
   pull/put performance by function (units, units/hour, time in function, goal progress), or a
   staging summary for GPMers. Leads/Managers get a separate cross-worker reporting screen; IRP
   always shows only the logged-in user's own data.
-- **ISI — Item Storage Inquiry.** Looks up an item by DPCI or UPC (like IID) and lists every
-  location currently storing it, ordered by location. Selecting a row jumps to that location's
-  LII screen, or to the pallet's PII screen.
 - **PRQ — Pull Request by Label.** Not yet designed.
 
 ---
 
 ## Unreleased — Reported Issues
 
-Grouped by screen. Each item is either a bug (something's broken) or a feature change (works
-today, wanted differently) — tagged `[Bug]` or `[Feature Change]`. Reports filed via
-[DevNotes/ReportTemplate.md](DevNotes/ReportTemplate.md) land here. Items without a tag below
-predate that convention and were found during the 2026-07-05 full Playwright run (61 passed / 21
-failed) — see
+Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/BobbyJoeCool/PalletIQ/issues) on this repo, not as file-based reports — see `.claude/CLAUDE.md`'s Bug Report Conventions. Severity is a label (`blocker`/`major`/`minor`/`nice-to-have`/`distant-future`/`needs-triage`); closing an issue is what marks it done, so a closed issue's fix is documented in whichever version below actually shipped it rather than listed again here. This section is just the current open backlog, grouped by severity, kept in sync as issues are filed or closed.
+
+### Blocker
+
+- [#1](https://github.com/BobbyJoeCool/PalletIQ/issues/1) — App becomes "UNAUTHORIZED" after 15 minutes even during active use
+
+### Major/Important
+
+- [#3](https://github.com/BobbyJoeCool/PalletIQ/issues/3) — Dismiss keyboard when storage code is selected (ELA)
+- [#4](https://github.com/BobbyJoeCool/PalletIQ/issues/4) — ELA report only returns requested size instead of all sizes in aisle
+- [#6](https://github.com/BobbyJoeCool/PalletIQ/issues/6) — Add reason code to edit pallet screen (PII)
+- [#14](https://github.com/BobbyJoeCool/PalletIQ/issues/14) — Add ability to put ranges on hold (WLH)
+- [#15](https://github.com/BobbyJoeCool/PalletIQ/issues/15) — Add helper bar button to select a location on hold (WLH)
+
+### Nice-to-have/Cosmetic
+
+- [#46](https://github.com/BobbyJoeCool/PalletIQ/issues/46) — Persist team member activity log across screens for the last 12 hours
+- [#52](https://github.com/BobbyJoeCool/PalletIQ/issues/52) — Demo reseed should generate randomly-staged aisles with realistic timestamps, so SAR looks realistic in demos
+
+### Distant Future
+
+- [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
+
+---
+
+## Legacy — Playwright-Run Findings (2026-07-05)
+
+Predates the GitHub Issues migration and the file-based bug-report systems that came before it —
+found during a full Playwright run (61 passed / 21 failed) rather than filed as reports. Kept here
+for reference rather than migrated to Issues, since several are test-locator problems rather than
+confirmed app bugs; see
 [DevNotes/TestLogs/playwright-run-2026-07-05.md](DevNotes/TestLogs/playwright-run-2026-07-05.md)
-for full detail, error text, and reproduction steps.
+for full detail, error text, and reproduction steps. Not actively tracked against current app
+behavior — treat anything below as needing re-verification before acting on it.
 
 ### Empty Locations (ELA / ELZ)
 
@@ -58,8 +85,8 @@ for full detail, error text, and reproduction steps.
       `<option>` element instead of the visible size-column header text — a test-locator fix,
       not necessarily an app bug (`ela.spec.ts:52`)
 - [ ] **ELA** — "Stage Aisle" navigation doesn't show "STG" jump-code text after arriving at
-      `/stage` (`ela.spec.ts:109`) — **superseded**: STG's layout is being fully redesigned (see
-      the Stage Aisle section below); re-verify against the new implementation
+      `/stage` (`ela.spec.ts:109`) — **superseded**: STG's layout was fully redesigned since; the
+      follow-up work for that redesign is tracked right below
 - [ ] **ELZ** — "Stage Aisle" navigation button click times out — an on-screen numpad/keyboard
       panel from a prior field entry doesn't fully dismiss and intercepts the click
       (`elz.spec.ts:65`)
@@ -108,10 +135,7 @@ for full detail, error text, and reproduction steps.
       (`stg.spec.ts:62`, `:67`, `:101`)
 - [ ] Strict-mode collision on "Unstage Aisle" — the button label and the modal heading share the
       same text (`stg.spec.ts:111`)
-- **Note:** the two items above are against STG's *old* layout. STG is mid-redesign as of this
-  writing (pallet-rider-triple graphic, Master Control restructure — see
-  `DevNotes/Logs/Pre-V1_0_0/phase-11.md`'s 11.2 entry); the follow-up work for that redesign is tracked
-  separately right below rather than folded into the old-layout items above.
+- **Note:** the two items above are against STG's *old* layout, predating its redesign.
 
 ### STG Redesign Follow-Ups
 
@@ -120,6 +144,139 @@ for full detail, error text, and reproduction steps.
 - [ ] Rewrite `tests/e2e/stg.spec.ts` against the new DOM — replaces the two old-layout items
       above rather than fixing them in place; add new coverage for Master Control's Aisle field
       feeding "Fill All" and for the zone map's idle → loaded states
+
+---
+
+## [1.1.0] — 2026-07-08
+
+Closes the entire Nice-to-Have and Minor backlog plus several Major items:
+[#2](https://github.com/BobbyJoeCool/PalletIQ/issues/2),
+[#5](https://github.com/BobbyJoeCool/PalletIQ/issues/5),
+[#7](https://github.com/BobbyJoeCool/PalletIQ/issues/7),
+[#8](https://github.com/BobbyJoeCool/PalletIQ/issues/8),
+[#10](https://github.com/BobbyJoeCool/PalletIQ/issues/10),
+[#11](https://github.com/BobbyJoeCool/PalletIQ/issues/11),
+[#13](https://github.com/BobbyJoeCool/PalletIQ/issues/13),
+[#16](https://github.com/BobbyJoeCool/PalletIQ/issues/16),
+[#18](https://github.com/BobbyJoeCool/PalletIQ/issues/18),
+[#19](https://github.com/BobbyJoeCool/PalletIQ/issues/19),
+[#20](https://github.com/BobbyJoeCool/PalletIQ/issues/20),
+[#21](https://github.com/BobbyJoeCool/PalletIQ/issues/21),
+[#22](https://github.com/BobbyJoeCool/PalletIQ/issues/22),
+[#25](https://github.com/BobbyJoeCool/PalletIQ/issues/25),
+[#26](https://github.com/BobbyJoeCool/PalletIQ/issues/26),
+[#27](https://github.com/BobbyJoeCool/PalletIQ/issues/27),
+[#28](https://github.com/BobbyJoeCool/PalletIQ/issues/28),
+[#45](https://github.com/BobbyJoeCool/PalletIQ/issues/45),
+[#47](https://github.com/BobbyJoeCool/PalletIQ/issues/47),
+[#48](https://github.com/BobbyJoeCool/PalletIQ/issues/48),
+[#49](https://github.com/BobbyJoeCool/PalletIQ/issues/49),
+[#50](https://github.com/BobbyJoeCool/PalletIQ/issues/50), and
+[#51](https://github.com/BobbyJoeCool/PalletIQ/issues/51).
+
+### 1.1.0 — Added
+
+- **ISI — Item Storage Inquiry**, a new screen replacing SAR's old slot in the Location
+  Management menu column. Worker enters a DPCI (three separate Dept/Class/Item fields, same
+  auto-advancing pattern as IID) and sees every location currently storing that item; selecting a
+  row enables "Go to Location ID"/"Go to Pallet ID" hot buttons. Backed by a new endpoint,
+  `GET /api/items/dpci/:dpci/locations`. ([#13](https://github.com/BobbyJoeCool/PalletIQ/issues/13))
+- **Reports menu restructure** ([#10](https://github.com/BobbyJoeCool/PalletIQ/issues/10)): SAR
+  (Staged Aisle Report) moved from Location Management to the top of Reporting Functions; the
+  "Other Reporting Functions" (RPT) placeholder slot is removed entirely.
+- **SAR shows a freight-type badge per aisle** (StorageCode-Size, e.g. `CR-M`) and selecting a row
+  enables "Directed Put"/"Stage Aisle" hot buttons that carry the aisle over to SDP/STG via router
+  state. ([#11](https://github.com/BobbyJoeCool/PalletIQ/issues/11),
+  [#26](https://github.com/BobbyJoeCool/PalletIQ/issues/26))
+- **PIP FP Alt-ID level mismatch now prompts a confirm dialog instead of rejecting outright.**
+  Alternate ID verification already checked aisle+bin for every pull function; FP additionally
+  checks level ([#48](https://github.com/BobbyJoeCool/PalletIQ/issues/48)) — but a Full Pallet pull
+  is done from floor level, so requiring the worker to scan the *actual* (possibly high-rack)
+  level's barcode isn't physically viable. A level mismatch on an otherwise-matching aisle+bin now
+  shows "Level doesn't match" with the scanned vs. actual level, and the worker can confirm the
+  pull anyway. ([#49](https://github.com/BobbyJoeCool/PalletIQ/issues/49))
+- **SDP shows an "Applying: …" summary** listing every active Size/Storage Code/Zone override
+  once at least one is set, confirming they combine (AND) rather than only the last one taking
+  effect. ([#50](https://github.com/BobbyJoeCool/PalletIQ/issues/50) — investigated as a possible
+  logic bug; the backend already combined overrides correctly, so this ships as a UI
+  clarification rather than a logic change)
+- **App-wide: DPCI and UPC values are now clickable**, jumping to IID pre-populated via
+  `?dpci=`/`?upc=` — applied to LII, MNP, PIP, PII (both DPCI and UPC), and SDP's directed-pallet
+  display. ([#47](https://github.com/BobbyJoeCool/PalletIQ/issues/47))
+- **WLH: hold status and current location are larger and color-coded** — blue for
+  `HOLD_IN`/`HOLD_OUT`, amber for `HOLD_BOTH`, red for `HOLD_PERM` — instead of uniform white text.
+  ([#27](https://github.com/BobbyJoeCool/PalletIQ/issues/27),
+  [#28](https://github.com/BobbyJoeCool/PalletIQ/issues/28))
+- **ELZ's zone map is split into 4 zone groups with Odd/Even sub-columns and dividers**, instead
+  of one flat header row. ([#25](https://github.com/BobbyJoeCool/PalletIQ/issues/25))
+- **PII**: Received/Put/Last Pulled By show zNumbers instead of names
+  ([#7](https://github.com/BobbyJoeCool/PalletIQ/issues/7)); a "Full Pallets" quantity field
+  ([#19](https://github.com/BobbyJoeCool/PalletIQ/issues/19)); the cartons field is labeled "Total
+  Cartons" everywhere instead of "cartons per pallet"
+  ([#20](https://github.com/BobbyJoeCool/PalletIQ/issues/20)); DPCI is edited as three separate
+  Dept/Class/Item fields ([#21](https://github.com/BobbyJoeCool/PalletIQ/issues/21)); the
+  read-only view is a two-column layout ([#22](https://github.com/BobbyJoeCool/PalletIQ/issues/22)).
+- **IID**: DPCI entry is three separate Dept/Class/Item fields instead of one combined field, same
+  auto-advancing pattern used by ISI. ([#16](https://github.com/BobbyJoeCool/PalletIQ/issues/16))
+- **LII**: a second column shows the located pallet's info alongside the location detail, instead
+  of stacking everything in one narrow column. ([#18](https://github.com/BobbyJoeCool/PalletIQ/issues/18))
+- **App-wide: a focused field clears on the first keystroke of a fresh focus** instead of
+  appending onto whatever value it already held. ([#2](https://github.com/BobbyJoeCool/PalletIQ/issues/2))
+- **PIP's scanned location display is larger, bold, and red** (24px), matching the Pull History
+  log's existing styling, instead of blending in as regular text.
+  ([#8](https://github.com/BobbyJoeCool/PalletIQ/issues/8))
+- **PIP: a "⚠ Wrong Function" demo button** in the Label field's footer helpers, to exercise the
+  "scanned a label for a different pull function" error path on demand.
+- **New Playwright coverage**: `tests/e2e/home.spec.ts`, `tests/e2e/isi.spec.ts`, plus new/updated
+  cases across `pii.spec.ts`, `sar.spec.ts`, `elz.spec.ts`, `pip.spec.ts`, `sdp.spec.ts`,
+  `iid.spec.ts` for every fix in this release.
+
+### 1.1.0 — Fixed
+
+- **PIP's status bar updated on every plain rescan while verifying, capable of stomping a
+  still-relevant previous message**, even outside the specific "message overwritten" case fixed in
+  1.0.9. The status bar now only updates on a rescan if there's actually an error to show — a
+  plain rescan silently reloads the new label's data. ([#45](https://github.com/BobbyJoeCool/PalletIQ/issues/45))
+- **PIP's Alternate ID demo buttons ("✓ Alt ID"/"✗ Alt ID") required focusing the Alternate ID
+  field first** — already-correct behavior (Pallet ID auto-focuses on entering verifying, but Alt
+  ID doesn't), just previously undocumented and untested; now covered directly in
+  `pip.spec.ts`.
+- **IID and ISI's Dept/Class/Item display fields stayed on their `—` placeholders after a demo
+  scan or a `?dpci=` link**, despite the item loading successfully — `loadByDpci` never populated
+  the three fields when called with a whole DPCI string rather than typed in one digit at a time.
+  Both now parse and populate all three fields regardless of entry path.
+- **`GET /api/items/dpci/:dpci/locations` (ISI's endpoint) never validated that the DPCI
+  corresponds to a real Item**, so a bogus DPCI silently returned an empty location list (200)
+  instead of 404 — indistinguishable from "valid item, nothing currently stored." Now checks Item
+  existence first, matching `getItemByDpci`'s behavior.
+- **SDP's "✗ PID" demo button showed a generic failure instead of "Pallet not found"** — same root
+  cause already fixed for MNP (a non-numeric placeholder value fails the API's numeric validation
+  before ever reaching the not-found check); applied the identical fix.
+- **The in-app "Reseed Test Data" button could fail with a foreign key error and abort the whole
+  reseed** ([#51](https://github.com/BobbyJoeCool/PalletIQ/issues/51)) — it deleted `PUT_PENDING`
+  pallets without first clearing `Reservation`/`ActivityLog` rows referencing them, so an
+  abandoned reservation or a routine log entry from a prior session (e.g. a crashed or
+  interrupted test run) blocked every future reseed. The same root cause also blocked the
+  standalone `prisma db seed` script, which was missing a `Reservation` clear before its own
+  pallet wipe. Both fixed by clearing the referencing rows first.
+
+### 1.1.0 — Test Infrastructure
+
+- **`tapKeys` (the Playwright helper that taps on-screen keys) searched the whole page for a
+  button by label**, which is ambiguous once a field's own displayed value happens to match the
+  next key (e.g. typing a repeated digit like "99" — after the first "9", the field's own button
+  is also named "9"). Scoped it to the numpad/keyboard panel via new `data-testid` attributes on
+  `Numpad.tsx`/`Keyboard.tsx`.
+
+---
+
+## [1.0.10] — 2026-07-08
+
+### 1.0.10 — Added
+
+- **App version number on the login screen** — a small, muted label in the bottom-right corner,
+  sourced from `package.json` at build time so it can never drift out of sync with an actual
+  release.
 
 ---
 

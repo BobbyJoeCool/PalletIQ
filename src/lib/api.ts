@@ -1,7 +1,10 @@
 /**
  * Generic authenticated API call helper. Attaches the session token to every request
  * and throws an Error with the server's error code as its message on non-OK responses.
- * The thrown error's message is the string callers check (e.g. "PALLET_MISMATCH").
+ * The thrown error's message is the string callers check (e.g. "PALLET_MISMATCH"). Any
+ * additional fields the server attached alongside `error` (see api/lib/response.ts's
+ * withHandler `data` support) are attached to the thrown error's `data` property, for
+ * error codes that carry more than just a code (e.g. LEVEL_MISMATCH's scanned/actual level).
  *
  * Sent as `X-Auth-Token` rather than the standard `Authorization` header — Azure Static
  * Web Apps' Managed Functions proxy overwrites `Authorization` with its own internal
@@ -29,8 +32,9 @@ export async function apiFetch<T>(
   });
   if (!res.ok) {
     const body: unknown = await res.json().catch(() => ({}));
-    const code = (body as { error?: string }).error ?? 'REQUEST_FAILED';
-    throw Object.assign(new Error(code), { status: res.status });
+    const { error, ...data } = (body as { error?: string }) ?? {};
+    const code = error ?? 'REQUEST_FAILED';
+    throw Object.assign(new Error(code), { status: res.status, data });
   }
   return res.json() as Promise<T>;
 }

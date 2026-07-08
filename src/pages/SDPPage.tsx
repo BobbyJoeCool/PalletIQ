@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { HoldPanel } from '../components/shared/HoldPanel';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveId } from '../components/ui/LiveId';
@@ -15,6 +16,11 @@ import { fmtLocation } from '../lib/fmt';
 const SIZES = ['XS', 'HS', 'S', 'M', 'L'];
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+/** Router state shape for pre-populating the Aisle field on entry (e.g. from SAR's row-select navigation). */
+interface NavState {
+  aisle?: number;
+}
 
 interface DirectedResult {
   reservationId: number;
@@ -178,6 +184,8 @@ export function SDPPage() {
   const { setMessage } = useMessageBar();
   const { deliverScan, hidePanel } = useNumpad();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
+  const routerLocation = useLocation();
+  const prefill = (routerLocation.state as NavState | null) ?? null;
 
   const [screenState, setScreenState] = useState<ScreenState>('entry');
   const [loading, setLoading] = useState(false);
@@ -214,6 +222,13 @@ export function SDPPage() {
   const sizeField     = useNumpadField('keyboard');
   const storageField  = useNumpadField('keyboard', 2);
   const zoneField     = useNumpadField('numpad', 1);
+
+  // Pre-populate the Aisle field from router state (e.g. SAR's row-select navigation) on mount.
+  useEffect(() => {
+    if (prefill?.aisle != null) aisleField.set(String(prefill.aisle));
+    // Field setters are stable across the lifetime of the hook — only run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // handlePalletScan can run from a closure captured well before the aisle was typed —
   // the aisle-confirm → focusPalletField chain registers it once, immediately after the
@@ -597,8 +612,11 @@ export function SDPPage() {
     }
   }, [token, deliverScan, setMessage]);
 
+  // Must be numeric — a non-numeric value fails the API's parseInt check (INVALID_INPUT, 400)
+  // before ever reaching the not-found lookup (PALLET_NOT_FOUND, 404). Same bug/fix as MNP's
+  // demoBadPid (see CHANGELOG.md's Legacy findings).
   /** Delivers a Pallet ID that doesn't exist, simulating a not-found scan. */
-  const demoBadPid = useCallback(() => deliverScan('INVALID-PID-000'), [deliverScan]);
+  const demoBadPid = useCallback(() => deliverScan('999999999'), [deliverScan]);
 
   /** Delivers the currently directed location, simulating a correct confirm scan. */
   const demoConfirmOk = useCallback(() => {
@@ -718,6 +736,20 @@ export function SDPPage() {
           )}
         </div>
 
+        {/* Applying-overrides summary (issue #50) — every selected override is combined
+            with AND when the system searches for a location, but nothing on screen
+            confirmed that plainly, which read as "it only applies one." */}
+        {isIM && (sizeField.value || storageField.value || zoneField.value) && (
+          <p className="font-ui text-[13px] text-[#9A9A9A]">
+            Applying:{' '}
+            {[
+              sizeField.value && `Size ${sizeField.value}`,
+              storageField.value && `Storage ${storageField.value}`,
+              zoneField.value && `Zone ${zoneField.value}`,
+            ].filter(Boolean).join(' + ')}
+          </p>
+        )}
+
         {/* Consolidating toggle (IM+ only) + directed-to readout */}
         {(isIM || (screenState === 'directed' && directed)) && (
           <div className="flex items-center gap-4">
@@ -777,7 +809,7 @@ export function SDPPage() {
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">
                   DPCI
                 </span>
-                <div className="font-data text-[22px] text-white flex-1">{directed.pallet.dpci}</div>
+                <div className="flex-1"><LiveId type="dpci" id={directed.pallet.dpci} className="!text-[22px]" /></div>
                 <span className="font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">
                   Qty
                 </span>

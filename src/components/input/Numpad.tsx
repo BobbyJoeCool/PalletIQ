@@ -18,7 +18,7 @@ export function Numpad() {
   const { handleKey } = useNumpad();
 
   return (
-    <div className="absolute bottom-0 right-0 w-[436px] h-[494px] flex flex-col bg-[#0A0A0A] border border-b-0 border-[#2A2A2A] rounded-t-[16px] shadow-[0px_-14px_44px_0px_rgba(0,0,0,0.55)] select-none">
+    <div data-testid="numpad-panel" className="absolute bottom-0 right-0 w-[436px] h-[494px] flex flex-col bg-[#0A0A0A] border border-b-0 border-[#2A2A2A] rounded-t-[16px] shadow-[0px_-14px_44px_0px_rgba(0,0,0,0.55)] select-none">
       {/* Key grid */}
       <div className="flex-1 flex flex-col gap-2 px-3 pt-3 pb-3">
         {ROWS.map((row, ri) => (

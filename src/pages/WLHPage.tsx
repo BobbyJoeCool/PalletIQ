@@ -97,7 +97,7 @@ export function WLHPage() {
         <div className="flex-1 flex flex-col overflow-y-auto max-w-[720px] gap-4">
           <div className="flex items-center gap-3">
             <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">Location</span>
-            <LiveId type="location" id={locationId} />
+            <LiveId type="location" id={locationId} className="!text-[28px] !font-bold" />
           </div>
           <HoldPanel locationId={locationId} />
         </div>

@@ -41,18 +41,33 @@ export function AisleGrid({ levels, dense = false }: AisleGridProps) {
 
   return (
     <div className="flex flex-col border border-[#2A2A2A] rounded-[12px] overflow-hidden select-none">
-      {/* Header row */}
+      {/* Header row 1 — zone label, spanning its Odd+Even column pair */}
+      <div className="flex bg-[#161616] border-b border-[#2A2A2A]">
+        <div className="w-[56px] shrink-0" />
+        {ZONES.map((zone) => (
+          <div
+            key={zone}
+            className={`flex-1 text-center border-l-2 border-[#555] first:border-l-0 ${dense ? 'py-0.5' : 'py-1'}`}
+          >
+            <span className="font-ui text-[12px] font-bold text-white uppercase tracking-wider">
+              Zone {zone}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Header row 2 — Odd / Even sub-headers */}
       <div className="flex bg-[#111111] border-b border-[#2A2A2A]">
         <div className="w-[56px] shrink-0" />
         {ZONES.map((zone) => (
-          <div key={zone} className="flex-1 flex">
+          <div key={zone} className="flex-1 flex border-l-2 border-[#555] first:border-l-0">
             {SIDES.map((side) => (
               <div
                 key={cellKey(zone, side)}
                 className={`flex-1 text-center border-l border-[#2A2A2A] first:border-l-0 ${dense ? 'py-1' : 'py-2'}`}
               >
                 <span className="font-ui text-[13px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
-                  Z{zone} {side === 'odd' ? 'Odd' : 'Even'}
+                  {side === 'odd' ? 'Odd' : 'Even'}
                 </span>
               </div>
             ))}
@@ -72,7 +87,7 @@ export function AisleGrid({ levels, dense = false }: AisleGridProps) {
                 </span>
               </div>
               {ZONES.map((zone) => (
-                <div key={zone} className="flex-1 flex">
+                <div key={zone} className="flex-1 flex border-l-2 border-[#555] first:border-l-0">
                   {SIDES.map((side) => {
                     const cell = byPos.get(cellKey(zone, side));
                     return (

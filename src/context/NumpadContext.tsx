@@ -39,6 +39,13 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   // a useCallback closure would be stale for that purpose.
   const activeFieldIdRef = useRef<string | null>(null);
   const isScanningRef = useRef(false);
+  // Guards the synthetic-Enter-on-dismiss block below against firing itself recursively —
+  // the outgoing field's own submit callback typically calls hidePanel() as its last step,
+  // which is a reentrant setKeyHandler(null) call; without this guard that reentrant call
+  // would see the same "a field was active, now it isn't" condition and fire another
+  // synthetic Enter, forever. Set for the duration of the synthetic prevHandler('Enter')
+  // call only.
+  const firingSyntheticRef = useRef(false);
 
   /** Opens the numeric numpad panel. */
   const showNumpad = useCallback(() => setActivePanel('numpad'), []);
@@ -53,16 +60,20 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
    * of the two. Individual screens' own hidePanel() calls rely on this: they mean "we're done
    * with input here," which should always also drop the stale active-field highlight.
    *
-   * Before installing the new field, if a *different* field was previously active, its handler
-   * is sent a synthetic 'Enter' — moving focus to another field (tab-out/click-away) commits
-   * whatever the field you're leaving currently holds, the same as pressing OK on it (bug
-   * report V1.0.5, "Tab-out/blur on filled field should trigger OK action"). This must run
-   * before keyHandlerRef/activeFieldIdRef are overwritten with the new field: the old field's
-   * own submit callback typically calls hidePanel() (a reentrant setKeyHandler(null, null)
-   * call), and running it first means that reentrant clear happens before — not after — the
-   * new field's registration, so the new field ends up active rather than clobbered back to
-   * none. The reentrant call is harmless: its own fieldId is null, which fails the `fieldId
-   * != null` guard, so it can't recurse into another auto-submit.
+   * Before installing the new field (or clearing to none), if a *different* field was
+   * previously active, its handler is sent a synthetic 'Enter' — moving focus to another
+   * field, or dismissing the panel entirely (tap-outside with no new field focused), both
+   * commit whatever the field you're leaving currently holds, the same as pressing OK on it
+   * (bug report V1.0.5, "Tab-out/blur on filled field should trigger OK action"; extended to
+   * cover plain dismissal too, not just switching fields, in issue #5's fix). This must run
+   * before keyHandlerRef/activeFieldIdRef are overwritten: the old field's own submit callback
+   * typically calls hidePanel() (a reentrant setKeyHandler(null, null) call), and running the
+   * synthetic Enter first means that reentrant clear happens before — not after — the new
+   * field's registration, so the new field ends up active rather than clobbered back to none.
+   * firingSyntheticRef guards against that reentrant call re-triggering this same block —
+   * unlike the old field-switch-only version, dismissal is no longer distinguishable from the
+   * reentrant call by fieldId alone (both have fieldId === null), so the ref is now load-bearing
+   * for every path, not just an edge case.
    *
    * @param handler - Function that receives individual key strings ('0'–'9', '⌫', 'Enter', 'OK', etc.)
    * @param fieldId - Stable ID for the field (from useId); used to track which field is active
@@ -70,8 +81,10 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   const setKeyHandler = useCallback((handler: ((key: string) => void) | null, fieldId: string | null = null) => {
     const prevHandler = keyHandlerRef.current;
     const prevFieldId = activeFieldIdRef.current;
-    if (fieldId != null && prevFieldId != null && prevFieldId !== fieldId && prevHandler) {
+    if (!firingSyntheticRef.current && prevFieldId != null && prevFieldId !== fieldId && prevHandler) {
+      firingSyntheticRef.current = true;
       prevHandler('Enter');
+      firingSyntheticRef.current = false;
     }
 
     keyHandlerRef.current = handler;

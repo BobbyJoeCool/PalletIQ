@@ -40,7 +40,7 @@ flowchart TD
     subgraph LOC["Location Management"]
         LII["LII — Location ID Info\n/location — LIIPage.tsx"]
         WLH["WLH — Warehouse Location Hold\n/hold — WLHPage.tsx"]
-        SAR["SAR — Staged Aisle Report\n/staged-aisle — SARPage.tsx"]
+        ISI["ISI — Item Storage Inquiry\n/storage-inquiry — ISIPage.tsx"]
     end
 
     subgraph GPM["GPM Functions"]
@@ -49,24 +49,28 @@ flowchart TD
         STG["STG — Stage Aisle\n/stage — STGPage.tsx"]
     end
 
-    subgraph RPTG["Reporting Functions — not built in this demo"]
-        IRP["IRP — Individual Reporting\n/reporting/individual — PlaceholderPage"]
-        PRQ["PRQ — Pull Request by Label\n/reporting/pull-request — PlaceholderPage"]
-        RPT["RPT — Other Reporting\n/reporting/other — PlaceholderPage"]
+    subgraph RPTG["Reporting Functions"]
+        SAR["SAR — Staged Aisle Report\n/staged-aisle — SARPage.tsx"]
+        IRP["IRP — Individual Reporting\n/reporting/individual — PlaceholderPage (not built)"]
+        PRQ["PRQ — Pull Request by Label\n/reporting/pull-request — PlaceholderPage (not built)"]
     end
 
-    %% Home screen function grid — tapping a button navigates directly
+    %% Home screen function grid — tapping a button navigates directly. Reporting
+    %% Functions is a mixed group: SAR is built (solid arrow), IRP/PRQ are not
+    %% (dashed arrow, same as before).
     HOM -->|tap button| PROD
     HOM -->|tap button| INV
     HOM -->|tap button| LOC
     HOM -->|tap button| GPM
-    HOM -.->|"tap button — built:false in JUMP_CODES\nMessageBar error, stays on Home"| RPTG
+    HOM -->|"tap SAR"| SAR
+    HOM -.->|"tap IRP/PRQ — built:false in JUMP_CODES\nMessageBar error, stays on Home"| RPTG
 
     %% Header "Home" button from any built screen
     PROD -.->|"Header ⌂ Home"| HOM
     INV -.->|"Header ⌂ Home"| HOM
     LOC -.->|"Header ⌂ Home"| HOM
     GPM -.->|"Header ⌂ Home"| HOM
+    SAR -.->|"Header ⌂ Home"| HOM
 
     JMP{{"HotJump overlay\nsrc/components/shell/HotJump.tsx\ntype a 3-letter jump code"}}
 
@@ -76,6 +80,7 @@ flowchart TD
     INV ---|"Header ›_ Jump"| JMP
     LOC ---|"Header ›_ Jump"| JMP
     GPM ---|"Header ›_ Jump"| JMP
+    SAR ---|"Header ›_ Jump"| JMP
 
     %% From HotJump, a valid built code navigates immediately, closing the overlay
     JMP -->|"resolved code, built:true"| HOM
@@ -83,6 +88,7 @@ flowchart TD
     JMP -->|"resolved code, built:true"| INV
     JMP -->|"resolved code, built:true"| LOC
     JMP -->|"resolved code, built:true"| GPM
+    JMP -->|"resolved code, built:true"| SAR
     JMP -.->|"resolved code, built:false\nMessageBar error, overlay stays open"| RPTG
 
     %% Header "Logout" button from any authenticated screen, including Home
@@ -91,8 +97,10 @@ flowchart TD
     INV -.->|"Header Logout"| LGN
     LOC -.->|"Header Logout"| LGN
     GPM -.->|"Header Logout"| LGN
+    SAR -.->|"Header Logout"| LGN
 
     style HOM fill:#1a1a1a,stroke:#CC0000,color:#fff
     style JMP fill:#1a1a1a,stroke:#CC0000,color:#fff
     style LGN fill:#1a1a1a,stroke:#555,color:#fff
-    style RPTG fill:#330000,stroke:#660000,color:#ff8080
+    style IRP fill:#330000,stroke:#660000,color:#ff8080
+    style PRQ fill:#330000,stroke:#660000,color:#ff8080

@@ -12,13 +12,21 @@ export const USERS = {
 /**
  * Taps one on-screen button per character — stands in for a worker tapping a physical
  * keypad, since none of this app's custom fields support `.fill()`.
+ *
+ * Scoped to the numpad/keyboard panel (data-testid="numpad-panel"/"keyboard-panel"), not
+ * the whole page: an unscoped lookup is ambiguous once the target field's own button text
+ * happens to equal the next key's label (e.g. typing a repeated digit like "99" — after the
+ * first "9", the field button's accessible name is also "9"), causing a strict-mode
+ * violation. ZnumPad (login) has no such panel, so it falls back to the whole page.
  */
 export async function tapKeys(page: Page, keys: string) {
+  const panel = page.locator('[data-testid="numpad-panel"], [data-testid="keyboard-panel"]');
+  const scope = (await panel.count()) > 0 ? panel : page;
   for (const ch of keys) {
     // exact: true matches case-sensitively — zNumbers are typed lowercase (e.g. "002p21")
     // but ZnumPad's letter keys render uppercase ("P"/"N"/"X"), so the button name lookup
     // must be uppercased even though the value passed to onChange stays lowercase.
-    await page.getByRole('button', { name: ch.toUpperCase(), exact: true }).click();
+    await scope.getByRole('button', { name: ch.toUpperCase(), exact: true }).click();
   }
 }
 

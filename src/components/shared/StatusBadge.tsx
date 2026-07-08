@@ -1,10 +1,11 @@
-export type StatusVariant = 'neutral' | 'good' | 'warning' | 'danger';
+export type StatusVariant = 'neutral' | 'good' | 'warning' | 'danger' | 'info';
 
 const VARIANT_STYLES: Record<StatusVariant, string> = {
   neutral: 'bg-[#1A1A1A] text-[#9A9A9A] border-[#3A3A3A]',
   good:    'bg-[#003300] text-[#33CC33] border-[#006600]',
   warning: 'bg-[#332600] text-[#DDAA00] border-[#664D00]',
   danger:  'bg-[#330000] text-[#FF4444] border-[#660000]',
+  info:    'bg-[#001A33] text-[#4499FF] border-[#003366]',
 };
 
 // Best-effort default coloring across LocationStatus, PalletStatus, and LabelStatus

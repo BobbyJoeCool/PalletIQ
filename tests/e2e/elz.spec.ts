@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { hardwareScan } from './helpers';
+import { hardwareScan, tapKeys } from './helpers';
 
 // See ela.spec.ts — same aisle/storage-code/size combination, chosen because it's
 // overwhelmingly likely to have at least one empty CR-sized location under the current seed.
@@ -53,9 +53,11 @@ test.describe('ELZ — Empty Locations by Zone', () => {
     await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
     await hardwareScan(page, LIVE_STORAGE);
 
-    // Grid: 8 fixed zone-side column headers.
-    await expect(page.getByText('Z1 Odd')).toBeVisible();
-    await expect(page.getByText('Z4 Even')).toBeVisible();
+    // Grid: 4 zone headers (each spanning an Odd+Even pair) plus the Odd/Even sub-headers.
+    await expect(page.getByText('Zone 1', { exact: true })).toBeVisible();
+    await expect(page.getByText('Zone 4', { exact: true })).toBeVisible();
+    await expect(page.getByText('Odd', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Even', { exact: true }).first()).toBeVisible();
 
     // Zone summary panel: at least Zone 1 should render with a StorageCode-Size breakdown line.
     await expect(page.getByText('Zone Summary')).toBeVisible();
@@ -76,5 +78,17 @@ test.describe('ELZ — Empty Locations by Zone', () => {
 
   test('the Stage Aisle button is disabled until an aisle has been entered', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Stage Aisle' })).toBeDisabled();
+  });
+
+  // Issue #5: Aisle auto-submits at 3 digits and Storage Code at 2 characters, without an
+  // explicit OK/Enter tap — tapKeys() (unlike hardwareScan()) never presses Enter itself, so
+  // reaching the results here proves the maxLength auto-submit fired on its own.
+  test('Aisle and Storage Code auto-submit at their max length without an explicit OK tap', async ({ page }) => {
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button').click();
+    await tapKeys(page, LIVE_AISLE);
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await tapKeys(page, LIVE_STORAGE);
+
+    await expect(page.getByText('Zone Summary')).toBeVisible();
   });
 });

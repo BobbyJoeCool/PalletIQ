@@ -622,6 +622,7 @@ async function main() {
   console.log('Clearing existing data...')
   await prisma.activityLog.deleteMany()
   await prisma.label.deleteMany()
+  await prisma.reservation.deleteMany()
   await prisma.pallet.deleteMany()
   await prisma.location.deleteMany()
   await prisma.user.deleteMany()

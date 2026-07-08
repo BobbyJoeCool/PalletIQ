@@ -6,6 +6,7 @@ import { ELAPage } from './pages/ELAPage';
 import { ELZPage } from './pages/ELZPage';
 import { HomePage } from './pages/HomePage';
 import { IIDPage } from './pages/IIDPage';
+import { ISIPage } from './pages/ISIPage';
 import { LIIPage } from './pages/LIIPage';
 import { LoginPage } from './pages/LoginPage';
 import { MNPPage } from './pages/MNPPage';
@@ -59,12 +60,12 @@ export default function App() {
           <Route path="/location"                element={<LIIPage />} />
           <Route path="/hold"                    element={<WLHPage />} />
           <Route path="/staged-aisle"            element={<SARPage />} />
+          <Route path="/storage-inquiry"         element={<ISIPage />} />
           <Route path="/empty/aisle"             element={<ELAPage />} />
           <Route path="/empty/zone"              element={<ELZPage />} />
           <Route path="/stage"                   element={<STGPage />} />
           <Route path="/reporting/individual"    element={<PlaceholderPage code="IRP" />} />
           <Route path="/reporting/pull-request"  element={<PlaceholderPage code="PRQ" />} />
-          <Route path="/reporting/other"         element={<PlaceholderPage code="RPT" />} />
         </Route>
       </Route>
 

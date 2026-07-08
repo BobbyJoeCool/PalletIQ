@@ -20,20 +20,31 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLengt
   const [value, setValue] = useState('');
   const valueRef = useRef('');
   const submitRef = useRef<((v: string) => void) | null>(null);
+  // True immediately after focus(), until the first key event of that focus session.
+  // Lets a fresh focus on a field that still holds a previous value start clean on the
+  // very next keystroke, instead of appending onto stale content (issue #2) — but only
+  // once the worker actually types; tapping the field and walking away leaves the old
+  // value visible, matching the issue's "only if the user actually types" requirement.
+  const freshFocusRef = useRef(false);
 
   /** Applies a single key event to the accumulated value: backspace, clear, submit, or append. */
   const handler = useCallback((key: string) => {
     if (key === '⌫' || key === 'Backspace') {
+      freshFocusRef.current = false;
       const next = valueRef.current.slice(0, -1);
       valueRef.current = next;
       setValue(next);
     } else if (key === 'CLEAR') {
+      freshFocusRef.current = false;
       valueRef.current = '';
       setValue('');
     } else if (key === 'Enter' || key === 'OK') {
+      freshFocusRef.current = false;
       submitRef.current?.(valueRef.current);
     } else if (key.length === 1) {
-      const next = valueRef.current + key;
+      const base = freshFocusRef.current ? '' : valueRef.current;
+      freshFocusRef.current = false;
+      const next = base + key;
       valueRef.current = next;
       setValue(next);
       if (maxLength != null && next.length >= maxLength && !isScanningRef.current) {
@@ -45,6 +56,7 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLengt
   /** Registers this field as the active numpad/keyboard target and opens the matching panel. */
   const focus = useCallback(
     (onSubmit: (v: string) => void) => {
+      freshFocusRef.current = true;
       submitRef.current = onSubmit;
       setKeyHandler(handler, fieldId);
       if (panel === 'keyboard') showKeyboard();

@@ -541,7 +541,7 @@ export function MNPPage() {
                 <LiveId type="pallet" id={String(scannedPallet.id)} />
               </DataRow>
               <DataRow label="Item">{scannedPallet.descShort}</DataRow>
-              <DataRow label="DPCI">{scannedPallet.dpci}</DataRow>
+              <DataRow label="DPCI"><LiveId type="dpci" id={scannedPallet.dpci} /></DataRow>
               <DataRow label="Qty on pallet">
                 {scannedPallet.quantity.pallets}P / {scannedPallet.quantity.cartons}C / {scannedPallet.quantity.ssps}S
               </DataRow>

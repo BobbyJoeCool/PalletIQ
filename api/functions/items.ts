@@ -74,6 +74,47 @@ async function getItemByUpc(req: HttpRequest): Promise<unknown> {
 }
 
 /**
+ * Item Storage Inquiry (ISI, issue #13) — every location currently storing a pallet of
+ * the given DPCI, ordered by location ID (aisle, then bin, then level). Only stored
+ * pallets are included (locationAisle non-null); a pallet pending put has no location
+ * yet and isn't "stored" anywhere for this purpose.
+ *
+ * @param req - HTTP request with URL param `dpci` (9-digit, dash-separated or concatenated)
+ * @returns `{ locations: { locationId: string, palletId: number }[] }` — locationId is the
+ *   canonical 8-digit id (Aisle+Bin+Level), sorted ascending by aisle/bin/level
+ * @throws 400 INVALID_INPUT if dpci is not a 9-digit value; 404 NOT_FOUND if no Item matches
+ */
+async function getItemLocations(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+
+  const digits = (req.params.dpci ?? '').replace(/-/g, '');
+  if (!/^\d{9}$/.test(digits)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
+  const dept = parseInt(digits.slice(0, 3), 10);
+  const cls  = parseInt(digits.slice(3, 5), 10);
+  const itm  = parseInt(digits.slice(5, 9), 10);
+
+  const item = await prisma.item.findUnique({ where: { DPCI: { dept, class: cls, item: itm } } });
+  if (!item) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+  const pallets = await prisma.pallet.findMany({
+    where: { dept, class: cls, item: itm, locationAisle: { not: null } },
+    select: { pid: true, locationAisle: true, locationBin: true, locationLevel: true },
+    orderBy: [{ locationAisle: 'asc' }, { locationBin: 'asc' }, { locationLevel: 'asc' }],
+  });
+
+  return {
+    locations: pallets.map((p) => ({
+      locationId:
+        String(p.locationAisle).padStart(3, '0') +
+        String(p.locationBin).padStart(3, '0') +
+        String(p.locationLevel).padStart(2, '0'),
+      palletId: p.pid,
+    })),
+  };
+}
+
+/**
  * Demo helper for IID's "Scan DPCI" footer button — returns a random item's DPCI.
  *
  * @returns `{ dpci: string }`
@@ -103,6 +144,13 @@ app.http('getItemByUpc', {
   authLevel: 'anonymous',
   route: 'items/upc/{upc}',
   handler: withHandler(getItemByUpc),
+});
+
+app.http('getItemLocations', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'items/dpci/{dpci}/locations',
+  handler: withHandler(getItemLocations),
 });
 
 app.http('sampleItem', {

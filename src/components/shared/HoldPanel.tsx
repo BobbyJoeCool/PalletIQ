@@ -22,6 +22,18 @@ const REMOVE_ROLE: Record<HoldCategory, Role> = {
   HOLD_IN: 'IM', HOLD_OUT: 'IM', HOLD_BOTH: 'IM', HOLD_PERM: 'LEAD',
 };
 
+// Color coding for the Current Hold display (issue #27): Hold Both reads as a caution
+// (yellow), Hold Permanent as the most severe (red), and the two directional holds
+// (Hold Inbound/Outbound) as informational (blue) — matches this app's StatusBadge
+// "info"/"warning"/"danger" variant colors without pulling in StatusBadge's pill shape,
+// since this display isn't a badge.
+const HOLD_TEXT_COLOR: Record<HoldCategory, string> = {
+  HOLD_IN:   'text-[#4499FF]',
+  HOLD_OUT:  'text-[#4499FF]',
+  HOLD_BOTH: 'text-[#DDAA00]',
+  HOLD_PERM: 'text-[#FF4444]',
+};
+
 interface LocationHoldInfo {
   status: string;
   holdCategory: HoldCategory | null;
@@ -143,7 +155,7 @@ export function HoldPanel({ locationId, onDone, showClose = false }: HoldPanelPr
     <div className="flex flex-col gap-4 max-w-[520px]">
       <div className="flex items-center gap-3">
         <span className="font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Current Hold</span>
-        <span className="font-data text-[20px] font-semibold text-white">
+        <span className={`font-data text-[28px] font-bold ${info.holdCategory ? HOLD_TEXT_COLOR[info.holdCategory] : 'text-white'}`}>
           {info.holdCategory ? HOLD_LABELS[info.holdCategory].name : 'None'}
         </span>
       </div>

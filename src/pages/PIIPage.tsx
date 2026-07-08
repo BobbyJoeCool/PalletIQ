@@ -24,6 +24,7 @@ interface PalletData {
   ssp: number;
   currentCartons: number;
   currentSSPs: number;
+  currentPallets: number;
   status: string;
   location: { aisle: number; bin: number; level: number } | null;
   receivedBy: UserStamp;
@@ -44,10 +45,10 @@ function location8(loc: { aisle: number; bin: number; level: number }): string {
   return String(loc.aisle).padStart(3, '0') + String(loc.bin).padStart(3, '0') + String(loc.level).padStart(2, '0');
 }
 
-/** Formats a "who/when" audit stamp for display, or an em dash if the pallet hasn't reached that stage yet. */
+/** Formats a "who/when" audit stamp for display, showing the zNumber (issue #7 — not the name), or an em dash if the pallet hasn't reached that stage yet. */
 function fmtUser(u: UserStamp | null, at: string | null): string {
   if (!u || !at) return '—';
-  return `${u.firstName} ${u.lastName.charAt(0)}. — ${new Date(at).toLocaleString()}`;
+  return `${u.zNumber} — ${new Date(at).toLocaleString()}`;
 }
 
 type ScreenState = 'ready' | 'loaded' | 'edit';
@@ -72,11 +73,15 @@ export function PIIPage() {
   const palletField = useNumpadField();
 
   // Edit-mode field values, seeded from the loaded pallet on entering edit mode.
-  const [editDpci, setEditDpci] = useState('');
+  // DPCI is three separate fields (issue #21) instead of one combined string.
+  const [editDept, setEditDept] = useState('');
+  const [editClass, setEditClass] = useState('');
+  const [editItem, setEditItem] = useState('');
   const [editVcp, setEditVcp] = useState('');
   const [editSsp, setEditSsp] = useState('');
   const [editCartons, setEditCartons] = useState('');
   const [editSSPs, setEditSSPs] = useState('');
+  const [editPallets, setEditPallets] = useState('');
   const [saving, setSaving] = useState(false);
 
   /** Looks up a pallet by id via the API and transitions to the loaded state; resets to ready on failure. */
@@ -138,11 +143,14 @@ export function PIIPage() {
   /** Seeds the edit-mode fields from the currently loaded pallet and switches to the edit state. */
   function enterEditMode() {
     if (!pallet) return;
-    setEditDpci(fmtDpci(pallet.dpci));
+    setEditDept(String(pallet.dpci.dept).padStart(3, '0'));
+    setEditClass(String(pallet.dpci.class).padStart(2, '0'));
+    setEditItem(String(pallet.dpci.item).padStart(4, '0'));
     setEditVcp(String(pallet.vcp));
     setEditSsp(String(pallet.ssp));
     setEditCartons(String(pallet.currentCartons));
     setEditSSPs(String(pallet.currentSSPs));
+    setEditPallets(String(pallet.currentPallets));
     setScreenState('edit');
   }
 
@@ -156,16 +164,14 @@ export function PIIPage() {
     if (!pallet || saving) return;
     setSaving(true);
     try {
-      const digits = editDpci.replace(/-/g, '');
       const body: Record<string, unknown> = {};
 
-      if (/^\d{9}$/.test(digits)) {
-        const dept = parseInt(digits.slice(0, 3), 10);
-        const cls = parseInt(digits.slice(3, 5), 10);
-        const itm = parseInt(digits.slice(5, 9), 10);
-        if (dept !== pallet.dpci.dept || cls !== pallet.dpci.class || itm !== pallet.dpci.item) {
-          body.dpci = { dept, class: cls, item: itm };
-        }
+      const dept = parseInt(editDept, 10);
+      const cls = parseInt(editClass, 10);
+      const itm = parseInt(editItem, 10);
+      if (!isNaN(dept) && !isNaN(cls) && !isNaN(itm) &&
+          (dept !== pallet.dpci.dept || cls !== pallet.dpci.class || itm !== pallet.dpci.item)) {
+        body.dpci = { dept, class: cls, item: itm };
       }
       const vcp = parseInt(editVcp, 10);
       if (!isNaN(vcp) && vcp !== pallet.vcp) body.vcp = vcp;
@@ -175,6 +181,8 @@ export function PIIPage() {
       if (!isNaN(cartons) && cartons !== pallet.currentCartons) body.currentCartons = cartons;
       const ssps = parseInt(editSSPs, 10);
       if (!isNaN(ssps) && ssps !== pallet.currentSSPs) body.currentSSPs = ssps;
+      const pallets = parseInt(editPallets, 10);
+      if (!isNaN(pallets) && pallets !== pallet.currentPallets) body.currentPallets = pallets;
 
       await apiFetch(`/api/pallets/${pallet.pid}`, token!, {
         method: 'PATCH',
@@ -251,14 +259,20 @@ export function PIIPage() {
       {loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
 
       {pallet && screenState !== 'ready' && (
-        <div className="flex-1 flex flex-col overflow-y-auto max-w-[720px]">
+        <div className={`flex-1 flex flex-col overflow-y-auto ${screenState === 'edit' ? 'max-w-[720px]' : 'max-w-[1100px]'}`}>
           <DataRow label="Pallet ID"><LiveId type="pallet" id={String(pallet.pid)} /></DataRow>
 
           {screenState === 'edit' ? (
             <>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
-                <input aria-label="DPCI" value={editDpci} onChange={(e) => setEditDpci(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] focus:outline-none focus:border-[#CC0000]" />
+                <div className="flex items-center gap-2">
+                  <input aria-label="Dept" value={editDept} onChange={(e) => setEditDept(e.target.value)} maxLength={3} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[76px] text-center focus:outline-none focus:border-[#CC0000]" />
+                  <span className="text-[#555]">-</span>
+                  <input aria-label="Class" value={editClass} onChange={(e) => setEditClass(e.target.value)} maxLength={2} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[64px] text-center focus:outline-none focus:border-[#CC0000]" />
+                  <span className="text-[#555]">-</span>
+                  <input aria-label="Item" value={editItem} onChange={(e) => setEditItem(e.target.value)} maxLength={4} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[92px] text-center focus:outline-none focus:border-[#CC0000]" />
+                </div>
               </div>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">VCP</span>
@@ -269,30 +283,39 @@ export function PIIPage() {
                 <input aria-label="SSP" type="number" value={editSsp} onChange={(e) => setEditSsp(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
               </div>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
-                <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Cartons on Pallet</span>
-                <input aria-label="Cartons on Pallet" type="number" value={editCartons} onChange={(e) => setEditCartons(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
+                <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Total Cartons</span>
+                <input aria-label="Total Cartons" type="number" value={editCartons} onChange={(e) => setEditCartons(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
               </div>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">SSPs on Pallet</span>
                 <input aria-label="SSPs on Pallet" type="number" value={editSSPs} onChange={(e) => setEditSSPs(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
               </div>
+              <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
+                <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Full Pallets</span>
+                <input aria-label="Full Pallets" type="number" value={editPallets} onChange={(e) => setEditPallets(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
+              </div>
             </>
           ) : (
-            <>
-              <DataRow label="DPCI">{fmtDpci(pallet.dpci)}</DataRow>
-              <DataRow label="UPC">{pallet.upc}</DataRow>
-              <DataRow label="VCP">{pallet.vcp}</DataRow>
-              <DataRow label="SSP">{pallet.ssp}</DataRow>
-              <DataRow label="Cartons on Pallet">{pallet.currentCartons}</DataRow>
-              <DataRow label="SSPs on Pallet">{pallet.currentSSPs}</DataRow>
-              <DataRow label="Status"><StatusBadge status={pallet.status} /></DataRow>
-              <DataRow label="Current Location">
-                {pallet.location ? <LiveId type="location" id={location8(pallet.location)} /> : '—'}
-              </DataRow>
-              <DataRow label="Received By">{fmtUser(pallet.receivedBy, pallet.receivedAt)}</DataRow>
-              <DataRow label="Put By">{fmtUser(pallet.putBy, pallet.putAt)}</DataRow>
-              <DataRow label="Last Pulled By">{fmtUser(pallet.lastPulledBy, pallet.lastPulledAt)}</DataRow>
-            </>
+            <div className="flex gap-8">
+              <div className="flex-1 flex flex-col">
+                <DataRow label="DPCI"><LiveId type="dpci" id={fmtDpci(pallet.dpci)} /></DataRow>
+                <DataRow label="UPC"><LiveId type="upc" id={pallet.upc} /></DataRow>
+                <DataRow label="VCP">{pallet.vcp}</DataRow>
+                <DataRow label="SSP">{pallet.ssp}</DataRow>
+                <DataRow label="Total Cartons">{pallet.currentCartons}</DataRow>
+                <DataRow label="SSPs on Pallet">{pallet.currentSSPs}</DataRow>
+                <DataRow label="Full Pallets">{pallet.currentPallets}</DataRow>
+              </div>
+              <div className="flex-1 flex flex-col">
+                <DataRow label="Status"><StatusBadge status={pallet.status} /></DataRow>
+                <DataRow label="Current Location">
+                  {pallet.location ? <LiveId type="location" id={location8(pallet.location)} /> : '—'}
+                </DataRow>
+                <DataRow label="Received By">{fmtUser(pallet.receivedBy, pallet.receivedAt)}</DataRow>
+                <DataRow label="Put By">{fmtUser(pallet.putBy, pallet.putAt)}</DataRow>
+                <DataRow label="Last Pulled By">{fmtUser(pallet.lastPulledBy, pallet.lastPulledAt)}</DataRow>
+              </div>
+            </div>
           )}
 
           <div className="flex gap-3 mt-4">

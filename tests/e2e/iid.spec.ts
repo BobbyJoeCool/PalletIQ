@@ -23,17 +23,18 @@ test.describe('IID — Item ID Lookup', () => {
     await expect(page.getByText('Item not found')).toBeVisible();
   });
 
-  test('entering a UPC clears the DPCI field', async ({ page }) => {
+  test('entering a UPC clears the DPCI fields', async ({ page }) => {
     await page.getByRole('button', { name: '✓ Scan DPCI' }).click();
     await expect(page.getByText('Name', { exact: true })).toBeVisible();
 
-    const dpciField = page.locator('div.w-\\[260px\\]', { hasText: 'DPCI' }).getByRole('button');
-    await expect(dpciField).not.toHaveText('—');
+    // DPCI is three separate fields (issue #16) — Dept/Class/Item.
+    const deptField = page.getByRole('button', { name: 'Dept' });
+    await expect(deptField).not.toHaveText('—');
 
     const upcField = page.locator('div.w-\\[260px\\]', { hasText: 'UPC' }).getByRole('button');
     await upcField.click();
     await hardwareScan(page, '999999999999');
 
-    await expect(dpciField).toHaveText('—');
+    await expect(deptField).toHaveText('—');
   });
 });

@@ -29,8 +29,8 @@ flowchart TD
     S3[State: verifying\nstores labelData\npidField auto-focuses\nvia useEffect on screenState]
 
     S3 --> RESCAN{New label\nscanned while verifying?}
-    RESCAN -->|Yes — handleLabelScan| WARN[Warning: Label not verified\nclear PID + Alt fields\nreload label data]
-    WARN --> S3
+    RESCAN -->|Yes — handleLabelScan\nissue #45: no status-bar\nupdate on a plain rescan| RELOAD[Clear PID + Alt fields\nreload label data\nsilently]
+    RELOAD --> S3
 
     S3 --> VER_PATH{Worker scans one of:}
 
@@ -44,11 +44,15 @@ flowchart TD
 
     ALT_VERIFY --> ALT_UPC{UPC match?}
     ALT_UPC -->|Yes| ALT_OK
-    ALT_UPC -->|No| ALT_FN{pullFunction?}
-    ALT_FN -->|CA/CF| ALT_BINONLY[Location barcode\n6- or 8-digit\naisle+bin only — level ignored]
-    ALT_FN -->|FP| ALT_LEVEL[Location barcode\nfull 8-digit required\naisle+bin AND level must match]
-    ALT_BINONLY --> ALT_OK
-    ALT_LEVEL --> ALT_OK
+    ALT_UPC -->|No| ALT_BIN{aisle+bin match?}
+    ALT_BIN -->|No| ALT_OK
+    ALT_BIN -->|Yes| ALT_FN{pullFunction?}
+    ALT_FN -->|CA/CF\nlevel ignored| ALT_OK
+    ALT_FN -->|FP| ALT_LEVEL{level also\nmatches?}
+    ALT_LEVEL -->|Yes| ALT_OK
+    ALT_LEVEL -->|No — issues #48/#49\nLEVEL_MISMATCH 400| CONFIRM[ConfirmDialog:\nLevel doesn't match\nYou scanned Level X /\nactual is Level Y]
+    CONFIRM -->|Cancel — cancelLevelMismatch| ERR_ALT
+    CONFIRM -->|Confirm Pull —\nresubmit with\nconfirmLevelMismatch: true| ALT_OK
 
     ALT_OK{Result?}
     ALT_OK -->|ALTERNATE_MISMATCH| ERR_ALT[Error: Invalid Alternate ID\naltField cleared + re-focused]
@@ -76,3 +80,4 @@ flowchart TD
     style ERR_PID2 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_ALT fill:#330000,stroke:#660000,color:#ff8080
     style ERR_ALT2 fill:#330000,stroke:#660000,color:#ff8080
+    style CONFIRM fill:#332200,stroke:#665500,color:#ffcc66

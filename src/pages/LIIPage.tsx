@@ -139,29 +139,33 @@ export function LIIPage() {
       {loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
 
       {location && locationId && !loading && (
-        <div className="flex-1 flex flex-col overflow-y-auto max-w-[720px]">
-          <DataRow label="Location ID"><LiveId type="location" id={locationId} /></DataRow>
-          <DataRow label="Aisle">{location.aisle}</DataRow>
-          <DataRow label="Bin">{location.bin}</DataRow>
-          <DataRow label="Level">{location.level}</DataRow>
-          <DataRow label="Zone">{location.zone}</DataRow>
-          <DataRow label="Size">{location.size}</DataRow>
-          <DataRow label="Storage Code">{location.storageCode}</DataRow>
-          <DataRow label="Status"><StatusBadge status={location.status} /></DataRow>
-          <DataRow label="Hold">
-            {location.holdCategory ? <StatusBadge status={HOLD_NAMES[location.holdCategory] ?? location.holdCategory} variant="danger" /> : 'None'}
-          </DataRow>
+        <div className={`flex-1 flex flex-col overflow-y-auto ${location.pallet ? 'max-w-[1100px]' : 'max-w-[720px]'}`}>
+          <div className="flex gap-8">
+            <div className="flex-1 flex flex-col">
+              <DataRow label="Location ID"><LiveId type="location" id={locationId} /></DataRow>
+              <DataRow label="Aisle">{location.aisle}</DataRow>
+              <DataRow label="Bin">{location.bin}</DataRow>
+              <DataRow label="Level">{location.level}</DataRow>
+              <DataRow label="Zone">{location.zone}</DataRow>
+              <DataRow label="Size">{location.size}</DataRow>
+              <DataRow label="Storage Code">{location.storageCode}</DataRow>
+              <DataRow label="Status"><StatusBadge status={location.status} /></DataRow>
+              <DataRow label="Hold">
+                {location.holdCategory ? <StatusBadge status={HOLD_NAMES[location.holdCategory] ?? location.holdCategory} variant="danger" /> : 'None'}
+              </DataRow>
+            </div>
 
-          {location.pallet && (
-            <>
-              <DataRow label="Pallet ID"><LiveId type="pallet" id={String(location.pallet.id)} /></DataRow>
-              <DataRow label="DPCI">{location.pallet.dpci}</DataRow>
-              <DataRow label="Cartons">{location.pallet.cartons}</DataRow>
-              <DataRow label="Pallets">{location.pallet.pallets}</DataRow>
-              <DataRow label="SSPs">{location.pallet.ssps}</DataRow>
-              <DataRow label="Pallet Status"><StatusBadge status={location.pallet.status} /></DataRow>
-            </>
-          )}
+            {location.pallet && (
+              <div className="flex-1 flex flex-col">
+                <DataRow label="Pallet ID"><LiveId type="pallet" id={String(location.pallet.id)} /></DataRow>
+                <DataRow label="DPCI"><LiveId type="dpci" id={location.pallet.dpci} /></DataRow>
+                <DataRow label="Cartons">{location.pallet.cartons}</DataRow>
+                <DataRow label="Pallets">{location.pallet.pallets}</DataRow>
+                <DataRow label="SSPs">{location.pallet.ssps}</DataRow>
+                <DataRow label="Pallet Status"><StatusBadge status={location.pallet.status} /></DataRow>
+              </div>
+            )}
+          </div>
 
           <div className="flex gap-3 mt-4">
             <button

@@ -1,117 +1,71 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { DataRow } from '../components/shared/DataRow';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
-import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
+import { fmtLocation } from '../lib/fmt';
 import { useNumpadField } from '../lib/useNumpadField';
 
-// Item.vcp/Item.ssp do not exist on the actual data model — VCP/SSP are set per-pallet
-// at receiving time, not fixed at the item level (see outline.md's Core Data Concepts,
-// and api/prisma/schema.prisma's Item model). IID.md's read-only field table lists them
-// anyway, which looks like a leftover from an earlier iteration of the data model. This
-// screen displays the Item model's actual fields instead — see phase-9 log.
-interface ItemData {
-  dept: number;
-  class: number;
-  item: number;
-  dpci: string;
-  upc: string;
-  name: string;
-  desc: string;
-  descShort: string;
-  retailPrice: number;
-  cost: number;
-  packingZoneCode: number;
-  storageCode: string;
-  conveyable: boolean;
+interface LocationEntry {
+  locationId: string;
+  palletId: number;
 }
 
 /**
- * IID — Item ID Lookup. Read-only item lookup for all roles via two independent entry
- * fields (DPCI or UPC) — no edit capability, item data is managed outside this app.
- * See DevNotes/Screen-Specs/IID.md.
+ * ISI — Item Storage Inquiry (issue #13). Worker enters a DPCI; every location currently
+ * storing a pallet of that item is listed, ordered by location ID. Selecting a row enables
+ * hot buttons to jump to that row's Location ID or Pallet ID screen. Read-only, no edit
+ * capability — this is a lookup tool, same spirit as IID.
  */
-export function IIDPage() {
+export function ISIPage() {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
-  const { hidePanel } = useNumpad();
-  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
-  // DPCI entry is three separate fields (issue #16) instead of one combined field —
-  // Dept auto-advances to Class, Class to Item, and Item auto-resolves the lookup once
-  // all three are filled. deptValueRef/classValueRef hold the accumulated values live
-  // across the chain — reading deptField.value/classField.value directly in
-  // handleItemConfirm would see them frozen at mount time (the same stale-closure hazard
-  // fixed in LocationEntryFields.tsx earlier this session), since this chain's handlers
-  // are only ever registered once, at mount / on each preceding field's confirm.
+  // Same three-field Dept/Class/Item entry pattern as IID (issue #16) — auto-advances
+  // Dept → Class → Item, then resolves once all three are filled. deptValueRef/
+  // classValueRef hold the accumulated values live across the chain (see IIDPage.tsx's
+  // identical pattern for why refs are needed instead of reading field.value directly).
   const deptField = useNumpadField('numpad', 3);
   const classField = useNumpadField('numpad', 2);
   const itemField = useNumpadField('numpad', 4);
-  const upcField = useNumpadField('keyboard');
-  const [item, setItem] = useState<ItemData | null>(null);
-  const [loading, setLoading] = useState(false);
   const deptValueRef = useRef('');
   const classValueRef = useRef('');
 
-  /** Looks up an item by DPCI via the API, clearing the UPC field on success (or the DPCI fields on failure). */
-  const loadByDpci = useCallback(async (v: string) => {
-    const trimmed = v.trim();
-    if (!trimmed) return;
-    // Populate the three display fields directly — the typed-entry chain already has them
-    // filled by this point, but callers that supply a whole DPCI at once (demo buttons, the
-    // ?dpci= URL param) otherwise leave the fields showing "—" despite a loaded item.
-    const [d, c, i] = trimmed.split('-');
+  const [locations, setLocations] = useState<LocationEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<number | null>(null);
+
+  /** Looks up every stored location for a DPCI via the API. */
+  const loadByDpci = useCallback(async (dpci: string) => {
+    // Populate the three display fields directly — callers that supply a whole DPCI at
+    // once (demo buttons) otherwise leave the fields showing "—" despite a loaded result
+    // (same fix as IIDPage.tsx's identical loadByDpci).
+    const [d, c, i] = dpci.split('-');
     if (d != null && c != null && i != null) {
       deptField.set(d);
       classField.set(c);
       itemField.set(i);
     }
-    upcField.clear();
-    hidePanel();
     setLoading(true);
+    setSelected(null);
     try {
-      const data = await apiFetch<ItemData>(`/api/items/dpci/${encodeURIComponent(trimmed)}`, token!);
-      setItem(data);
+      const data = await apiFetch<{ locations: LocationEntry[] }>(`/api/items/dpci/${encodeURIComponent(dpci)}/locations`, token!);
+      setLocations(data.locations);
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: 'Item not found' });
       deptField.clear();
       classField.clear();
       itemField.clear();
-      setItem(null);
+      setLocations(null);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, hidePanel]);
-
-  /** Looks up an item by UPC via the API, clearing the DPCI fields on success (or the UPC field on failure). */
-  const loadByUpc = useCallback(async (v: string) => {
-    const trimmed = v.trim();
-    if (!trimmed) return;
-    upcField.set(trimmed);
-    deptField.clear();
-    classField.clear();
-    itemField.clear();
-    hidePanel();
-    setLoading(true);
-    try {
-      const data = await apiFetch<ItemData>(`/api/items/upc/${encodeURIComponent(trimmed)}`, token!);
-      setItem(data);
-    } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Item not found' });
-      upcField.clear();
-      setItem(null);
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, hidePanel]);
+  }, [token]);
 
   /** Registers the Dept field's numpad handler; on confirm (3 digits), advances to Class. */
   function focusDeptField() {
@@ -152,27 +106,19 @@ export function IIDPage() {
   useEffect(() => {
     const id = setTimeout(() => focusDeptField(), 50);
     return () => clearTimeout(id);
-    // Only ever focus Dept on mount — this screen doesn't reset/re-enter a "ready" state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Pre-population via ?dpci= or ?upc= (issue #47 — DPCI/UPC chips elsewhere in the app
-  // navigate here via LiveId, same pattern as LII/WLH/PII's ?id=).
-  const dpciParam = searchParams.get('dpci');
-  const upcParam = searchParams.get('upc');
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount effect (URL ?dpci=/?upc= pre-population)
-    if (dpciParam) void loadByDpci(dpciParam);
-    else if (upcParam) void loadByUpc(upcParam);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dpciParam, upcParam]);
+  /** Toggles row selection — tapping the already-selected row deselects it. */
+  function toggleSelect(palletId: number) {
+    setSelected((s) => (s === palletId ? null : palletId));
+  }
 
-  /** Registers the UPC field's keyboard handler, wired to loadByUpc on confirm. */
-  const focusUpcField = useCallback(() => upcField.focus(loadByUpc), [upcField, loadByUpc]);
+  const selectedEntry = locations?.find((l) => l.palletId === selected) ?? null;
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
-  /** Fetches a random real DPCI from the API and looks it up, simulating a successful scan. */
+  /** Fetches a real DPCI from the item catalogue and looks it up, simulating a scan (may return zero locations if that item isn't currently stored anywhere). */
   const demoScan = useCallback(async () => {
     try {
       const { dpci } = await apiFetch<{ dpci: string }>('/api/items/sample', token!);
@@ -186,7 +132,6 @@ export function IIDPage() {
   /** Looks up a DPCI that doesn't exist, simulating a not-found scan. */
   const demoBad = useCallback(() => void loadByDpci('999-99-9999'), [loadByDpci]);
 
-  /** Footer demo-button slot content: a good scan and a bad scan trigger. */
   const demoSlot = useMemo(() => (
     <>
       <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">
@@ -204,7 +149,7 @@ export function IIDPage() {
 
   return (
     <div className="absolute inset-0 flex flex-col p-6 gap-4 select-none">
-      <div className="flex gap-4">
+      <div className="flex items-end gap-4">
         <div>
           <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
           <div className="flex items-center gap-2 mt-1">
@@ -245,34 +190,46 @@ export function IIDPage() {
             </button>
           </div>
         </div>
-        <div className="w-[260px]">
-          <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">UPC</span>
-          <button
-            type="button"
-            onClick={focusUpcField}
-            className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${upcField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-          >
-            <span className="font-data text-[26px] font-medium text-white">
-              {upcField.value || <span className="text-[#444]">—</span>}
-            </span>
-            {upcField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-          </button>
-        </div>
+
+        {selectedEntry && (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate(`/location?id=${selectedEntry.locationId}`)}
+              className="h-[56px] px-6 rounded-[12px] font-ui text-[16px] font-semibold bg-[#003366] hover:bg-[#004488] text-white transition-colors"
+            >
+              Go to Location ID
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(`/pallet?id=${selectedEntry.palletId}`)}
+              className="h-[56px] px-6 rounded-[12px] font-ui text-[16px] font-semibold bg-[#003366] hover:bg-[#004488] text-white transition-colors"
+            >
+              Go to Pallet ID
+            </button>
+          </div>
+        )}
       </div>
 
       {loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
 
-      {item && !loading && (
-        <div className="flex-1 flex flex-col overflow-y-auto max-w-[720px]">
-          <DataRow label="DPCI">{item.dpci}</DataRow>
-          <DataRow label="UPC">{item.upc}</DataRow>
-          <DataRow label="Name">{item.name}</DataRow>
-          <DataRow label="Short Description">{item.descShort}</DataRow>
-          <DataRow label="Description">{item.desc}</DataRow>
-          <DataRow label="Retail Price">${item.retailPrice.toFixed(2)}</DataRow>
-          <DataRow label="Cost">${item.cost.toFixed(2)}</DataRow>
-          <DataRow label="Storage Code">{item.storageCode}</DataRow>
-          <DataRow label="Conveyable">{item.conveyable ? 'Yes' : 'No'}</DataRow>
+      {locations && !loading && (
+        <div className="flex-1 flex flex-col overflow-y-auto max-w-[720px] border border-[#2A2A2A] rounded-[12px]">
+          {locations.length === 0 ? (
+            <p className="px-5 py-4 font-ui text-[15px] text-[#555]">No locations currently storing this item</p>
+          ) : (
+            locations.map((l) => (
+              <button
+                type="button"
+                key={l.palletId}
+                onClick={() => toggleSelect(l.palletId)}
+                className={`w-full flex items-center justify-between px-5 py-3 border-b border-[#1A1A1A] last:border-b-0 text-left transition-colors ${selected === l.palletId ? 'bg-[#1A2A3A]' : 'hover:bg-[#111111]'}`}
+              >
+                <span className="font-data text-[20px] font-semibold text-white">{fmtLocation(l.locationId)}</span>
+                <span className="font-data text-[16px] text-[#9A9A9A]">Pallet {l.palletId}</span>
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>

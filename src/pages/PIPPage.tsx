@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HoldPanel } from '../components/shared/HoldPanel';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
@@ -167,6 +168,9 @@ export function PIPPage() {
   // Quick-hold panel (WLH.md: "surfaced as a quick-action on PIP, SDP, and MNP" —
   // inline, not a full navigation) for the scanned label's resolved location.
   const [holdOpen, setHoldOpen] = useState(false);
+  // Pending FP level-mismatch confirmation (issue #49) — set by handleAltVerify on
+  // LEVEL_MISMATCH, resolved by confirmLevelMismatch/cancelLevelMismatch.
+  const [levelMismatch, setLevelMismatch] = useState<{ scannedLevel: number; actualLevel: number; altValue: string } | null>(null);
 
   const labelField = useNumpadField();
   const pidField   = useNumpadField();
@@ -217,7 +221,11 @@ export function PIPPage() {
     const priorState = screenStateRef.current;
     if (!v || loadingRef.current || (priorState !== 'ready' && priorState !== 'verifying')) return;
     if (priorState === 'verifying') {
-      setMessage({ type: 'warning', text: 'Label not verified' });
+      // No message-bar update here — scanning the next label while the previous one was still
+      // unverified is a normal part of the fast scan-then-verify-in-batch workflow, not an error
+      // condition. Overwriting whatever's already showing (e.g. the previous pull's success
+      // message) with a "Label not verified" warning on every plain rescan is what issue #45
+      // actually reported; the fields still get cleared to make way for the new label's data.
       pidField.clear();
       altField.clear();
     }
@@ -291,6 +299,10 @@ export function PIPPage() {
    * Submit handler for the Alternate ID field. Calls POST /api/pulls/verify with alternateId
    * (the backend tries UPC match then location barcode match in that order).
    * On mismatch (ALTERNATE_MISMATCH), clears and re-focuses the Alt ID field for retry.
+   * On an FP-only level mismatch (LEVEL_MISMATCH — aisle+bin matched but level didn't),
+   * opens a confirm prompt instead of failing outright (issue #49): a Full Pallet pull
+   * happens from floor level, so the worker may only be able to reach/scan a barcode at a
+   * level other than where the pallet is actually stored.
    * On success, calls onPullSuccess.
    */
   async function handleAltVerify(value: string) {
@@ -308,6 +320,13 @@ export function PIPPage() {
       onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
+      if (code === 'LEVEL_MISMATCH') {
+        const data = (err as { data?: { scannedLevel: number; actualLevel: number } }).data;
+        if (data) {
+          setLevelMismatch({ ...data, altValue: v });
+          return;
+        }
+      }
       playAlert('error');
       altField.clear();
       altField.focus(handleAltVerify);
@@ -321,6 +340,39 @@ export function PIPPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  /** Worker confirmed the FP level mismatch is genuinely their pull — resubmit with confirmLevelMismatch to complete it. */
+  async function confirmLevelMismatch() {
+    const pending = levelMismatch;
+    const ld = labelDataRef.current;
+    setLevelMismatch(null);
+    if (!pending || !ld) return;
+    setLoading(true);
+    try {
+      const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
+        '/api/pulls/verify',
+        token!,
+        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, alternateId: pending.altValue, confirmLevelMismatch: true }) },
+      );
+      onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
+    } catch {
+      playAlert('error');
+      altField.clear();
+      altField.focus(handleAltVerify);
+      setMessage({ type: 'error', text: 'Verification failed — please try again' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /** Worker declined to confirm the FP level mismatch — treat it like any other invalid Alternate ID. */
+  function cancelLevelMismatch() {
+    setLevelMismatch(null);
+    playAlert('error');
+    altField.clear();
+    altField.focus(handleAltVerify);
+    setMessage({ type: 'error', text: 'Invalid Alternate ID' });
   }
 
   /**
@@ -388,6 +440,18 @@ export function PIPPage() {
     deliverScan('INVALID-LABEL-000');
   }, [deliverScan]);
 
+  /** Fetches a real, valid label for a pull function other than the one selected, and delivers it as a simulated scan — demonstrates the "Wrong function" error path (handleLabelScan's FN_CHECK). */
+  const demoWrongFnLabel = useCallback(async () => {
+    const otherFn = PULL_FUNCTIONS.find(f => f.code !== pullFunction)?.code;
+    if (!otherFn) return;
+    try {
+      const { labelId } = await apiFetch<{ labelId: string }>(`/api/demo/label?fn=${otherFn}`, token!);
+      deliverScan(labelId);
+    } catch (err) {
+      setMessage({ type: 'error', text: `Demo label: ${err instanceof Error ? err.message : 'unavailable'}` });
+    }
+  }, [token, deliverScan, setMessage, pullFunction]);
+
   /** Delivers the current label's actual pallet id, simulating a correct verification scan. */
   const demoScanPid = useCallback(() => {
     const ld = labelDataRef.current;
@@ -420,6 +484,7 @@ export function PIPPage() {
       <>
         <DemoBtn label="✓ Scan Label" color="green" onClick={demoScanLabel} />
         <DemoBtn label="✗ Scan Label" color="red"   onClick={demoBadLabel} />
+        <DemoBtn label="⚠ Wrong Function" color="amber" onClick={demoWrongFnLabel} />
       </>
     ) : pidField.isActive ? (
       <>
@@ -434,7 +499,7 @@ export function PIPPage() {
     ) : null
   ), [
     screenState, labelField.isActive, pidField.isActive, altField.isActive,
-    demoScanLabel, demoBadLabel, demoScanPid, demoBadPid, demoScanAlt, demoBadAlt,
+    demoScanLabel, demoBadLabel, demoWrongFnLabel, demoScanPid, demoBadPid, demoScanAlt, demoBadAlt,
   ]);
 
   useDemoSlot(demoSlot);
@@ -528,11 +593,11 @@ export function PIPPage() {
                 <div className="flex flex-col mt-1">
                   <DataRow label="Location">
                     {labelData.location.id
-                      ? <LiveId type="location" id={labelData.location.id} className="!font-bold" />
+                      ? <LiveId type="location" id={labelData.location.id} className="!text-[24px] !font-bold !text-[#FF1A1A]" />
                       : <span className="text-[#9A9A9A]">—</span>}
                   </DataRow>
                   <DataRow label="Item">{labelData.label.descShort}</DataRow>
-                  <DataRow label="DPCI">{labelData.label.dpci}</DataRow>
+                  <DataRow label="DPCI"><LiveId type="dpci" id={labelData.label.dpci} /></DataRow>
                   <QtyRow label="Pull qty"    qty={labelData.label.quantity} />
                   <QtyRow label="In location" qty={labelData.pallet.quantity} />
                   {remaining && (
@@ -601,6 +666,18 @@ export function PIPPage() {
             <HoldPanel locationId={labelData.location.id} onDone={() => setHoldOpen(false)} showClose />
           </div>
         </div>
+      )}
+
+      {levelMismatch && (
+        <ConfirmDialog
+          title="Level doesn't match"
+          message={`You scanned Level ${levelMismatch.scannedLevel}, but this pallet's recorded location is Level ${levelMismatch.actualLevel}. Confirm you pulled this Full Pallet from the scanned location?`}
+          confirmLabel="Confirm Pull"
+          cancelLabel="Cancel"
+          variant="primary"
+          onConfirm={confirmLevelMismatch}
+          onCancel={cancelLevelMismatch}
+        />
       )}
     </div>
   );

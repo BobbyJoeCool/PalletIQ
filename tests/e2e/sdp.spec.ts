@@ -156,6 +156,26 @@ test.describe('SDP — System Directed Put flow', () => {
       await expect(page.getByRole('button', { name: 'Consolidating' })).toBeVisible();
     });
   });
+
+  // Issue #50: no "Applying: ..." summary until at least one override is actually set, then
+  // it lists every selected override (not just one) — confirms overrides combine with AND
+  // rather than the system only acting on a single one.
+  test('the "Applying" summary lists every selected override', async ({ page }) => {
+    await expect(page.getByText('Applying:')).not.toBeVisible();
+
+    await page.getByRole('button', { name: 'M', exact: true }).click(); // Size quick-pick
+
+    // The Zone wrapper also contains a "Lock" toggle button — target the field display
+    // button specifically (its accessible name starts as the placeholder "—").
+    const zoneField = page.locator('div.flex.flex-col.gap-1', { hasText: 'Zone' }).getByRole('button', { name: '—' });
+    await zoneField.click();
+    await tapKeys(page, '2');
+
+    const summary = page.getByText(/^Applying:/);
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText('Size M');
+    await expect(summary).toContainText('Zone 2');
+  });
 });
 
 test.describe('SDP — Worker role gating', () => {

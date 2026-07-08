@@ -197,6 +197,11 @@ function LoginContent() {
         </div>
       </div>
 
+      {/* Version number — unobtrusive corner label, build-time constant from package.json */}
+      <span className="absolute bottom-3 right-4 font-ui text-[13px] text-[#444444] select-none">
+        v{__APP_VERSION__}
+      </span>
+
       {/* Bottom: message bar (standalone 84 px) */}
       <MessageBar standalone />
     </div>

@@ -21,6 +21,10 @@ export function json(body: unknown, status = 200): HttpResponseInit {
  * use that status code; all others become 500 INTERNAL_ERROR.
  * The error message becomes the `error` field in the JSON response body,
  * which the client reads to identify the specific failure (e.g. "PALLET_MISMATCH").
+ * An optional `data` property (a plain object) is spread into the response body
+ * alongside `error` — for cases where the client needs more than just the error
+ * code to react correctly (e.g. LEVEL_MISMATCH's scanned/actual level, so the
+ * frontend can show them in a confirmation prompt rather than a generic message).
  *
  * @param fn - The async endpoint handler to wrap
  * @returns An Azure Functions HttpHandler that catches and formats thrown errors
@@ -35,7 +39,8 @@ export function withHandler(
     } catch (err) {
       const status = (err as { status?: number }).status ?? 500;
       const code = err instanceof Error ? err.message : 'INTERNAL_ERROR';
-      return json({ error: code }, status);
+      const data = (err as { data?: Record<string, unknown> }).data;
+      return json({ error: code, ...data }, status);
     }
   };
 }

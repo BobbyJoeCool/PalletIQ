@@ -59,8 +59,8 @@ export function ELZPage() {
   const routerLocation = useLocation();
   const prefill = (routerLocation.state as NavState | null) ?? null;
 
-  const aisleField = useNumpadField('numpad');
-  const storageField = useNumpadField('keyboard');
+  const aisleField = useNumpadField('numpad', 3);
+  const storageField = useNumpadField('keyboard', 2);
   const [aisle, setAisle] = useState<number | null>(prefill?.aisle ?? null);
   const [storageCode, setStorageCode] = useState(prefill?.storageCode ?? '');
   const [result, setResult] = useState<EmptyByZoneResult | null>(null);
