@@ -7,6 +7,7 @@ import './functions/pulls.js';
 import './functions/puts.js';
 import './functions/staging.js';
 import './functions/samples.js';
+import './functions/demo-reseed.js';
 import './functions/reservationTimer.js';
 import './functions/activity.js';
 import './functions/items.js';
