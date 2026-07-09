@@ -33,7 +33,8 @@ async function identify(req: HttpRequest, _ctx: InvocationContext): Promise<unkn
 /**
  * Verifies a zNumber + 4-digit PIN pair and, on success, issues a signed JWT.
  * The PIN is compared against the stored bcrypt hash — the raw PIN is never stored.
- * The returned token is valid for 15 minutes and encodes the user's zNumber and role.
+ * The returned token is valid for 12 hours and encodes the user's zNumber and role — session
+ * length is actually enforced client-side by the 15-minute idle timeout in AuthContext.tsx.
  *
  * @param req - HTTP request with JSON body `{ zNumber: string; pin: string }`
  * @returns `{ token, user: { zNumber, firstName, lastName, role } }` on success

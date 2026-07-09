@@ -593,7 +593,11 @@ export function PIPPage() {
                 <div className="flex flex-col mt-1">
                   <DataRow label="Location">
                     {labelData.location.id
-                      ? <LiveId type="location" id={labelData.location.id} className="!text-[24px] !font-bold !text-[#FF1A1A]" />
+                      ? (
+                        <span className="inline-flex px-3 py-1 rounded-[10px] bg-[#CC0000]/10 border-2 border-[#CC0000]/40">
+                          <LiveId type="location" id={labelData.location.id} className="!text-[24px] !font-bold !text-[#FF1A1A]" />
+                        </span>
+                      )
                       : <span className="text-[#9A9A9A]">—</span>}
                   </DataRow>
                   <DataRow label="Item">{labelData.label.descShort}</DataRow>

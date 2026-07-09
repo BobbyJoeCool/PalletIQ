@@ -11,8 +11,11 @@ export interface JwtPayload {
 const getSecret = () => Buffer.from(process.env.JWT_SECRET!, 'utf-8');
 
 /**
- * Signs a short-lived HS256 JWT containing the user's zNumber and role.
- * Token expiry is 15 minutes, matching the session idle timeout enforced client-side.
+ * Signs an HS256 JWT containing the user's zNumber and role.
+ * Token expiry is 12 hours — long enough to outlast any real kiosk shift.
+ * The actual session-length enforcement is the 15-minute idle timeout in
+ * AuthContext.tsx (client-side); this expiry is just a backstop, not the
+ * mechanism that ends active sessions.
  *
  * @param payload - `{ zNumber, role }` to embed in the token claims
  * @returns Signed JWT string
@@ -21,7 +24,7 @@ export async function signToken(payload: JwtPayload): Promise<string> {
   return new SignJWT({ zNumber: payload.zNumber, role: payload.role })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime('15m')
+    .setExpirationTime('12h')
     .sign(getSecret());
 }
 

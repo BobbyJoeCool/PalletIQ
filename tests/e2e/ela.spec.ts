@@ -18,9 +18,10 @@ const UNKNOWN_STORAGE = 'ZZ';
  * and the two pre-population navigation actions described in DevNotes/Screen-Specs/ELA.md.
  *
  * Not covered:
- * - Dynamic multi-size column rendering: the API always returns exactly one size column
- *   per query (storageCode+size are both required filters — see api/functions/locations.ts's
- *   getLocationsEmptyByAisle), so there is no real multi-column case to exercise.
+ * - Dynamic multi-size column rendering: as of issue #4's fix, getLocationsEmptyByAisle
+ *   returns every size present in a qualifying aisle (e.g. aisle 304 is CR with level 1 = M
+ *   and levels 2-5 = L, per AISLE_PATTERN in api/prisma/seed.ts), so a real multi-column case
+ *   now exists against seed data — just not yet asserted here.
  * - The blank/E/E(S)/(S) cell format's staged branch: no seed data sets Location.status
  *   to STAGED, so `E(S)` and `(S)` cannot be produced against a real dataset.
  */

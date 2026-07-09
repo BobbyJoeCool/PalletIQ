@@ -96,15 +96,20 @@ async function getLocation(req: HttpRequest, _ctx: InvocationContext): Promise<u
 
 /**
  * Empty Locations by Aisle (ELA). Returns, per aisle, the count of EMPTY and STAGED
- * locations matching the given Storage Code and Size — the GPMer's primary space-finding
- * tool before bringing pallet stacks into the building. See DevNotes/Screen-Specs/ELA.md.
+ * locations for every size present in that aisle at the given Storage Code — the GPMer's
+ * primary space-finding tool before bringing pallet stacks into the building. See
+ * DevNotes/Screen-Specs/ELA.md.
  *
- * Both storageCode and size are matched exactly (case-insensitive); an aisle is included
- * only if it has at least one non-zero empty or staged count. Sorted by empty count
- * descending — staged does not affect sort order.
+ * storageCode is matched exactly (case-insensitive); size selects which aisles qualify
+ * (an aisle is included only if the *queried* size has at least one non-zero empty or
+ * staged count there) but each qualifying aisle's `sizes` breakdown covers every size
+ * present in that aisle, not just the one searched for — e.g. searching CR-S returns
+ * HS/S/M/L columns for any matching CR aisle. Sorted by totalEmpty (summed across all
+ * sizes in the aisle) descending — staged does not affect sort order.
  *
  * @param req - HTTP request with query params `storageCode` and `size` (both required)
- * @returns Array of `{ aisle, totalEmpty, sizes: [{ size, empty, staged }] }`
+ * @returns Array of `{ aisle, totalEmpty, sizes: [{ size, empty, staged }] }`, sizes sorted
+ *   per SIZE_ORDER
  * @throws 400 INVALID_INPUT if either query param is missing
  */
 async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
@@ -121,31 +126,42 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
 
   const [empties, stageds] = await Promise.all([
     prisma.location.groupBy({
-      by: ['aisle'],
-      where: { storageCode, size, status: 'EMPTY' },
+      by: ['aisle', 'size'],
+      where: { storageCode, status: 'EMPTY' },
       _count: { _all: true },
     }),
     prisma.location.groupBy({
-      by: ['aisle'],
-      where: { storageCode, size, status: 'STAGED' },
+      by: ['aisle', 'size'],
+      where: { storageCode, status: 'STAGED' },
       _count: { _all: true },
     }),
   ]);
 
-  const byAisle = new Map<number, { empty: number; staged: number }>();
-  for (const row of empties) byAisle.set(row.aisle, { empty: row._count._all, staged: 0 });
+  const byAisle = new Map<number, Map<string, { empty: number; staged: number }>>();
+  for (const row of empties) {
+    if (!byAisle.has(row.aisle)) byAisle.set(row.aisle, new Map());
+    byAisle.get(row.aisle)!.set(row.size, { empty: row._count._all, staged: 0 });
+  }
   for (const row of stageds) {
-    const existing = byAisle.get(row.aisle) ?? { empty: 0, staged: 0 };
+    if (!byAisle.has(row.aisle)) byAisle.set(row.aisle, new Map());
+    const sizes = byAisle.get(row.aisle)!;
+    const existing = sizes.get(row.size) ?? { empty: 0, staged: 0 };
     existing.staged = row._count._all;
-    byAisle.set(row.aisle, existing);
+    sizes.set(row.size, existing);
   }
 
   return [...byAisle.entries()]
-    .map(([aisle, counts]) => ({
-      aisle,
-      totalEmpty: counts.empty,
-      sizes: [{ size, empty: counts.empty, staged: counts.staged }],
-    }))
+    .filter(([, sizes]) => {
+      const queried = sizes.get(size);
+      return queried != null && (queried.empty > 0 || queried.staged > 0);
+    })
+    .map(([aisle, sizes]) => {
+      const sizeCounts = [...sizes.entries()]
+        .map(([s, counts]) => ({ size: s, empty: counts.empty, staged: counts.staged }))
+        .sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size));
+      const totalEmpty = sizeCounts.reduce((sum, s) => sum + s.empty, 0);
+      return { aisle, totalEmpty, sizes: sizeCounts };
+    })
     .sort((a, b) => b.totalEmpty - a.totalEmpty);
 }
 

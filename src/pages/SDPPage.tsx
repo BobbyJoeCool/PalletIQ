@@ -200,6 +200,7 @@ export function SDPPage() {
 
   // Entry-state field values.
   const [zoneOverride, setZoneOverride]     = useState<number | null>(null);
+  const [sizeOverride, setSizeOverride]     = useState('');
   const [consolidating, setConsolidating]   = useState(false);
   const [sizeLocked, setSizeLocked]         = useState(false);
   const [storageLocked, setStorageLocked]   = useState(false);
@@ -219,7 +220,6 @@ export function SDPPage() {
   const aisleField    = useNumpadField('numpad', 3);
   const palletField   = useNumpadField();
   const confirmField  = useNumpadField();
-  const sizeField     = useNumpadField('keyboard');
   const storageField  = useNumpadField('keyboard', 2);
   const zoneField     = useNumpadField('numpad', 1);
 
@@ -267,17 +267,6 @@ export function SDPPage() {
   const focusConfirmField = useCallback(() => {
     confirmField.focus(handleLocationConfirm);
   }, [confirmField]);
-
-  /** Registers the IM+ Size override field's keyboard handler; just dismisses the panel on confirm. */
-  const focusSizeField = useCallback(() => {
-    sizeField.focus(() => hidePanel());
-  }, [sizeField, hidePanel]);
-
-  /** Quick-pick: sets Size directly to a tapped standard value and ends focus — the field stays typeable via focusSizeField for anything non-standard. */
-  const selectSize = useCallback((v: string) => {
-    sizeField.set(v);
-    hidePanel();
-  }, [sizeField, hidePanel]);
 
   /** Registers the IM+ Storage Code override field's keyboard handler; dismisses the panel and advances to Pallet ID on confirm. */
   const focusStorageField = useCallback(() => {
@@ -377,7 +366,7 @@ export function SDPPage() {
       const palletId = parseInt(v, 10);
       if (isNaN(palletId)) throw Object.assign(new Error('PALLET_NOT_FOUND'), { status: 404 });
 
-      const sizeVal    = sizeField.value.trim().toUpperCase();
+      const sizeVal    = sizeOverride;
       const storageVal = storageField.value.trim().toUpperCase();
 
       const result = await apiFetch<DirectedResult>('/api/puts/directed', token!, {
@@ -578,13 +567,13 @@ export function SDPPage() {
     if (full) {
       postResetFocusRef.current = 'aisle';
       aisleField.clear();
-      sizeField.clear();
+      setSizeOverride('');
       storageField.clear();
       zoneField.clear();
       setZoneOverride(null);
     } else {
       postResetFocusRef.current = 'pallet';
-      if (!sizeLocked)    sizeField.clear();
+      if (!sizeLocked)    setSizeOverride('');
       if (!storageLocked) storageField.clear();
       if (!zoneLocked)    { zoneField.clear(); setZoneOverride(null); }
     }
@@ -669,26 +658,21 @@ export function SDPPage() {
           {isIM && (
             <>
               <div className="w-[160px] flex flex-col gap-1">
-                <FieldDisplay
-                  label="Size"
-                  value={sizeField.value}
-                  onFocus={focusSizeField}
-                  active={sizeField.isActive}
-                  locked={locked}
-                />
-                <div className="flex gap-1">
+                <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
+                  Size
+                </span>
+                <select
+                  aria-label="Size"
+                  value={sizeOverride}
+                  onChange={(e) => setSizeOverride(e.target.value)}
+                  disabled={locked}
+                  className="h-[72px] px-4 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] font-data text-[24px] font-medium text-white focus:outline-none focus:border-[#CC0000] hover:border-[#555] disabled:opacity-40 transition-colors"
+                >
+                  <option value="">—</option>
                   {SIZES.map(s => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => selectSize(s)}
-                      disabled={locked}
-                      className="flex-1 h-[26px] rounded-[6px] border border-[#3A3A3A] font-ui text-[11px] font-medium text-[#9A9A9A] hover:border-[#555] hover:text-white disabled:opacity-40 transition-colors"
-                    >
-                      {s}
-                    </button>
+                    <option key={s} value={s}>{s}</option>
                   ))}
-                </div>
+                </select>
                 <button
                   type="button"
                   onClick={() => setSizeLocked(l => !l)}
@@ -739,11 +723,11 @@ export function SDPPage() {
         {/* Applying-overrides summary (issue #50) — every selected override is combined
             with AND when the system searches for a location, but nothing on screen
             confirmed that plainly, which read as "it only applies one." */}
-        {isIM && (sizeField.value || storageField.value || zoneField.value) && (
+        {isIM && (sizeOverride || storageField.value || zoneField.value) && (
           <p className="font-ui text-[13px] text-[#9A9A9A]">
             Applying:{' '}
             {[
-              sizeField.value && `Size ${sizeField.value}`,
+              sizeOverride && `Size ${sizeOverride}`,
               storageField.value && `Storage ${storageField.value}`,
               zoneField.value && `Zone ${zoneField.value}`,
             ].filter(Boolean).join(' + ')}
@@ -764,7 +748,7 @@ export function SDPPage() {
               </button>
             )}
             {screenState === 'directed' && directed && (
-              <span className="flex items-center gap-3">
+              <span className="flex items-center gap-3 px-4 py-1.5 rounded-[10px] bg-[#CC0000]/10 border-2 border-[#CC0000]/40">
                 <span className="font-ui text-[20px] font-semibold text-[#FF1A1A] uppercase tracking-wider">
                   Put in
                 </span>

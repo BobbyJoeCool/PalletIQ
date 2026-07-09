@@ -7,6 +7,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
 - [Legacy — Playwright-Run Findings (2026-07-05)](#legacy--playwright-run-findings-2026-07-05)
+- [1.1.5 — 2026-07-08](#115--2026-07-08)
 - [1.1.0 — 2026-07-08](#110--2026-07-08)
 - [1.0.10 — 2026-07-08](#1010--2026-07-08)
 - [1.0.9 — 2026-07-08](#109--2026-07-08)
@@ -46,15 +47,8 @@ conversation and build plan when picked up.
 
 Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/BobbyJoeCool/PalletIQ/issues) on this repo, not as file-based reports — see `.claude/CLAUDE.md`'s Bug Report Conventions. Severity is a label (`blocker`/`major`/`minor`/`nice-to-have`/`distant-future`/`needs-triage`); closing an issue is what marks it done, so a closed issue's fix is documented in whichever version below actually shipped it rather than listed again here. This section is just the current open backlog, grouped by severity, kept in sync as issues are filed or closed.
 
-### Blocker
-
-- [#1](https://github.com/BobbyJoeCool/PalletIQ/issues/1) — App becomes "UNAUTHORIZED" after 15 minutes even during active use
-
 ### Major/Important
 
-- [#3](https://github.com/BobbyJoeCool/PalletIQ/issues/3) — Dismiss keyboard when storage code is selected (ELA)
-- [#4](https://github.com/BobbyJoeCool/PalletIQ/issues/4) — ELA report only returns requested size instead of all sizes in aisle
-- [#6](https://github.com/BobbyJoeCool/PalletIQ/issues/6) — Add reason code to edit pallet screen (PII)
 - [#14](https://github.com/BobbyJoeCool/PalletIQ/issues/14) — Add ability to put ranges on hold (WLH)
 - [#15](https://github.com/BobbyJoeCool/PalletIQ/issues/15) — Add helper bar button to select a location on hold (WLH)
 
@@ -144,6 +138,66 @@ behavior — treat anything below as needing re-verification before acting on it
 - [ ] Rewrite `tests/e2e/stg.spec.ts` against the new DOM — replaces the two old-layout items
       above rather than fixing them in place; add new coverage for Master Control's Aisle field
       feeding "Fill All" and for the zone map's idle → loaded states
+
+---
+
+## [1.1.5] — 2026-07-08
+
+Closes the last open blocker plus a batch of small, contained bug fixes:
+[#1](https://github.com/BobbyJoeCool/PalletIQ/issues/1),
+[#3](https://github.com/BobbyJoeCool/PalletIQ/issues/3),
+[#4](https://github.com/BobbyJoeCool/PalletIQ/issues/4),
+[#6](https://github.com/BobbyJoeCool/PalletIQ/issues/6),
+[#53](https://github.com/BobbyJoeCool/PalletIQ/issues/53),
+[#54](https://github.com/BobbyJoeCool/PalletIQ/issues/54),
+[#55](https://github.com/BobbyJoeCool/PalletIQ/issues/55),
+[#56](https://github.com/BobbyJoeCool/PalletIQ/issues/56), and
+[#59](https://github.com/BobbyJoeCool/PalletIQ/issues/59).
+
+### 1.1.5 — Fixed
+
+- **Sessions no longer expire mid-use.** The signed JWT issued at login had a fixed, absolute
+  15-minute expiration with no renewal path, so any active kiosk session was forced back to
+  "UNAUTHORIZED" exactly 15 minutes after login regardless of activity — a completely separate
+  15-minute *idle* timeout already existed client-side (`AuthContext.tsx`) and was working
+  correctly, but the two timers weren't connected. The JWT's expiration is now 12 hours (long
+  enough to outlast a full shift); the client-side idle timeout remains the actual mechanism
+  that ends a session after genuine inactivity. ([#1](https://github.com/BobbyJoeCool/PalletIQ/issues/1))
+- **IID's UPC field now opens the number pad instead of the full keyboard**, since UPCs are
+  always numeric. ([#56](https://github.com/BobbyJoeCool/PalletIQ/issues/56))
+- **ELA's Storage Code field now auto-commits at 2 characters**, matching ELZ's identical field
+  (all storage codes are exactly 2 characters). Previously the field only committed on an
+  explicit Enter/OK, so switching straight to the Size dropdown without pressing Enter left the
+  typed storage code uncommitted and the on-screen keyboard open — fixing both of those reported
+  symptoms with the one change. ([#3](https://github.com/BobbyJoeCool/PalletIQ/issues/3),
+  [#59](https://github.com/BobbyJoeCool/PalletIQ/issues/59))
+- **PII's Pallet ID field now blurs/defocuses after a scan or manual entry**, dismissing the
+  on-screen number pad so it no longer covers the pallet info that just loaded. LII and IID
+  already did this correctly — PII was the only screen missing the fix.
+  ([#55](https://github.com/BobbyJoeCool/PalletIQ/issues/55))
+- **PIP's and SDP's Location display now sits inside a bordered box** so it stands out at a
+  glance instead of blending into the surrounding data rows.
+  ([#53](https://github.com/BobbyJoeCool/PalletIQ/issues/53))
+- **ELA now shows every size present in a matching aisle, not just the searched-for size** —
+  e.g. searching CR-S now returns HS/S/M/L columns for any matching CR aisle, matching what
+  `ELA.md`'s spec already described. The aisle still only qualifies as a match if the *searched*
+  size has a non-zero empty/staged count there; the fix widens the columns shown, not which
+  aisles show up. Backend-only change (`getLocationsEmptyByAisle`); the frontend was already
+  built to render however many size columns the API returns.
+  ([#4](https://github.com/BobbyJoeCool/PalletIQ/issues/4))
+- **SDP's IM+ Size override is now a plain dropdown**, matching `SDP.md`'s spec exactly. This
+  removes the small quick-pick buttons and the free-text keyboard entry the old hybrid allowed
+  — a deliberate behavior change (not just a restyle), confirmed with the user first since it
+  drops the ability to type a size outside the fixed list.
+  ([#54](https://github.com/BobbyJoeCool/PalletIQ/issues/54))
+- **PII's edit-pallet screen now requires a reason code** whenever a save actually changes a
+  field — a dropdown of common codes (Damaged, Mis-scan, Relabel, Quantity correction, Quality
+  issue) plus a "Type a code…" free-text escape hatch, mirroring the existing Hold reason-code
+  UX. Like hold reason codes, it's never stored as a column — only written into the
+  ActivityLog's existing flexible details field. Deliberately a flat, ungated list for now — a
+  role-gated Warehousing/Inbound code split was requested but depends on the Inbound access
+  model from issue #29, which is explicitly distant-future/unscheduled; revisit gating once
+  that lands. ([#6](https://github.com/BobbyJoeCool/PalletIQ/issues/6))
 
 ---
 

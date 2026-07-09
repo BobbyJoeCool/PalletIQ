@@ -51,7 +51,7 @@ export function IIDPage() {
   const deptField = useNumpadField('numpad', 3);
   const classField = useNumpadField('numpad', 2);
   const itemField = useNumpadField('numpad', 4);
-  const upcField = useNumpadField('keyboard');
+  const upcField = useNumpadField('numpad');
   const [item, setItem] = useState<ItemData | null>(null);
   const [loading, setLoading] = useState(false);
   const deptValueRef = useRef('');

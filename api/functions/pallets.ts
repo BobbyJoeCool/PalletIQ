@@ -73,9 +73,13 @@ async function getPallet(req: HttpRequest, _ctx: InvocationContext): Promise<unk
  *     below the total committed to pending pull labels; same check for SSPs.
  *
  * @param req - HTTP request with URL param `id` and optional body fields:
- *   `dpci`, `vcp`, `ssp`, `currentPallets`, `currentCartons`, `currentSSPs`
+ *   `dpci`, `vcp`, `ssp`, `currentPallets`, `currentCartons`, `currentSSPs`, `reasonCode`
+ *   (`reasonCode` is required whenever at least one editable field actually changes value;
+ *   like hold reason codes, it is never stored as a column — only logged, per the
+ *   ActivityLog's flexible details field)
  * @returns `{ pid }` confirming the updated pallet ID
- * @throws 400 INVALID_INPUT for non-numeric id or negative quantities;
+ * @throws 400 INVALID_INPUT for non-numeric id, negative quantities, or a missing reason
+ *   code when a field actually changed;
  *   403 FORBIDDEN if caller is not IM+;
  *   404 NOT_FOUND if pallet or new DPCI does not exist;
  *   409 BLOCKED_BY_PENDING_PULL if open labels block a DPCI change;
@@ -95,6 +99,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
     currentPallets?: number;
     currentCartons?: number;
     currentSSPs?: number;
+    reasonCode?: string;
   };
 
   const pallet = await prisma.pallet.findUnique({ where: { pid } });
@@ -151,6 +156,20 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
     }
   }
 
+  // A reason code is required whenever the edit actually changes something — same rule as
+  // location holds (WLH.md); never stored as a column, only logged (see writeLog call below).
+  const hasAnyChange =
+    dpciChanging ||
+    (body.vcp            != null && body.vcp            !== pallet.vcp) ||
+    (body.ssp             != null && body.ssp            !== pallet.ssp) ||
+    (body.currentPallets != null && body.currentPallets !== pallet.currentPallets) ||
+    (body.currentCartons != null && body.currentCartons !== pallet.currentCartons) ||
+    (body.currentSSPs    != null && body.currentSSPs    !== pallet.currentSSPs);
+  const reasonCode = typeof body.reasonCode === 'string' ? body.reasonCode.trim() : '';
+  if (hasAnyChange && !reasonCode) {
+    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  }
+
   // Build the update payload from only the fields that were provided.
   const updateData: Record<string, unknown> = {};
   if (dpciChanging) {
@@ -205,7 +224,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
       userId: auth.zNumber,
       actionType: 'EDIT_PAL',
       palletId: pid,
-      details: { old: oldVals, new: newVals },
+      details: { old: oldVals, new: newVals, reasonCode },
     });
   }
 

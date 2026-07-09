@@ -6,8 +6,10 @@ import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
+import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
+import { EDIT_REASON_CODES } from '../lib/editReasonCodes';
 import { useNumpadField } from '../lib/useNumpadField';
 
 interface UserStamp {
@@ -62,6 +64,7 @@ type ScreenState = 'ready' | 'loaded' | 'edit';
 export function PIIPage() {
   const { token, user } = useAuth();
   const { setMessage } = useMessageBar();
+  const { hidePanel } = useNumpad();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
@@ -82,10 +85,13 @@ export function PIIPage() {
   const [editCartons, setEditCartons] = useState('');
   const [editSSPs, setEditSSPs] = useState('');
   const [editPallets, setEditPallets] = useState('');
+  const [reasonCode, setReasonCode] = useState('');
+  const [customReason, setCustomReason] = useState('');
   const [saving, setSaving] = useState(false);
 
   /** Looks up a pallet by id via the API and transitions to the loaded state; resets to ready on failure. */
   const loadPallet = useCallback(async (idStr: string) => {
+    hidePanel();
     const pid = parseInt(idStr, 10);
     if (isNaN(pid)) {
       playAlert('error');
@@ -109,7 +115,7 @@ export function PIIPage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, hidePanel]);
 
   /** Registers the Pallet ID field's numpad handler; a scan while editing discards unsaved changes and re-loads. */
   const focusPalletField = useCallback(() => {
@@ -151,6 +157,8 @@ export function PIIPage() {
     setEditCartons(String(pallet.currentCartons));
     setEditSSPs(String(pallet.currentSSPs));
     setEditPallets(String(pallet.currentPallets));
+    setReasonCode('');
+    setCustomReason('');
     setScreenState('edit');
   }
 
@@ -183,6 +191,15 @@ export function PIIPage() {
       if (!isNaN(ssps) && ssps !== pallet.currentSSPs) body.currentSSPs = ssps;
       const pallets = parseInt(editPallets, 10);
       if (!isNaN(pallets) && pallets !== pallet.currentPallets) body.currentPallets = pallets;
+
+      if (Object.keys(body).length > 0) {
+        const finalReason = reasonCode === 'OTHER' ? customReason.trim() : reasonCode;
+        if (!finalReason) {
+          setMessage({ type: 'error', text: 'A reason code is required to save changes' });
+          return;
+        }
+        body.reasonCode = finalReason;
+      }
 
       await apiFetch(`/api/pallets/${pallet.pid}`, token!, {
         method: 'PATCH',
@@ -293,6 +310,30 @@ export function PIIPage() {
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Full Pallets</span>
                 <input aria-label="Full Pallets" type="number" value={editPallets} onChange={(e) => setEditPallets(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
+              </div>
+              <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
+                <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Reason Code</span>
+                <select
+                  aria-label="Reason code"
+                  value={reasonCode}
+                  onChange={(e) => setReasonCode(e.target.value)}
+                  className="font-data text-[18px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[280px] focus:outline-none focus:border-[#CC0000]"
+                >
+                  <option value="">Select a reason…</option>
+                  {EDIT_REASON_CODES.map((r) => (
+                    <option key={r.code} value={r.code}>{r.code} — {r.desc}</option>
+                  ))}
+                  <option value="OTHER">Type a code…</option>
+                </select>
+                {reasonCode === 'OTHER' && (
+                  <input
+                    aria-label="Custom reason code"
+                    value={customReason}
+                    onChange={(e) => setCustomReason(e.target.value)}
+                    placeholder="Reason code"
+                    className="font-data text-[18px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[160px] focus:outline-none focus:border-[#CC0000]"
+                  />
+                )}
               </div>
             </>
           ) : (

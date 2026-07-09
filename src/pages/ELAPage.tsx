@@ -46,7 +46,7 @@ export function ELAPage() {
   const { hidePanel } = useNumpad();
   const navigate = useNavigate();
 
-  const storageField = useNumpadField('keyboard');
+  const storageField = useNumpadField('keyboard', 2);
   const [storageCode, setStorageCode] = useState('');
   const [size, setSize] = useState('');
   const [rows, setRows] = useState<AisleRow[] | null>(null);
@@ -88,11 +88,13 @@ export function ELAPage() {
 
   const selectedRow = rows?.find((r) => r.aisle === selected) ?? null;
 
-  // Size columns are whatever the API actually returned (normally just the queried size).
+  // Size columns are the union of every size actually present across all returned aisles
+  // (each aisle now reports its full size breakdown, not just the queried size — issue #4),
+  // in canonical SIZES order rather than API/Set insertion order.
   const sizeCols = useMemo(() => {
     const set = new Set<string>();
     rows?.forEach((r) => r.sizes.forEach((s) => set.add(s.size)));
-    return [...set];
+    return SIZES.filter((s) => set.has(s));
   }, [rows]);
 
   /** Selects a result row, or deselects it if it's already the selected row. */
