@@ -12,3 +12,8 @@ export function fmtLocation(id: string): string {
   if (id.length === 6) return `${id.slice(0, 3)}-${id.slice(3)}`;
   return id;
 }
+
+/** Formats a DPCI object as `DDD-CC-IIII`. */
+export function fmtDpci(dpci: { dept: number; class: number; item: number }): string {
+  return `${String(dpci.dept).padStart(3, '0')}-${String(dpci.class).padStart(2, '0')}-${String(dpci.item).padStart(4, '0')}`;
+}

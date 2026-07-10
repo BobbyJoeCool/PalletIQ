@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CellValue } from '../components/shared/CellValue';
+import { SizeField } from '../components/shared/SizeField';
+import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
-import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
-import { useNumpadField } from '../lib/useNumpadField';
-
-const SIZES = ['XS', 'HS', 'S', 'M', 'L'];
+import { SIZES } from '../lib/sizes';
 
 interface SizeCount {
   size: string;
@@ -31,30 +30,23 @@ interface AisleRow {
 export function ELAPage() {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
-  const { hidePanel } = useNumpad();
   const navigate = useNavigate();
 
-  const storageField = useNumpadField('keyboard', 2);
   const [storageCode, setStorageCode] = useState('');
   const [size, setSize] = useState('');
   const [rows, setRows] = useState<AisleRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
 
-  /** Registers the Storage Code field's keyboard handler; on confirm, uppercases the value and clears the current row selection. */
-  const focusStorageField = useCallback(() => {
-    storageField.focus((v) => {
-      const trimmed = v.trim().toUpperCase();
-      storageField.set(trimmed);
-      setStorageCode(trimmed);
-      setSelected(null);
-      hidePanel();
-    });
-  }, [storageField, hidePanel]);
+  /** Applies a new Storage Code filter, clearing the current row selection. */
+  const handleStorageCodeChange = useCallback((v: string) => {
+    setStorageCode(v);
+    setSelected(null);
+  }, []);
 
   // Query trigger: auto-run once both fields have values. Selection is cleared by the field
-  // handlers themselves (see focusStorageField and the Size <select> onChange) whenever a
-  // filter changes, so this effect only needs to own the fetch lifecycle.
+  // handlers themselves (see handleStorageCodeChange and the Size <select> onChange) whenever
+  // a filter changes, so this effect only needs to own the fetch lifecycle.
   useEffect(() => {
     if (!storageCode || !size) return;
     let cancelled = false;
@@ -107,37 +99,8 @@ export function ELAPage() {
       {/* Top bar: filter fields + navigation actions */}
       <div className="flex items-end justify-between gap-4 shrink-0">
         <div className="flex items-end gap-4">
-          <div className="w-[220px] flex flex-col gap-1">
-            <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-              Storage Code
-            </span>
-            <button
-              type="button"
-              onClick={focusStorageField}
-              className={`flex items-center h-[64px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${storageField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-            >
-              <span className="font-data text-[26px] font-medium text-white tracking-[0.04em]">
-                {storageField.value || <span className="text-[#444]">—</span>}
-              </span>
-              {storageField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-            </button>
-          </div>
-          <div className="w-[160px] flex flex-col gap-1">
-            <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-              Size
-            </span>
-            <select
-              aria-label="Size"
-              value={size}
-              onChange={(e) => { setSize(e.target.value); setSelected(null); }}
-              className="h-[64px] px-4 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] font-data text-[20px] text-white focus:outline-none focus:border-[#CC0000] transition-colors"
-            >
-              <option value="">Select…</option>
-              {SIZES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
+          <StorageCodeField value={storageCode} onChange={handleStorageCodeChange} />
+          <SizeField value={size} onChange={(v) => { setSize(v); setSelected(null); }} />
         </div>
 
         <div className="flex gap-3">

@@ -300,10 +300,10 @@ Below or alongside the grid, a **per-zone summary** (combining both odd and even
 
 ## Stage Aisle
 
-**New feature, not present in the legacy system being improved upon.** Fully designed and built (Phase 7; redesigned to a pallet-rider-triple graphic in Phase 11.2) — see `DevNotes/Screen-Specs/STG.md` for the complete spec.
+**New feature, not present in the legacy system being improved upon.** Fully designed and built (Phase 7; redesigned to a pallet-rider-triple graphic in Phase 11.2; graphic flipped/shortened and consolidated to a single stageable front stack, with a location suggestion reject/hold flow, in v1.3.0/issue #77) — see `DevNotes/Screen-Specs/STG.md` for the complete spec.
 
 - Entry points: Home menu, Empty Locations by Aisle (per-aisle button), Empty Locations by Zone (per-aisle button) — all pre-populate the aisle.
-- Purpose: a General Pallet Mover (GPMer) brings multiple pallet stacks into an aisle at once (three stacks at a time via a fork-truck graphic). The worker enters the Storage Code, Size, and quantity for each stack, and the system assigns each pallet a destination location, marking it `STAGED` rather than `STORED` — a placeholder reservation that a subsequent Put confirms.
+- Purpose: a General Pallet Mover (GPMer) brings a pallet stack into an aisle via a fork-truck graphic; only the front (furthest-from-operator) position is ever stageable. The worker enters the Storage Code, Size, and quantity, and the system assigns each pallet a destination location, marking it `STAGED` rather than `STORED` — a placeholder reservation that a subsequent Put confirms. The system's suggested next location can be rejected (puts it on hold with a reason code and suggests another) without staging anything.
 - Staging always fills an aisle from the back forward (highest bin, lowest level first) — the reverse of Directed Put's front-to-back zone fill — so the two workflows can operate on the same aisle from opposite ends without colliding.
 - `STAGED` locations are valid Directed Put candidates alongside `EMPTY` ones (excluded only when the putting worker has Consolidating mode on). A Manual Put onto a `STAGED` location is allowed but shows a non-blocking warning.
 - IM and above can Unstage (clear) or Restage an aisle's `STAGED` locations via a modal on the Stage Aisle screen.

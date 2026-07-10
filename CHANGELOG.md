@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.3.0 — 2026-07-10](#130--2026-07-10)
 - [1.2.0 — 2026-07-09](#120--2026-07-09)
 - [1.1.5 — 2026-07-08](#115--2026-07-08)
 - [1.1.0 — 2026-07-08](#110--2026-07-08)
@@ -60,10 +61,8 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#55](https://github.com/BobbyJoeCool/PalletIQ/issues/55) — ID field should defocus/blur after scan or entry (PII, LII, IID) — reopened: still reselects on the very first scan of a session
 - [#64](https://github.com/BobbyJoeCool/PalletIQ/issues/64) — SDP: "Applying Size" indicator should sit next to the Consolidation button instead of shifting the screen
 - [#66](https://github.com/BobbyJoeCool/PalletIQ/issues/66) — PII: block Save on edit-pallet when no fields actually changed
-- [#67](https://github.com/BobbyJoeCool/PalletIQ/issues/67) — STG: hot-jumping from ELZ only fills Aisle on the first pallet stack, not all three
 - [#68](https://github.com/BobbyJoeCool/PalletIQ/issues/68) — PAR: DPCI entry should be split into 3 boxes
 - [#69](https://github.com/BobbyJoeCool/PalletIQ/issues/69) — PAR: Location entry should be split into 3 boxes
-- [#74](https://github.com/BobbyJoeCool/PalletIQ/issues/74) — STG: make Unstage Aisle button larger and red
 - [#75](https://github.com/BobbyJoeCool/PalletIQ/issues/75) — STG: refresh of forks elements on defocus is slow
 
 ### Nice-to-have/Cosmetic
@@ -83,6 +82,38 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
 
 ---
+
+## [1.3.0] — 2026-07-10
+
+### 1.3.0 — Added
+
+- **STG: simplified triple graphic with a single front-stack box and a location
+  suggestion reject/hold flow.** The old three-independent-fork-stacks model — each with
+  its own Aisle/Storage Code/Size/Quantity and its own destination-location list — is
+  replaced by one stageable **front stack** ("front" = furthest from the operator, fixed
+  regardless of the graphic's on-screen orientation). The triple graphic is flipped so the
+  forks point right and shortened to reclaim vertical space; "Fill All" and "Unstage
+  Aisle" move onto the graphic itself, top-left over the operator's compartment. The front
+  stack's next suggested destination location is now a button: tapping it opens a
+  confirm/cancel popup to put that location on hold (reason code defaults to "Blocked",
+  editable via dropdown) and get a new suggestion, without staging anything. Holds placed
+  this way persist until released elsewhere (e.g. WLH) and are not tied to unstaging.
+  ([#77](https://github.com/BobbyJoeCool/PalletIQ/issues/77))
+- **STG: manual Refresh button.** Reloads the live info panel and the front stack's
+  suggested location on demand, independent of the automatic refresh already triggered by
+  field commits. ([#76](https://github.com/BobbyJoeCool/PalletIQ/issues/76))
+- **Shared field components** for Storage Code, Size, Pallet ID, DPCI (edit mode), and
+  Reason Code (`src/components/shared/{StorageCodeField,SizeField,PalletIdField,
+  DpciField,ReasonCodeField}.tsx`), each with `compact`/`default` size variants instead of
+  free className passthrough. Migrated STG, ELA, ELZ, HoldPanel, and PII as representative
+  usages; broader rollout across the rest of the app is left as follow-up.
+  ([#78](https://github.com/BobbyJoeCool/PalletIQ/issues/78))
+
+### 1.3.0 — Fixed
+
+- [#74](https://github.com/BobbyJoeCool/PalletIQ/issues/74) — STG: Unstage Aisle button is now larger and red, given its destructive nature (folded into the #77 redesign above)
+- [#6](https://github.com/BobbyJoeCool/PalletIQ/issues/6) — Reason code "Type a code…" free-text fields (HoldPanel, PII edit mode) now use the app's own on-screen keyboard instead of popping the iPad's native keyboard — a side effect of consolidating both onto the new shared `ReasonCodeField`
+- [#67](https://github.com/BobbyJoeCool/PalletIQ/issues/67) — STG hot-jump-fills-only-one-of-three-stacks bug is moot now that there's only one stageable stack
 
 ## [1.2.0] — 2026-07-09
 

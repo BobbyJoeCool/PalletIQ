@@ -7,6 +7,7 @@ import { playAlert } from '../../lib/audio';
 import { fmtLocation } from '../../lib/fmt';
 import { HOLD_REASON_CODES } from '../../lib/holdReasonCodes';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { ReasonCodeField } from './ReasonCodeField';
 
 type HoldCategory = 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM';
 
@@ -66,7 +67,6 @@ export function HoldPanel({ locationId, onDone, showClose = false }: HoldPanelPr
   const [loading, setLoading] = useState(true);
   const [placing, setPlacing] = useState<HoldCategory | null>(null);
   const [reasonCode, setReasonCode] = useState('');
-  const [customReason, setCustomReason] = useState('');
   const [confirmReplace, setConfirmReplace] = useState<HoldCategory | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -100,19 +100,17 @@ export function HoldPanel({ locationId, onDone, showClose = false }: HoldPanelPr
 
   /** Submits the reason code and calls PATCH /api/locations/:id/hold to place/replace the hold. */
   async function confirmPlace(type: HoldCategory) {
-    const finalReason = reasonCode === 'OTHER' ? customReason.trim() : reasonCode;
-    if (!finalReason || submitting) return;
+    if (!reasonCode || submitting) return;
     setSubmitting(true);
     try {
       await apiFetch(`/api/locations/${locationId}/hold`, token!, {
         method: 'PATCH',
-        body: JSON.stringify({ holdType: type, reasonCode: finalReason }),
+        body: JSON.stringify({ holdType: type, reasonCode }),
       });
       playAlert('info');
       setMessage({ type: 'success', text: `${HOLD_LABELS[type].name} placed on ${fmtLocation(locationId)}` });
       setPlacing(null);
       setReasonCode('');
-      setCustomReason('');
       await load();
       onDone?.();
     } catch (err) {
@@ -165,34 +163,15 @@ export function HoldPanel({ locationId, onDone, showClose = false }: HoldPanelPr
           <span className="font-ui text-[15px] font-semibold text-white">
             Reason code for {HOLD_LABELS[placing].name}
           </span>
-          <select
-            aria-label="Reason code"
-            value={reasonCode}
-            onChange={(e) => setReasonCode(e.target.value)}
-            className="h-[52px] px-3 rounded-[10px] bg-[#000] border-2 border-[#3A3A3A] font-data text-[18px] text-white focus:outline-none focus:border-[#CC0000]"
-          >
-            <option value="">Select a reason…</option>
-            {HOLD_REASON_CODES.map((r) => (
-              <option key={r.code} value={r.code}>{r.code} — {r.desc}</option>
-            ))}
-            <option value="OTHER">Type a code…</option>
-          </select>
-          {reasonCode === 'OTHER' && (
-            <input
-              value={customReason}
-              onChange={(e) => setCustomReason(e.target.value)}
-              placeholder="Reason code"
-              className="h-[52px] px-3 rounded-[10px] bg-[#000] border-2 border-[#3A3A3A] font-data text-[18px] text-white focus:outline-none focus:border-[#CC0000]"
-            />
-          )}
+          <ReasonCodeField codes={HOLD_REASON_CODES} value={reasonCode} onChange={setReasonCode} label="" />
           <div className="flex gap-3">
-            <button type="button" onClick={() => { setPlacing(null); setReasonCode(''); setCustomReason(''); }} className="flex-1 h-[52px] rounded-[10px] border border-[#3A3A3A] font-ui text-[15px] text-white">
+            <button type="button" onClick={() => { setPlacing(null); setReasonCode(''); }} className="flex-1 h-[52px] rounded-[10px] border border-[#3A3A3A] font-ui text-[15px] text-white">
               Cancel
             </button>
             <button
               type="button"
               onClick={() => confirmPlace(placing)}
-              disabled={submitting || (!reasonCode || (reasonCode === 'OTHER' && !customReason.trim()))}
+              disabled={submitting || !reasonCode}
               className="flex-1 h-[52px] rounded-[10px] font-ui text-[15px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40"
             >
               Confirm Hold

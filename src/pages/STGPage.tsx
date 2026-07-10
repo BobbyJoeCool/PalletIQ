@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Triple from '../assets/Triple.png';
 import { AisleGrid, type GridLevel } from '../components/shared/AisleGrid';
 import { CellValue } from '../components/shared/CellValue';
+import { ReasonCodeField } from '../components/shared/ReasonCodeField';
+import { SizeField } from '../components/shared/SizeField';
+import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
@@ -10,9 +13,9 @@ import { useStaging } from '../context/StagingContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
+import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
+import { SIZES } from '../lib/sizes';
 import { useNumpadField } from '../lib/useNumpadField';
-
-const SIZES = ['XS', 'HS', 'S', 'M', 'L'];
 
 interface NavState {
   aisle?: number;
@@ -37,27 +40,13 @@ interface ZoneMapResult {
 interface AisleSizeCount { size: string; empty: number; staged: number }
 interface AisleRow { aisle: number; totalEmpty: number; sizes: AisleSizeCount[] }
 
-/** Stable, referentially-constant empty exclude set — used by Stack 0, which has no lower-
- *  priority sibling to yield to, so its dependency never wastefully changes identity. */
-const EMPTY_EXCLUDE_SET = new Set<string>();
-
-/** Stable, referentially-constant empty array — stands in for "this sibling isn't a
- *  lower-priority stack relative to me" in priorLocations' dependency array below, so that
- *  array never accidentally depends on a stack's own `locations` (see priorLocations' comment). */
-const EMPTY_LOCATIONS: string[] = [];
-
 /**
- * Repeatedly calls GET /api/staging/next-location, walking the bin/level cursor
- * forward each time, to build a list of up to `count` destination locations. The
- * public API only returns one location per call (see api/functions/staging.ts), so
- * building an N-location list is inherently N sequential round trips.
- *
- * `exclude` skips locations already claimed by a higher-priority sibling stack's
- * uncommitted preview (see StackPanel's `priorLocations`) — the backend only knows about
- * locations actually STAGED in the DB, not another stack's still-in-progress UI state, so
- * this is the client's only way to keep two stacks from showing the same destination.
- * Skipped locations must not count against `count`, or `shortfall` would be inflated by
- * exclusions alone — the loop is bounded by how many results were actually kept.
+ * Repeatedly calls GET /api/staging/next-location, walking the bin/level cursor forward
+ * each time, to build a list of up to `count` destination locations for the front stack.
+ * The public API only returns one location per call (see api/functions/staging.ts), so
+ * building an N-location list is inherently N sequential round trips. Since issue #77
+ * collapsed STG down to one stageable position, there's no longer a sibling-stack
+ * exclusion set to thread through here (contrast the pre-#77 version of this function).
  */
 async function fetchStagingLocations(
   token: string,
@@ -65,15 +54,11 @@ async function fetchStagingLocations(
   storageCode: string,
   size: string,
   count: number,
-  exclude: Set<string> = EMPTY_EXCLUDE_SET,
 ): Promise<string[]> {
   const results: string[] = [];
   let afterBin: number | undefined;
   let afterLevel: number | undefined;
-  let attempts = 0;
-  const maxAttempts = count + exclude.size + 20; // defensive cap against a pathological aisle
-  while (results.length < count && attempts < maxAttempts) {
-    attempts++;
+  for (let attempts = 0; results.length < count && attempts < count + 5; attempts++) {
     const params = new URLSearchParams({ aisle, storageCode, size });
     if (afterBin != null) params.set('afterBin', String(afterBin));
     if (afterLevel != null) params.set('afterLevel', String(afterLevel));
@@ -84,7 +69,6 @@ async function fetchStagingLocations(
     if (!nextLocation) break;
     afterBin = parseInt(nextLocation.slice(3, 6), 10);
     afterLevel = parseInt(nextLocation.slice(6, 8), 10);
-    if (exclude.has(nextLocation)) continue; // claimed by a sibling — cursor already advanced past it
     results.push(nextLocation);
   }
   return results;
@@ -92,8 +76,9 @@ async function fetchStagingLocations(
 
 // ── Small display helpers ──────────────────────────────────────────────────────
 
-/** Labeled input display box used by the Master Control bar (full-size, unlike the
- *  compact pallet-styled boxes used on the fork graphic — see PalletBox below). */
+/** Labeled input display box used by the Master Control bar's Aisle field — a standalone
+ *  field, not one of the shared field types from issue #78 (unlike Storage Code/Size,
+ *  which now use StorageCodeField/SizeField below). */
 function FieldDisplay({
   label, value, onFocus, active = false, width = 'w-[160px]',
 }: { label: string; value: string; onFocus: () => void; active?: boolean; width?: string }) {
@@ -114,10 +99,12 @@ function FieldDisplay({
   );
 }
 
-/** A single pallet-styled input box, sized to sit stacked on the fork graphic. Two thin
- *  internal lines suggest pallet slats. `emphasize` (used for Qty) makes the box taller and
- *  brighter — it's the only field a GPMer taps on a regular basis, since Aisle/Storage/Size
- *  normally arrive from Master Control's "Fill All". */
+/** A single pallet-styled input box, sized to sit inside the front-stack box. Two thin
+ *  internal lines suggest pallet slats — kept distinct from the generic shared field
+ *  components (issue #78) on purpose: this compact stacked-pallet visual is specific to
+ *  STG's front-stack box, not a pattern reused elsewhere in the app. `emphasize` (used for
+ *  Qty) makes the box taller and brighter — it's the field a GPMer taps most, since
+ *  Aisle/Storage/Size normally arrive from Master Control's "Fill All". */
 function PalletBox({
   label, value, onFocus, active = false, emphasize = false,
 }: { label: string; value: string; onFocus: () => void; active?: boolean; emphasize?: boolean }) {
@@ -168,101 +155,152 @@ function PalletSelect({
   );
 }
 
-// ── Stack panel ──────────────────────────────────────────────────────────────
+// ── Location suggestion reject/hold dialog ────────────────────────────────────
 
-/** One fork-stack column: a compact Stage button and located-count readout above a
- *  vertical pallet-box stack (Aisle at the bottom, resting on the fork, Qty on top). */
-function StackPanel({ index, label }: { index: 0 | 1 | 2; label: string }) {
+/** Default reason code offered when rejecting a suggested location (issue #77) — editable
+ *  via the dropdown before confirming. */
+const DEFAULT_REJECT_REASON = 'B05'; // "Blocked" — see holdReasonCodes.ts
+
+/**
+ * Confirmation popup for rejecting the front stack's currently suggested location (issue
+ * #77). Confirming places a Hold Both (blocks both put and pull — the accessible-to-
+ * everyone hold category, matching STG's all-roles access) with the chosen reason code;
+ * cancelling leaves the original suggestion untouched. No full backdrop, and positioned in
+ * the screen's upper half — same reasoning as UnstageModal below: a worker may need the
+ * on-screen keyboard (for a custom reason code), which renders full-width at the bottom of
+ * the screen, so this must never cover that zone.
+ */
+function RejectHoldDialog({ locationId, onClose, onHeld }: { locationId: string; onClose: () => void; onHeld: () => void }) {
+  const { token } = useAuth();
+  const { setMessage } = useMessageBar();
+  const [reasonCode, setReasonCode] = useState(DEFAULT_REJECT_REASON);
+  const [submitting, setSubmitting] = useState(false);
+
+  /** Places a Hold Both on the rejected location with the chosen reason code, then signals the caller to recompute a new suggestion. */
+  async function confirm() {
+    if (!reasonCode || submitting) return;
+    setSubmitting(true);
+    try {
+      await apiFetch(`/api/locations/${locationId}/hold`, token!, {
+        method: 'PATCH',
+        body: JSON.stringify({ holdType: 'HOLD_BOTH', reasonCode }),
+      });
+      playAlert('info');
+      setMessage({ type: 'success', text: `${fmtLocation(locationId)} held — suggesting a new location` });
+      onHeld();
+    } catch {
+      playAlert('error');
+      setMessage({ type: 'error', text: 'Hold placement failed — please try again' });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 z-50 pointer-events-none">
+      <div className="absolute left-1/2 -translate-x-1/2 top-8 w-[480px] bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-6 flex flex-col gap-4 shadow-[0_0_60px_20px_rgba(0,0,0,0.6)] pointer-events-auto">
+        <h3 className="font-ui text-[19px] font-semibold text-white">Reject suggested location?</h3>
+        <p className="font-ui text-[14px] text-[#9A9A9A]">
+          <span className="font-data text-white">{fmtLocation(locationId)}</span> will be put on hold and a new
+          location will be suggested. This does not stage anything.
+        </p>
+        <ReasonCodeField codes={HOLD_REASON_CODES} value={reasonCode} onChange={setReasonCode} label="Reason" />
+        <div className="flex gap-3 mt-1">
+          <button type="button" onClick={onClose} className="flex-1 h-[52px] rounded-[10px] border border-[#3A3A3A] font-ui text-[15px] text-white">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={submitting || !reasonCode}
+            className="flex-1 h-[52px] rounded-[10px] font-ui text-[15px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40"
+          >
+            Confirm Hold
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Front stack box ────────────────────────────────────────────────────────────
+
+/**
+ * The single stageable front-stack box (issue #77 — supersedes the old three-independent-
+ * stacks StackPanel; "front" = furthest from the operator, always the same physical
+ * position regardless of the graphic's left/right orientation). Positioned beside the fork
+ * graphic, spanning its full height. Shows Aisle/Storage/Size/Qty entry, the computed
+ * destination-location list, and the Stage action. The very next suggested location
+ * (`locations[0]`) is rendered as a button — tapping it opens the reject/hold flow rather
+ * than staging anything.
+ */
+function FrontStackBox() {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
   const { hidePanel } = useNumpad();
-  const { stacks, updateStack, resetStackAfterStage, addLogEntry, bumpDataVersion } = useStaging();
-  const stack = stacks[index];
+  const { front, updateFront, resetFrontAfterStage, addLogEntry, bumpDataVersion, dataVersion } = useStaging();
 
   const aisleField = useNumpadField('numpad');
   const storageField = useNumpadField('keyboard');
   const quantityField = useNumpadField('numpad');
   const [loading, setLoading] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+  // Set right before the recompute triggered by a reject/hold confirmation, so that
+  // specific fetch resolution (and only that one) can report "no valid location remains"
+  // per issue #77 — an ordinary shortfall from a large Quantity is not an error.
+  const expectingSuggestionRef = useRef(false);
 
   // Keep the on-screen field displays in sync with context — covers the worker's own
-  // confirm, master-control "Fill All", and route-state pre-population from ELA/ELZ,
-  // all of which mutate context directly rather than going through these field hooks.
-  useEffect(() => { aisleField.set(stack.aisle); }, [stack.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { storageField.set(stack.storageCode); }, [stack.storageCode]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { quantityField.set(stack.quantity); }, [stack.quantity]); // eslint-disable-line react-hooks/exhaustive-deps
+  // confirm, master-control "Fill All", and route-state pre-population from ELA/ELZ, all of
+  // which mutate context directly rather than going through these field hooks.
+  useEffect(() => { aisleField.set(front.aisle); }, [front.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { storageField.set(front.storageCode); }, [front.storageCode]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { quantityField.set(front.quantity); }, [front.quantity]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Registers this stack's Aisle field numpad handler; writes the confirmed value into StagingContext. */
+  /** Registers the Aisle field's numpad handler; writes the confirmed value into StagingContext. */
   const focusAisleField = useCallback(() => {
-    aisleField.focus((v) => {
-      updateStack(index, { aisle: v.trim() });
-      hidePanel();
-    });
-  }, [aisleField, hidePanel, index, updateStack]);
+    aisleField.focus((v) => { updateFront({ aisle: v.trim() }); hidePanel(); });
+  }, [aisleField, hidePanel, updateFront]);
 
-  /** Registers this stack's Storage Code field keyboard handler; writes the confirmed value into StagingContext. */
+  /** Registers the Storage Code field's keyboard handler; writes the confirmed value into StagingContext. */
   const focusStorageField = useCallback(() => {
-    storageField.focus((v) => {
-      updateStack(index, { storageCode: v.trim().toUpperCase() });
-      hidePanel();
-    });
-  }, [storageField, hidePanel, index, updateStack]);
+    storageField.focus((v) => { updateFront({ storageCode: v.trim().toUpperCase() }); hidePanel(); });
+  }, [storageField, hidePanel, updateFront]);
 
-  /** Registers this stack's Quantity field numpad handler; writes the confirmed value into StagingContext. */
+  /** Registers the Quantity field's numpad handler; writes the confirmed value into StagingContext. */
   const focusQuantityField = useCallback(() => {
-    quantityField.focus((v) => {
-      updateStack(index, { quantity: v.trim() });
-      hidePanel();
-    });
-  }, [quantityField, hidePanel, index, updateStack]);
+    quantityField.focus((v) => { updateFront({ quantity: v.trim() }); hidePanel(); });
+  }, [quantityField, hidePanel, updateFront]);
 
-  // Locations already claimed by a higher-priority sibling's uncommitted preview (Stack 0
-  // outranks Stack 1 outranks Stack 2, matching the fork graphic's left-to-right layout).
-  // One-directional on purpose: a bidirectional exclusion would let two stacks' effects
-  // invalidate each other back and forth. Known accepted limitation: if a lower-indexed
-  // stack's fields change *after* a higher one already computed its list, the higher one
-  // won't know until something re-triggers it — display-only, since the stage endpoint
-  // re-validates each location as still EMPTY at write time and never double-books.
-  //
-  // lowerLocationsN must never resolve to *this* stack's own locations — depending on
-  // stacks[index].locations here would self-trigger: this stack's own fetch resolving
-  // changes stacks[index].locations, which would recompute this memo to a new Set identity
-  // even with identical contents, re-firing the fetch effect below, which resolves and
-  // changes stacks[index].locations again — forever. EMPTY_LOCATIONS stands in for "not a
-  // lower sibling" so both slots stay referentially stable when not applicable to this index.
-  const lowerLocations0 = index > 0 ? stacks[0].locations : EMPTY_LOCATIONS;
-  const lowerLocations1 = index > 1 ? stacks[1].locations : EMPTY_LOCATIONS;
-  const priorLocations = useMemo(() => {
-    if (lowerLocations0.length === 0 && lowerLocations1.length === 0) return EMPTY_EXCLUDE_SET;
-    const set = new Set<string>();
-    lowerLocations0.forEach((loc) => set.add(loc));
-    lowerLocations1.forEach((loc) => set.add(loc));
-    return set;
-  }, [lowerLocations0, lowerLocations1]);
-
-  // Live destination-location list: re-fetches whenever any of the four inputs change,
-  // per STG.md's "List updates live if any input field changes" — also re-fetches when a
-  // higher-priority sibling's claimed locations change (including clearing to [] after that
-  // sibling stages), so "an update anywhere on the forks" actually propagates.
+  // Live destination-location list: re-fetches whenever an input field changes, or
+  // `dataVersion` bumps (a location was just held via the reject flow, or the manual
+  // Refresh button — issue #76 — was pressed).
   useEffect(() => {
-    const qty = parseInt(stack.quantity, 10);
-    if (!stack.aisle || !stack.storageCode || !stack.size || !qty || qty <= 0) return;
+    const qty = parseInt(front.quantity, 10);
+    if (!front.aisle || !front.storageCode || !front.size || !qty || qty <= 0) return;
     let cancelled = false;
-    fetchStagingLocations(token!, stack.aisle, stack.storageCode, stack.size, qty, priorLocations)
+    fetchStagingLocations(token!, front.aisle, front.storageCode, front.size, qty)
       .then((locations) => {
         if (cancelled) return;
-        updateStack(index, { locations, shortfall: Math.max(0, qty - locations.length) });
+        if (expectingSuggestionRef.current) {
+          expectingSuggestionRef.current = false;
+          if (locations.length === 0) {
+            setMessage({ type: 'error', text: 'No valid location available to suggest' });
+          }
+        }
+        updateFront({ locations, shortfall: Math.max(0, qty - locations.length) });
       })
       .catch(() => {
-        if (!cancelled) setMessage({ type: 'error', text: `Stack ${index + 1}: location lookup failed` });
+        if (!cancelled) setMessage({ type: 'error', text: 'Location lookup failed' });
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stack.aisle, stack.storageCode, stack.size, stack.quantity, priorLocations]);
+  }, [front.aisle, front.storageCode, front.size, front.quantity, dataVersion]);
 
-  const qty = parseInt(stack.quantity, 10) || 0;
-  const canStage = !!stack.aisle && !!stack.storageCode && !!stack.size && qty > 0 && stack.locations.length > 0;
+  const qty = parseInt(front.quantity, 10) || 0;
+  const canStage = !!front.aisle && !!front.storageCode && !!front.size && qty > 0 && front.locations.length > 0;
 
-  /** Submits this stack's assigned locations via POST /api/staging/stage, logs the outcome, and resets the stack on success. */
+  /** Submits the assigned locations via POST /api/staging/stage, logs the outcome, and resets on success. */
   async function handleStage() {
     if (!canStage || loading) return;
     setLoading(true);
@@ -270,65 +308,63 @@ function StackPanel({ index, label }: { index: 0 | 1 | 2; label: string }) {
       const result = await apiFetch<StageResult>('/api/staging/stage', token!, {
         method: 'POST',
         body: JSON.stringify({
-          aisle: parseInt(stack.aisle, 10),
-          storageCode: stack.storageCode,
-          size: stack.size,
-          locationIds: stack.locations,
+          aisle: parseInt(front.aisle, 10),
+          storageCode: front.storageCode,
+          size: front.size,
+          locationIds: front.locations,
         }),
       });
 
       const nextText = result.nextLocation ? fmtLocation(result.nextLocation) : 'no further locations';
-      addLogEntry(`${result.staged.length} pallets staged in Aisle ${stack.aisle} → next location ${nextText}`);
+      addLogEntry(`${result.staged.length} pallets staged in Aisle ${front.aisle} → next location ${nextText}`);
 
       if (result.shortfall > 0) {
         playAlert('warning');
         const requested = result.staged.length + result.shortfall;
         addLogEntry(
-          `Warning: ${result.staged.length} of ${requested} locations available in Aisle ${stack.aisle} — ${result.shortfall} pallets have no location`,
+          `Warning: ${result.staged.length} of ${requested} locations available in Aisle ${front.aisle} — ${result.shortfall} pallets have no location`,
           true,
         );
-        setMessage({ type: 'warning', text: `Stack ${index + 1}: staged ${result.staged.length} of ${requested} — ${result.shortfall} pallets unplaced` });
+        setMessage({ type: 'warning', text: `Staged ${result.staged.length} of ${requested} — ${result.shortfall} pallets unplaced` });
       } else {
         playAlert('info');
-        setMessage({ type: 'success', text: `Stack ${index + 1}: ${result.staged.length} pallets staged in Aisle ${stack.aisle}` });
+        setMessage({ type: 'success', text: `${result.staged.length} pallets staged in Aisle ${front.aisle}` });
       }
 
-      resetStackAfterStage(index);
+      resetFrontAfterStage();
       bumpDataVersion();
     } catch {
       playAlert('error');
-      setMessage({ type: 'error', text: `Stack ${index + 1}: staging failed — please try again` });
+      setMessage({ type: 'error', text: 'Staging failed — please try again' });
     } finally {
       setLoading(false);
     }
   }
 
+  /** A location was successfully held — closes the dialog and recomputes the suggestion (via dataVersion) without staging anything. */
+  function handleHeld() {
+    const rejected = rejectTarget;
+    setRejectTarget(null);
+    addLogEntry(`Rejected suggested location ${fmtLocation(rejected!)} — held and recalculating`);
+    expectingSuggestionRef.current = true;
+    bumpDataVersion();
+  }
+
   return (
-    <div className="flex-1 flex flex-col items-stretch justify-between gap-1 px-2 min-w-0 h-full">
-      <span className="font-ui text-[10px] font-semibold text-[#666] uppercase tracking-wider text-center">{label}</span>
+    <div className="w-[300px] shrink-0 flex flex-col gap-2 p-3 bg-[#0A0A0A] border border-[#2A2A2A] rounded-[12px]">
+      <span className="font-ui text-[11px] font-semibold text-[#666] uppercase tracking-wider text-center shrink-0">
+        Front Stack
+      </span>
 
-      <button
-        type="button"
-        onClick={handleStage}
-        disabled={!canStage || loading}
-        className="w-full h-[28px] rounded-[6px] font-ui text-[11px] font-bold tracking-wide bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40 transition-colors shrink-0"
-      >
-        STAGE
-      </button>
-
-      {/* Left: pallet-box stack (Aisle at the bottom, resting on the fork; Qty on top, most
-          used). Right: a real display of where this stack's pallets are going — the actual
-          assigned locations, not just a count — since that's the info a GPMer needs to see
-          before tapping Stage. */}
       <div className="flex-1 min-h-0 flex gap-2">
         <div className="flex-1 min-w-0 min-h-0 flex flex-col-reverse gap-[3px]">
           <PalletBox label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} />
           <PalletBox label="Storage" value={storageField.value} onFocus={focusStorageField} active={storageField.isActive} />
           <PalletSelect
             label="Size"
-            ariaLabel={`${label} Size`}
-            value={stack.size}
-            onChange={(e) => updateStack(index, { size: e.target.value })}
+            ariaLabel="Front Stack Size"
+            value={front.size}
+            onChange={(e) => updateFront({ size: e.target.value })}
           />
           <PalletBox label="Qty" value={quantityField.value} onFocus={focusQuantityField} active={quantityField.isActive} emphasize />
         </div>
@@ -338,27 +374,36 @@ function StackPanel({ index, label }: { index: 0 | 1 | 2; label: string }) {
             Pallets Go To
           </span>
           <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-[2px] bg-[#0A0A0A] border border-[#2A2A2A] rounded-[5px] p-1">
-            {stack.locations.length === 0 && stack.shortfall === 0 && (
+            {front.locations.length === 0 && front.shortfall === 0 && (
               <span className="font-data text-[10px] text-[#444] text-center">—</span>
             )}
-            {stack.locations.map((loc, i) => {
-              // Larger text when there's little else in the list to show, per the report;
-              // the final assigned location (not a shortfall placeholder) is bolded red so
-              // the GPMer can see at a glance where the last pallet in the stack is headed.
-              const big = stack.locations.length + stack.shortfall <= 4;
-              const isLast = i === stack.locations.length - 1;
+            {front.locations.map((loc, i) => {
+              const big = front.locations.length + front.shortfall <= 4;
+              const isFirst = i === 0;
+              const isLast = i === front.locations.length - 1;
+              const sizeClass = big ? 'text-[14px]' : 'text-[10px]';
+              // The next suggestion (first in the list) is a tap target — tapping it opens
+              // the reject/hold flow, not staging (per issue #77, the location button's tap
+              // action is "reject this suggestion", never an accept/stage shortcut).
+              if (isFirst) {
+                return (
+                  <button
+                    key={loc}
+                    type="button"
+                    onClick={() => setRejectTarget(loc)}
+                    className={`font-data text-center underline decoration-dotted underline-offset-2 ${sizeClass} ${isLast ? 'font-bold text-[#FF4444]' : 'text-white'}`}
+                  >
+                    {fmtLocation(loc)}
+                  </button>
+                );
+              }
               return (
-                <span
-                  key={loc}
-                  className={`font-data text-center ${big ? 'text-[14px]' : 'text-[10px]'} ${
-                    isLast ? 'font-bold text-[#FF4444]' : 'text-[#CFCFCF]'
-                  }`}
-                >
+                <span key={loc} className={`font-data text-center ${sizeClass} ${isLast ? 'font-bold text-[#FF4444]' : 'text-[#CFCFCF]'}`}>
                   {fmtLocation(loc)}
                 </span>
               );
             })}
-            {Array.from({ length: stack.shortfall }, (_, i) => (
+            {Array.from({ length: front.shortfall }, (_, i) => (
               <span key={`shortfall-${i}`} className="font-ui text-[9px] text-[#CC4444] text-center font-semibold">
                 No location
               </span>
@@ -366,34 +411,66 @@ function StackPanel({ index, label }: { index: 0 | 1 | 2; label: string }) {
           </div>
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={handleStage}
+        disabled={!canStage || loading}
+        className="w-full h-[36px] rounded-[6px] font-ui text-[13px] font-bold tracking-wide bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40 transition-colors shrink-0"
+      >
+        STAGE
+      </button>
+
+      {rejectTarget && (
+        <RejectHoldDialog locationId={rejectTarget} onClose={() => setRejectTarget(null)} onHeld={handleHeld} />
+      )}
     </div>
   );
 }
 
 // ── Fork graphic ─────────────────────────────────────────────────────────────
 
-/** The Triple.png fork-truck graphic with the three StackPanels resting on its fork bar —
- *  the fork/mast span roughly the left 82% of the image, the cab the remaining ~18%, so the
- *  stack zone below matches that. Triple.png's native aspect is ~2.84:1, so at full 1366px
- *  width its natural height is ~481px; this uses 360px (recognizable proportions without
- *  eating too much of the screen) — the fork bar sits at a fixed 80% down the image regardless
- *  of container height, since it's a uniform stretch, so `bottom-[20%]` below stays correct at
- *  any height. The stack content stretches (items-stretch, not items-end) to fill that whole
- *  80%-tall zone rather than clumping at the bottom, so the available height is actually used. */
-function ForkGraphicArea() {
+/**
+ * The Triple.png fork-truck graphic, flipped so the forks point right and shortened to
+ * reclaim vertical space (issue #77). The image is mirrored via a horizontal CSS transform
+ * rather than a second asset — the fork/mast span (originally the left ~82%) now renders on
+ * the right, and the cab (originally the right ~18%) now renders on the left, which is
+ * exactly where the Fill All / Unstage Aisle buttons belong per the issue ("top-left of the
+ * triple graphic, over the operator's compartment").
+ */
+function TripleGraphic({ isIM, onFillAll, fillAllDisabled, onUnstage }: {
+  isIM: boolean;
+  onFillAll: () => void;
+  fillAllDisabled: boolean;
+  onUnstage: () => void;
+}) {
   return (
-    <div className="relative shrink-0 h-[360px] mx-4 mt-3 select-none">
+    <div className="relative flex-1 min-w-0 h-[270px] select-none">
       <img
         src={Triple}
         alt=""
-        className="absolute inset-0 w-full h-full object-fill opacity-90 pointer-events-none"
+        className="absolute inset-0 w-full h-full object-fill opacity-90 pointer-events-none [transform:scaleX(-1)]"
       />
-      <div className="absolute left-0 top-0 bottom-[20%] w-[82%] flex items-stretch px-2 py-1">
-        <StackPanel index={0} label="Stack 1" />
-        <div className="w-px self-stretch bg-[#3A3A3A]" />
-        <StackPanel index={1} label="Stack 2" />
-        <div className="w-px self-stretch bg-[#3A3A3A]" />
-        <StackPanel index={2} label="Stack 3" />
+      <div className="absolute left-3 top-3 flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={onFillAll}
+          disabled={fillAllDisabled}
+          className="h-[44px] px-5 rounded-[10px] font-ui text-[14px] font-semibold bg-[#003366] hover:bg-[#004488] text-white disabled:opacity-40 transition-colors"
+        >
+          Fill All
+        </button>
+        {isIM && (
+          // Larger and red (issue #74) — its destructive nature (clears staged locations)
+          // should stand out, now doubly so since it lives right next to Fill All.
+          <button
+            type="button"
+            onClick={onUnstage}
+            className="h-[56px] px-6 rounded-[10px] font-ui text-[16px] font-bold bg-[#CC0000] hover:bg-[#DD0000] text-white transition-colors shadow-[0_0_20px_4px_rgba(204,0,0,0.35)]"
+          >
+            Unstage Aisle
+          </button>
+        )}
       </div>
     </div>
   );
@@ -508,8 +585,9 @@ function ElaFormat({
  * fill Aisle/Size) whenever only a Storage Code is present, or an empty-state placeholder
  * otherwise (including Size filled alone). Not collapsible; sized to its content rather
  * than forced to fill all remaining height. Refetches on field changes and whenever a
- * stage/restage actually commits (`dataVersion`) — never from the fork graphic's own
- * candidate-location lookups, which are unrelated to these fields.
+ * stage/restage actually commits or the manual Refresh button is pressed (`dataVersion`) —
+ * never from the fork graphic's own candidate-location lookups, which are unrelated to
+ * these fields.
  */
 function InfoPanel({ aisle, storageCode, size }: { aisle: string; storageCode: string; size: string }) {
   const { token } = useAuth();
@@ -695,7 +773,7 @@ function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }
 
   // Keeps each field's own displayed value in sync with row state after Max/Clear
   // Restage (which set row state directly, bypassing the numpad) — same pattern as
-  // MasterControl/StackPanel syncing their fields from context after external updates.
+  // MasterControl/FrontStackBox syncing their fields from context after external updates.
   useEffect(() => {
     types?.forEach((t, i) => qtyFields[i]?.set(rows[typeKey(t)]?.quantity ?? '0'));
   }, [types, rows]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -861,143 +939,118 @@ function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }
 
 // ── Master control bar ────────────────────────────────────────────────────────
 
-/** Top control bar: shared Aisle/StorageCode/Size, "Fill All", and (IM+ only) Unstage Aisle. */
-function MasterControl({ isIM, onUnstage }: { isIM: boolean; onUnstage: () => void }) {
-  const { master, setMaster, stacks, updateStack } = useStaging();
+/** Top control bar: shared Aisle/StorageCode/Size and the manual Refresh button (issue
+ *  #76). "Fill All" and "Unstage Aisle" moved onto the fork graphic itself (issue #77). */
+function MasterControl({ onRefresh }: { onRefresh: () => void }) {
+  const { master, setMaster } = useStaging();
   const { hidePanel } = useNumpad();
   // Fixed 3-character field — auto-commits like every other screen's Aisle field (ELZ/SDP/
   // LocationEntryFields), which Feature 2's live info panel relies on for its "no explicit
   // submit step" behavior, same reasoning as the Storage Code field below.
   const aisleField = useNumpadField('numpad', 3);
-  // Fixed 2-character field — auto-commits like every other screen's Storage Code field
-  // (ELA/ELZ/SDP), which Feature 2's live info panel relies on for its "no explicit submit
-  // step" behavior.
-  const storageField = useNumpadField('keyboard', 2);
 
   useEffect(() => { aisleField.set(master.aisle); }, [master.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { storageField.set(master.storageCode); }, [master.storageCode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Registers the master Aisle field's numpad handler; writes the confirmed value into the shared master state. */
   const focusAisleField = useCallback(() => {
-    aisleField.focus((v) => {
-      setMaster({ aisle: v.trim() });
-      hidePanel();
-    });
+    aisleField.focus((v) => { setMaster({ aisle: v.trim() }); hidePanel(); });
   }, [aisleField, hidePanel, setMaster]);
 
-  /** Registers the master Storage Code field's keyboard handler; writes the confirmed value into the shared master state. */
-  const focusStorageField = useCallback(() => {
-    storageField.focus((v) => {
-      setMaster({ storageCode: v.trim().toUpperCase() });
-      hidePanel();
-    });
-  }, [storageField, hidePanel, setMaster]);
-
-  /** Applies the master Aisle/StorageCode/Size to every stack that doesn't have a Quantity yet. */
-  function fillAll() {
-    stacks.forEach((s, i) => {
-      if (!s.quantity) updateStack(i as 0 | 1 | 2, { aisle: master.aisle, storageCode: master.storageCode, size: master.size });
-    });
-  }
-
-  // Nothing left for Fill All to do once every stack already has its own Quantity — without
-  // this, the button's enabled state never reflected quantity entry at all.
-  const allStacksHaveQuantity = stacks.every((s) => !!s.quantity);
-
-  // Four equal-width columns mirror ForkGraphicArea's layout below (Stack 1 / Stack 2 /
-  // Stack 3 each occupy 25% of width, then the cab/mast zone takes the remaining 25%) —
-  // that's what makes Aisle land centered directly above Stack 2, not a coincidence.
   return (
-    <div className="flex items-end pt-3 pb-4 border-b border-[#1C1C1C] shrink-0">
-      <div className="flex-1 flex justify-center">
-        <FieldDisplay label="Storage Code" value={storageField.value} onFocus={focusStorageField} active={storageField.isActive} width="w-[160px]" />
-      </div>
-      <div className="flex-1 flex justify-center">
+    <div className="flex items-end justify-between pt-3 pb-4 border-b border-[#1C1C1C] shrink-0 px-4">
+      <div className="flex items-end gap-4">
+        <StorageCodeField value={master.storageCode} onChange={(v) => setMaster({ storageCode: v })} size="compact" />
         <FieldDisplay label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} width="w-[120px]" />
+        <SizeField value={master.size} onChange={(v) => setMaster({ size: v })} size="compact" ariaLabel="Master Size" />
       </div>
-      <div className="flex-1 flex justify-center">
-        <div className="flex flex-col gap-1 w-[120px]">
-          <span className="font-ui text-[12px] font-medium text-[#9A9A9A] uppercase tracking-wider text-center">Size</span>
-          <select
-            aria-label="Master Size"
-            value={master.size}
-            onChange={(e) => setMaster({ size: e.target.value })}
-            className="h-[52px] px-3 rounded-[10px] bg-[#0D0D0D] border-2 border-[#3A3A3A] font-data text-[18px] text-white text-center focus:outline-none focus:border-[#CC0000]"
-          >
-            <option value="">—</option>
-            {SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-      </div>
-      <div className="flex-1 flex flex-col items-center gap-2">
-        <button
-          type="button"
-          onClick={fillAll}
-          disabled={!master.aisle || !master.storageCode || !master.size || allStacksHaveQuantity}
-          className="h-[52px] px-5 rounded-[10px] font-ui text-[15px] font-semibold bg-[#003366] hover:bg-[#004488] text-white disabled:opacity-40 transition-colors"
-        >
-          Fill All
-        </button>
-        {isIM && (
-        <button
-          type="button"
-          onClick={onUnstage}
-          className="h-[36px] px-4 rounded-[8px] font-ui text-[12px] font-semibold border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
-        >
-          Unstage Aisle
-        </button>
-        )}
-      </div>
+
+      {/* Manual Refresh (issue #76) — reloads the live info panel and the front stack's
+          suggested location, independent of the automatic refresh already triggered by
+          field commits (issue #75 tracks that automatic path being slow). */}
+      <button
+        type="button"
+        onClick={onRefresh}
+        className="h-[44px] px-5 rounded-[10px] font-ui text-[14px] font-semibold border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
+      >
+        Refresh
+      </button>
     </div>
   );
 }
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 
-/** Assembles the STG screen: Master Control, the fork graphic with three StackPanels, a live
- *  zone map for Master Control's Aisle/StorageCode, and the Log Panel at the very bottom. */
+/** Assembles the STG screen: Master Control, the fork graphic with the front-stack box, a
+ *  live zone map for Master Control's Aisle/StorageCode, and the Log Panel at the very bottom. */
 function STGScreen() {
   const { user } = useAuth();
+  const { setMessage } = useMessageBar();
   const routerLocation = useLocation();
-  const { stacks, updateStack, master, setMaster } = useStaging();
+  const { front, updateFront, master, setMaster, bumpDataVersion } = useStaging();
   const [unstageOpen, setUnstageOpen] = useState(false);
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
 
   // Pre-population from ELA "Stage Aisle" / ELZ "Stage Aisle" — see STG.md's
-  // Pre-population section. Only applied once per navigation (route state is consumed,
-  // not re-applied on every render) — an empty Stack 1 is used as the "not yet applied" signal.
+  // Pre-population section. Only applied once per navigation (route state is consumed, not
+  // re-applied on every render) — an empty front stack's aisle is used as the "not yet
+  // applied" signal. Simplified for issue #77's single-front-stack model: "Fill All"
+  // auto-triggering now means applying storageCode/size directly to the one stack that
+  // exists, rather than to all three.
   useEffect(() => {
     const state = routerLocation.state as NavState | null;
-    if (!state?.aisle || stacks[0].aisle) return;
+    if (!state?.aisle || front.aisle) return;
     const aisle = String(state.aisle);
-    updateStack(0, { aisle });
+    updateFront({ aisle });
     setMaster({ aisle });
     if (state.storageCode) {
       // ELZ only ever supplies storageCode (no Size concept on that screen); ELA supplies
       // both. Apply whichever fields are present rather than requiring both together.
       setMaster({ storageCode: state.storageCode, ...(state.size ? { size: state.size } : {}) });
-      // "Fill All" auto-triggers: every stack with no Quantity yet (all three, on entry)
-      // inherits StorageCode (+ Size if supplied) — each still needs its own Quantity entered.
-      [0, 1, 2].forEach((i) => updateStack(i as 0 | 1 | 2, {
-        storageCode: state.storageCode!,
-        ...(state.size ? { size: state.size } : {}),
-      }));
+      updateFront({ storageCode: state.storageCode, ...(state.size ? { size: state.size } : {}) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routerLocation.state]);
 
+  /** Applies Master Control's Aisle/StorageCode/Size to the front stack if it has no Quantity yet (issue #77 — doesn't trigger the reject/hold flow). */
+  function fillAll() {
+    if (!front.quantity) {
+      updateFront({ aisle: master.aisle, storageCode: master.storageCode, size: master.size });
+    }
+  }
+
+  /** Manual Refresh (issue #76): reloads the live info panel and the front stack's suggestion without changing any field. */
+  function handleRefresh() {
+    bumpDataVersion();
+    setMessage({ type: 'info', text: 'Refreshed' });
+  }
+
   return (
     <div className="absolute inset-0 flex flex-col select-none">
-      <MasterControl isIM={isIM} onUnstage={() => setUnstageOpen(true)} />
-      <ForkGraphicArea />
+      <MasterControl onRefresh={handleRefresh} />
 
-      <div className="flex-1 flex flex-col overflow-y-auto border-t border-[#1C1C1C]">
+      {/* Explicit height (not just items-stretch) so FrontStackBox's internal flex-1/
+          min-h-0 chain has a real bound to shrink against — matching the old
+          ForkGraphicArea's `top-0 bottom-[20%]` absolute-positioning trick, which gave its
+          StackPanel children the same kind of implicit bounded height. Without this, the
+          box's content (4 pallet-box fields + location list + Stage button) overflows past
+          220px and gets hidden under the bottom-right Numpad panel. */}
+      <div className="flex items-stretch gap-3 mx-4 mt-3 h-[270px]">
+        <TripleGraphic
+          isIM={isIM}
+          onFillAll={fillAll}
+          fillAllDisabled={!master.aisle || !master.storageCode || !master.size || !!front.quantity}
+          onUnstage={() => setUnstageOpen(true)}
+        />
+        <FrontStackBox />
+      </div>
+
+      <div className="flex-1 flex flex-col overflow-y-auto border-t border-[#1C1C1C] mt-3">
         <InfoPanel aisle={master.aisle} storageCode={master.storageCode} size={master.size} />
         <LogPanel />
       </div>
 
       {unstageOpen && (
-        <UnstageModal aisle={master.aisle || stacks[0].aisle} onClose={() => setUnstageOpen(false)} />
+        <UnstageModal aisle={master.aisle || front.aisle} onClose={() => setUnstageOpen(false)} />
       )}
     </div>
   );

@@ -13,6 +13,9 @@ export const HOLD_REASON_CODES: HoldReasonCode[] = [
   { code: 'B02', desc: 'Quality hold' },
   { code: 'B03', desc: 'Inventory discrepancy' },
   { code: 'B04', desc: 'Pending investigation' },
+  // Added for STG's location suggestion reject/hold flow (issue #77) — the default reason
+  // when a GPMer rejects a suggested location, e.g. because it's physically inaccessible.
+  { code: 'B05', desc: 'Blocked' },
   { code: 'S01', desc: 'Safety concern' },
   { code: 'S02', desc: 'Recall' },
   { code: 'O01', desc: 'Other — see notes' },

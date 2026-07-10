@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AisleGrid, type GridLevel } from '../components/shared/AisleGrid';
 import { CellValue } from '../components/shared/CellValue';
+import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
@@ -50,17 +51,16 @@ export function ELZPage() {
   const prefill = (routerLocation.state as NavState | null) ?? null;
 
   const aisleField = useNumpadField('numpad', 3);
-  const storageField = useNumpadField('keyboard', 2);
   const [aisle, setAisle] = useState<number | null>(prefill?.aisle ?? null);
   const [storageCode, setStorageCode] = useState(prefill?.storageCode ?? '');
   const [result, setResult] = useState<EmptyByZoneResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
-  // Pre-populate field displays from router state (ELA "View Zone Map" / STG) on mount.
+  // Pre-populate the Aisle field display from router state (ELA "View Zone Map" / STG) on
+  // mount — Storage Code's pre-population is handled by StorageCodeField's own value-sync effect.
   useEffect(() => {
     if (prefill?.aisle != null) aisleField.set(String(prefill.aisle));
-    if (prefill?.storageCode) storageField.set(prefill.storageCode);
     // Field setters are stable across the lifetime of the hook — only run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -75,16 +75,6 @@ export function ELZPage() {
       hidePanel();
     });
   }, [aisleField, hidePanel]);
-
-  /** Registers the Storage Code field's keyboard handler; on confirm, uppercases the value and dismisses the panel. */
-  const focusStorageField = useCallback(() => {
-    storageField.focus((v) => {
-      const trimmed = v.trim().toUpperCase();
-      storageField.set(trimmed);
-      setStorageCode(trimmed);
-      hidePanel();
-    });
-  }, [storageField, hidePanel]);
 
   // Query trigger: grid loads once both fields have values; re-runs on either change.
   // (aisle/storageCode only ever move from empty to a submitted value — see focusAisleField
@@ -139,21 +129,7 @@ export function ELZPage() {
             {aisleField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
           </button>
         </div>
-        <div className="w-[220px] flex flex-col gap-1">
-          <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-            Storage Code
-          </span>
-          <button
-            type="button"
-            onClick={focusStorageField}
-            className={`flex items-center h-[64px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${storageField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-          >
-            <span className="font-data text-[26px] font-medium text-white tracking-[0.04em]">
-              {storageField.value || <span className="text-[#444]">—</span>}
-            </span>
-            {storageField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-          </button>
-        </div>
+        <StorageCodeField value={storageCode} onChange={setStorageCode} />
       </div>
 
       {/* Main area: grid + zone summary */}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
+import { DpciField, type DpciValue } from '../components/shared/DpciField';
+import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
@@ -10,6 +12,7 @@ import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { EDIT_REASON_CODES } from '../lib/editReasonCodes';
+import { fmtDpci } from '../lib/fmt';
 import { useNumpadField } from '../lib/useNumpadField';
 
 interface UserStamp {
@@ -35,11 +38,6 @@ interface PalletData {
   putAt: string | null;
   lastPulledBy: UserStamp | null;
   lastPulledAt: string | null;
-}
-
-/** Formats a DPCI object as `DDD-CC-IIII`. */
-function fmtDpci(dpci: { dept: number; class: number; item: number }): string {
-  return `${String(dpci.dept).padStart(3, '0')}-${String(dpci.class).padStart(2, '0')}-${String(dpci.item).padStart(4, '0')}`;
 }
 
 /** Formats a location object as its canonical 8-digit id (Aisle+Bin+Level). */
@@ -76,17 +74,14 @@ export function PIIPage() {
   const palletField = useNumpadField();
 
   // Edit-mode field values, seeded from the loaded pallet on entering edit mode.
-  // DPCI is three separate fields (issue #21) instead of one combined string.
-  const [editDept, setEditDept] = useState('');
-  const [editClass, setEditClass] = useState('');
-  const [editItem, setEditItem] = useState('');
+  // DPCI is three separate fields (issue #21), now via the shared DpciField (issue #78).
+  const [editDpci, setEditDpci] = useState<DpciValue>({ dept: '', class: '', item: '' });
   const [editVcp, setEditVcp] = useState('');
   const [editSsp, setEditSsp] = useState('');
   const [editCartons, setEditCartons] = useState('');
   const [editSSPs, setEditSSPs] = useState('');
   const [editPallets, setEditPallets] = useState('');
   const [reasonCode, setReasonCode] = useState('');
-  const [customReason, setCustomReason] = useState('');
   const [saving, setSaving] = useState(false);
 
   /** Looks up a pallet by id via the API and transitions to the loaded state; resets to ready on failure. */
@@ -149,16 +144,17 @@ export function PIIPage() {
   /** Seeds the edit-mode fields from the currently loaded pallet and switches to the edit state. */
   function enterEditMode() {
     if (!pallet) return;
-    setEditDept(String(pallet.dpci.dept).padStart(3, '0'));
-    setEditClass(String(pallet.dpci.class).padStart(2, '0'));
-    setEditItem(String(pallet.dpci.item).padStart(4, '0'));
+    setEditDpci({
+      dept: String(pallet.dpci.dept).padStart(3, '0'),
+      class: String(pallet.dpci.class).padStart(2, '0'),
+      item: String(pallet.dpci.item).padStart(4, '0'),
+    });
     setEditVcp(String(pallet.vcp));
     setEditSsp(String(pallet.ssp));
     setEditCartons(String(pallet.currentCartons));
     setEditSSPs(String(pallet.currentSSPs));
     setEditPallets(String(pallet.currentPallets));
     setReasonCode('');
-    setCustomReason('');
     setScreenState('edit');
   }
 
@@ -174,9 +170,9 @@ export function PIIPage() {
     try {
       const body: Record<string, unknown> = {};
 
-      const dept = parseInt(editDept, 10);
-      const cls = parseInt(editClass, 10);
-      const itm = parseInt(editItem, 10);
+      const dept = parseInt(editDpci.dept, 10);
+      const cls = parseInt(editDpci.class, 10);
+      const itm = parseInt(editDpci.item, 10);
       if (!isNaN(dept) && !isNaN(cls) && !isNaN(itm) &&
           (dept !== pallet.dpci.dept || cls !== pallet.dpci.class || itm !== pallet.dpci.item)) {
         body.dpci = { dept, class: cls, item: itm };
@@ -193,12 +189,11 @@ export function PIIPage() {
       if (!isNaN(pallets) && pallets !== pallet.currentPallets) body.currentPallets = pallets;
 
       if (Object.keys(body).length > 0) {
-        const finalReason = reasonCode === 'OTHER' ? customReason.trim() : reasonCode;
-        if (!finalReason) {
+        if (!reasonCode) {
           setMessage({ type: 'error', text: 'A reason code is required to save changes' });
           return;
         }
-        body.reasonCode = finalReason;
+        body.reasonCode = reasonCode;
       }
 
       await apiFetch(`/api/pallets/${pallet.pid}`, token!, {
@@ -281,15 +276,8 @@ export function PIIPage() {
 
           {screenState === 'edit' ? (
             <>
-              <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
-                <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
-                <div className="flex items-center gap-2">
-                  <input aria-label="Dept" value={editDept} onChange={(e) => setEditDept(e.target.value)} maxLength={3} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[76px] text-center focus:outline-none focus:border-[#CC0000]" />
-                  <span className="text-[#555]">-</span>
-                  <input aria-label="Class" value={editClass} onChange={(e) => setEditClass(e.target.value)} maxLength={2} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[64px] text-center focus:outline-none focus:border-[#CC0000]" />
-                  <span className="text-[#555]">-</span>
-                  <input aria-label="Item" value={editItem} onChange={(e) => setEditItem(e.target.value)} maxLength={4} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[92px] text-center focus:outline-none focus:border-[#CC0000]" />
-                </div>
+              <div className="py-2 border-b border-[#1A1A1A]">
+                <DpciField value={editDpci} onChange={setEditDpci} />
               </div>
               <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">VCP</span>
@@ -311,29 +299,11 @@ export function PIIPage() {
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Full Pallets</span>
                 <input aria-label="Full Pallets" type="number" value={editPallets} onChange={(e) => setEditPallets(e.target.value)} className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[140px] focus:outline-none focus:border-[#CC0000]" />
               </div>
-              <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
-                <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Reason Code</span>
-                <select
-                  aria-label="Reason code"
-                  value={reasonCode}
-                  onChange={(e) => setReasonCode(e.target.value)}
-                  className="font-data text-[18px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[280px] focus:outline-none focus:border-[#CC0000]"
-                >
-                  <option value="">Select a reason…</option>
-                  {EDIT_REASON_CODES.map((r) => (
-                    <option key={r.code} value={r.code}>{r.code} — {r.desc}</option>
-                  ))}
-                  <option value="OTHER">Type a code…</option>
-                </select>
-                {reasonCode === 'OTHER' && (
-                  <input
-                    aria-label="Custom reason code"
-                    value={customReason}
-                    onChange={(e) => setCustomReason(e.target.value)}
-                    placeholder="Reason code"
-                    className="font-data text-[18px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[160px] focus:outline-none focus:border-[#CC0000]"
-                  />
-                )}
+              <div className="flex items-start gap-2 py-2 border-b border-[#1A1A1A]">
+                <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider pt-3">Reason Code</span>
+                <div className="w-[280px]">
+                  <ReasonCodeField codes={EDIT_REASON_CODES} value={reasonCode} onChange={setReasonCode} label="" size="compact" />
+                </div>
               </div>
             </>
           ) : (
