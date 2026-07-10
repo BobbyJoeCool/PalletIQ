@@ -107,10 +107,15 @@ async function getLocation(req: HttpRequest, _ctx: InvocationContext): Promise<u
  * HS/S/M/L columns for any matching CR aisle. Sorted by totalEmpty (summed across all
  * sizes in the aisle) descending — staged does not affect sort order.
  *
- * @param req - HTTP request with query params `storageCode` and `size` (both required)
+ * `size` is optional (added for STG's live info panel — see Feature 2 in
+ * DevNotes/DesignPrompts/Feature-2-STG-Live-Matching-Aisle-Zone-Info.md, "Storage Code
+ * only" state): when omitted, an aisle qualifies if *any* size has a non-zero empty or
+ * staged count, rather than requiring one specific queried size to be non-zero.
+ *
+ * @param req - HTTP request with query param `storageCode` (required) and `size` (optional)
  * @returns Array of `{ aisle, totalEmpty, sizes: [{ size, empty, staged }] }`, sizes sorted
  *   per SIZE_ORDER
- * @throws 400 INVALID_INPUT if either query param is missing
+ * @throws 400 INVALID_INPUT if `storageCode` is missing
  */
 async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
   await requireAuth(req);
@@ -118,11 +123,11 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
   const params = new URL(req.url).searchParams;
   const storageCodeParam = params.get('storageCode');
   const sizeParam = params.get('size');
-  if (!storageCodeParam || !sizeParam) {
+  if (!storageCodeParam) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
   const storageCode = storageCodeParam.toUpperCase();
-  const size = sizeParam.toUpperCase();
+  const size = sizeParam ? sizeParam.toUpperCase() : null;
 
   const [empties, stageds] = await Promise.all([
     prisma.location.groupBy({
@@ -152,8 +157,11 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
 
   return [...byAisle.entries()]
     .filter(([, sizes]) => {
-      const queried = sizes.get(size);
-      return queried != null && (queried.empty > 0 || queried.staged > 0);
+      if (size) {
+        const queried = sizes.get(size);
+        return queried != null && (queried.empty > 0 || queried.staged > 0);
+      }
+      return [...sizes.values()].some((counts) => counts.empty > 0 || counts.staged > 0);
     })
     .map(([aisle, sizes]) => {
       const sizeCounts = [...sizes.entries()]
@@ -172,19 +180,26 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
  * by StorageCode-Size, filtered to the requested Storage Code. See DevNotes/Screen-Specs/ELZ.md.
  *
  * Design decision (not fully specified in ELZ.md): the grid reflects every location's
- * actual designation regardless of the storageCode filter — it's a physical map, not a
- * filtered view. The storageCode filter narrows only the actionable zoneSummary breakdown,
- * mirroring how ELA already scopes its results to one storage code. Contracted locations
- * are excluded from summary counts (they're unusable) but still render, highlighted, in
- * the grid itself.
+ * actual designation regardless of the storageCode/size filters — it's a physical map, not
+ * a filtered view. The filters narrow only the actionable zoneSummary breakdown, mirroring
+ * how ELA already scopes its results to one storage code. Contracted locations are
+ * excluded from summary counts (they're unusable) but still render, highlighted, in the
+ * grid itself.
  *
  * Each zone-side/level cell is expected to carry one uniform StorageCode/Size/Contraction
  * across every bin in that group (true of the current seed data); the first location
  * encountered per group is used as that cell's representative values.
  *
- * @param req - HTTP request with query params `aisle` and `storageCode` (both required)
+ * `storageCode` and `size` are both optional (added for STG's live info panel — see
+ * Feature 2 in DevNotes/DesignPrompts/Feature-2-STG-Live-Matching-Aisle-Zone-Info.md, and
+ * incidentally the same relaxation issue #60 wants for ELZ itself, though ELZPage.tsx's own
+ * required-both-fields gate is left as-is for now): each filters the zoneSummary breakdown
+ * independently when present; when a filter is absent, the breakdown includes every value
+ * for that dimension instead of narrowing to one.
+ *
+ * @param req - HTTP request with query param `aisle` (required), `storageCode` and `size` (both optional)
  * @returns `{ aisle, levels: [{ level, cells: [...] }], zoneSummary: [{ zone, breakdown: [...] }] }`
- * @throws 400 INVALID_INPUT if either query param is missing or aisle is not numeric;
+ * @throws 400 INVALID_INPUT if `aisle` is missing or not numeric;
  *   404 NOT_FOUND if the aisle has no location records
  */
 async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
@@ -193,12 +208,14 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
   const params = new URL(req.url).searchParams;
   const aisleParam = params.get('aisle');
   const storageCodeParam = params.get('storageCode');
-  if (!aisleParam || !storageCodeParam) {
+  const sizeParam = params.get('size');
+  if (!aisleParam) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
   const aisle = parseInt(aisleParam, 10);
   if (isNaN(aisle)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-  const storageCode = storageCodeParam.toUpperCase();
+  const storageCode = storageCodeParam ? storageCodeParam.toUpperCase() : null;
+  const size = sizeParam ? sizeParam.toUpperCase() : null;
 
   const locations = await prisma.location.findMany({ where: { aisle } });
   if (locations.length === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
@@ -219,12 +236,13 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
     .sort(([a], [b]) => a - b)
     .map(([level, cells]) => ({ level, cells: [...cells.values()] }));
 
-  // Zone summary: EMPTY/STAGED counts by StorageCode-Size, scoped to the queried storage
-  // code and excluding contracted locations.
+  // Zone summary: EMPTY/STAGED counts by StorageCode-Size, independently narrowed by
+  // storageCode and/or size when either is provided, excluding contracted locations.
   interface Breakdown { storageCode: string; size: string; empty: number; staged: number }
   const zoneMap = new Map<number, Map<string, Breakdown>>();
   for (const loc of locations) {
-    if (loc.storageCode.toUpperCase() !== storageCode) continue;
+    if (storageCode && loc.storageCode.toUpperCase() !== storageCode) continue;
+    if (size && loc.size.toUpperCase() !== size) continue;
     if (loc.contraction) continue;
     if (loc.status !== 'EMPTY' && loc.status !== 'STAGED') continue;
     if (!zoneMap.has(loc.zone)) zoneMap.set(loc.zone, new Map());

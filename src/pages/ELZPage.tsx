@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AisleGrid, type GridLevel } from '../components/shared/AisleGrid';
+import { CellValue } from '../components/shared/CellValue';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
@@ -28,17 +29,6 @@ interface EmptyByZoneResult {
 interface NavState {
   aisle?: number;
   storageCode?: string;
-}
-
-/** Renders the blank / `E` / `E(S)` / `(S)` cell format shared with ELA's results table. */
-function CellValue({ empty, staged }: { empty: number; staged: number }) {
-  if (empty === 0 && staged === 0) return null;
-  return (
-    <span className="font-data text-[15px] font-medium text-white">
-      {empty > 0 && empty}
-      {staged > 0 && <span className="text-[12px] text-[#9A9A9A] ml-0.5">({staged})</span>}
-    </span>
-  );
 }
 
 /**

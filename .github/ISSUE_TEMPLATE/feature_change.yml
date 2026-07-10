@@ -10,6 +10,14 @@ body:
         before anyone touches code (per `.claude/CLAUDE.md`'s Bias Toward Asking Questions). If
         something is actually broken instead, use [Bug Report](?template=bug_report.yml) instead.
 
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: One sentence — what should change, readable at a glance in an issue list
+    validations:
+      required: true
+
   - type: dropdown
     id: severity
     attributes:

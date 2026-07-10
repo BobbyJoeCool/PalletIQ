@@ -1,6 +1,6 @@
 {
   "name": "palletiq-api",
-  "version": "1.0.4",
+  "version": "1.2.0",
   "description": "PalletIQ — Azure Functions API",
   "type": "module",
   "main": "dist/index.js",
@@ -8,7 +8,15 @@
     "build": "prisma generate && tsc -p tsconfig.json",
     "postbuild": "cp -r generated dist/generated",
     "watch": "tsc -p tsconfig.json --watch",
-    "start": "func start"
+    "start": "func start",
+    "db:local:up": "docker compose up -d",
+    "db:local:down": "docker compose down",
+    "db:local:init": "node scripts/db-local-init.mjs",
+    "db:local:push": "dotenv -e .env.local -- prisma db push",
+    "db:local:seed": "dotenv -e .env.local -- prisma db seed",
+    "db:local:setup": "npm run db:local:up && npm run db:local:init && npm run db:local:push && npm run db:local:seed",
+    "db:use-local": "cp local.settings.local.json local.settings.json && echo 'func start now points at the local Docker DB.'",
+    "db:use-azure": "cp local.settings.azure.json local.settings.json && echo 'func start now points at the shared Azure DB.'"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -22,6 +30,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "dotenv-cli": "^11.0.0",
     "exceljs": "^4.4.0",
     "mssql": "^12.6.0",
     "prisma": "^7.8.0",

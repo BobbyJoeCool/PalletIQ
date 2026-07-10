@@ -23,6 +23,7 @@ api/dist/
 
 # Azure Functions local settings (contains connection strings/secrets)
 api/local.settings.json
+api/local.settings.*.json
 
 # ---------- Azure Functions / SWA artifacts ----------
 api/bin/

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CellValue } from '../components/shared/CellValue';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
@@ -18,19 +19,6 @@ interface AisleRow {
   aisle: number;
   totalEmpty: number;
   sizes: SizeCount[];
-}
-
-/** Renders the blank / `E` / `E(S)` / `(S)` cell format shared with ELZ's zone summary. */
-function CellValue({ empty, staged }: { empty: number; staged: number }) {
-  if (empty === 0 && staged === 0) return null;
-  return (
-    <span className="font-data text-[19px] font-medium text-white">
-      {empty > 0 && empty}
-      {staged > 0 && (
-        <span className="text-[13px] text-[#9A9A9A] ml-0.5">({staged})</span>
-      )}
-    </span>
-  );
 }
 
 /**
@@ -223,7 +211,7 @@ export function ELAPage() {
                     const cell = row.sizes.find((sz) => sz.size === s);
                     return (
                       <div key={s} className="flex-1 px-4 py-3 text-center">
-                        {cell && <CellValue empty={cell.empty} staged={cell.staged} />}
+                        {cell && <CellValue empty={cell.empty} staged={cell.staged} large />}
                       </div>
                     );
                   })}

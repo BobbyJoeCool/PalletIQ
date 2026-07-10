@@ -9,6 +9,14 @@ body:
         Something broken today, not a request to change how it behaves — that's a
         [Feature Change Request](?template=feature_change.yml) instead.
 
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: One sentence — what's wrong, readable at a glance in an issue list
+    validations:
+      required: true
+
   - type: dropdown
     id: severity
     attributes:

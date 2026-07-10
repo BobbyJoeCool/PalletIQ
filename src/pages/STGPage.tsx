@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Triple from '../assets/Triple.png';
-import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { AisleGrid, type GridLevel } from '../components/shared/AisleGrid';
+import { CellValue } from '../components/shared/CellValue';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
@@ -26,16 +26,16 @@ interface StageResult {
   nextLocation: string | null;
 }
 
-interface RestageResult {
-  cleared: number;
-  staged: number;
-  shortfall: number;
-  firstLocation: string | null;
-}
+interface ZoneBreakdown { storageCode: string; size: string; empty: number; staged: number }
+interface ZoneSummaryEntry { zone: number; breakdown: ZoneBreakdown[] }
 
 interface ZoneMapResult {
   levels: GridLevel[];
+  zoneSummary: ZoneSummaryEntry[];
 }
+
+interface AisleSizeCount { size: string; empty: number; staged: number }
+interface AisleRow { aisle: number; totalEmpty: number; sizes: AisleSizeCount[] }
 
 /** Stable, referentially-constant empty exclude set — used by Stack 0, which has no lower-
  *  priority sibling to yield to, so its dependency never wastefully changes identity. */
@@ -176,7 +176,7 @@ function StackPanel({ index, label }: { index: 0 | 1 | 2; label: string }) {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
   const { hidePanel } = useNumpad();
-  const { stacks, updateStack, resetStackAfterStage, addLogEntry } = useStaging();
+  const { stacks, updateStack, resetStackAfterStage, addLogEntry, bumpDataVersion } = useStaging();
   const stack = stacks[index];
 
   const aisleField = useNumpadField('numpad');
@@ -294,6 +294,7 @@ function StackPanel({ index, label }: { index: 0 | 1 | 2; label: string }) {
       }
 
       resetStackAfterStage(index);
+      bumpDataVersion();
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: `Stack ${index + 1}: staging failed — please try again` });
@@ -398,76 +399,200 @@ function ForkGraphicArea() {
   );
 }
 
-// ── Zone map ─────────────────────────────────────────────────────────────────
+// ── Live info panel ───────────────────────────────────────────────────────────
 
-/** Bottom-half live zone map for whatever Aisle + Storage Code are currently set in Master
- *  Control — reuses the same GET /api/locations/empty-by-zone endpoint and shared AisleGrid
- *  component as ELZ (see ELZPage.tsx), without ELZ's per-zone summary panel: STG only needs
- *  the physical layout for reference while staging, not the empty/staged counts. */
-function ZoneMap({ aisle, storageCode }: { aisle: string; storageCode: string }) {
-  const { token } = useAuth();
-  const { setMessage } = useMessageBar();
-  const [levels, setLevels] = useState<GridLevel[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [notFound, setNotFound] = useState(false);
+/** Short inline message shown in place of a row list/summary that came back empty — the
+ *  zone map (if present alongside it) keeps rendering normally either way. */
+function NoMatches({ text }: { text: string }) {
+  return <p className="font-ui text-[14px] text-[#555] text-center py-4">{text}</p>;
+}
 
-  useEffect(() => {
-    if (!aisle || !storageCode) {
-      setLevels(null);
-      setNotFound(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setNotFound(false);
-    apiFetch<ZoneMapResult>(
-      `/api/locations/empty-by-zone?aisle=${aisle}&storageCode=${encodeURIComponent(storageCode)}`,
-      token!,
-    )
-      .then((data) => { if (!cancelled) setLevels(data.levels); })
-      .catch((err) => {
-        if (cancelled) return;
-        if (err instanceof Error && err.message === 'NOT_FOUND') {
-          setLevels(null);
-          setNotFound(true);
-        } else {
-          setLevels(null);
-          setMessage({ type: 'error', text: 'Zone map lookup failed' });
-        }
-      })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [aisle, storageCode, token, setMessage]);
-
-  if (!aisle || !storageCode) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="font-ui text-[16px] text-[#555] text-center px-8">
-          Enter an Aisle and Storage Code in Master Control to view the zone map
-        </p>
+/** ELZ-format read-only display: physical layout grid (left, unfiltered) + zone summary
+ *  (right, narrowed by whichever of storageCode/size the caller supplied) — same JSX/
+ *  formatting pattern as ELZPage.tsx's zone summary panel. Not interactive, per Feature 2's
+ *  spec (this format is always a read-only display, matching ELZ itself). */
+function ElzFormat({ result, label }: { result: ZoneMapResult; label: string }) {
+  return (
+    <div className="flex-1 flex gap-4 overflow-hidden px-4 py-3">
+      <div className="flex-[6] overflow-auto">
+        <AisleGrid levels={result.levels} dense />
       </div>
-    );
+      <div className="flex-[4] overflow-y-auto border-l border-[#2A2A2A] pl-4">
+        {result.zoneSummary.length === 0 ? (
+          <NoMatches text={`No open ${label} locations in this aisle`} />
+        ) : (
+          result.zoneSummary.map((z) => (
+            <div key={z.zone} className="mb-3">
+              <span className="font-ui text-[14px] font-semibold text-white">Zone {z.zone}</span>
+              <div className="flex flex-col gap-1 mt-1">
+                {z.breakdown.map((b) => (
+                  <div key={`${b.storageCode}-${b.size}`} className="flex items-center justify-between">
+                    <span className="font-data text-[13px] text-[#CFCFCF]">{b.storageCode}-{b.size}</span>
+                    <CellValue empty={b.empty} staged={b.staged} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** ELA-format interactive list: aisle row headers, with size sub-rows nested beneath when
+ *  not already narrowed to one exact size. Only the aisle-number / size-label text itself is
+ *  a tap target — the counts/data area is a plain span, so a scroll swipe starting over the
+ *  numbers never fires a selection, per Feature 2's spec. */
+function ElaFormat({
+  rows, size, storageCode, onSelectAisle, onSelectSize,
+}: { rows: AisleRow[]; size: string; storageCode: string; onSelectAisle: (aisle: number) => void; onSelectSize: (size: string) => void }) {
+  if (rows.length === 0) {
+    return <NoMatches text={`No open ${storageCode}${size ? `-${size}` : ''} locations`} />;
   }
 
-  if (loading) {
+  if (size) {
+    // Already narrowed to one exact freight type — no sub-rows needed; sort/display by
+    // that specific size's own empty count (a row's `sizes` still lists every size present
+    // in that aisle, not just the queried one).
+    const sorted = [...rows].sort((a, b) => {
+      const av = a.sizes.find((s) => s.size === size)?.empty ?? 0;
+      const bv = b.sizes.find((s) => s.size === size)?.empty ?? 0;
+      return bv - av;
+    });
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="font-ui text-[14px] text-[#555]">Loading zone map…</p>
-      </div>
-    );
-  }
-
-  if (notFound || !levels) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="font-ui text-[16px] text-[#CC4444]">Aisle {aisle} not found</p>
+      <div className="flex-1 overflow-y-auto px-4">
+        {sorted.map((r) => {
+          const cell = r.sizes.find((s) => s.size === size);
+          return (
+            <div key={r.aisle} className="flex items-center justify-between py-3 border-b border-[#1A1A1A] last:border-b-0">
+              <button type="button" onClick={() => onSelectAisle(r.aisle)} className="font-data text-[20px] font-semibold text-white">
+                Aisle {r.aisle}
+              </button>
+              <span>{cell && <CellValue empty={cell.empty} staged={cell.staged} large />}</span>
+            </div>
+          );
+        })}
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-5 py-3">
-      <AisleGrid levels={levels} dense />
+    <div className="flex-1 overflow-y-auto px-4">
+      {rows.map((r) => (
+        <div key={r.aisle} className="py-3 border-b border-[#1A1A1A] last:border-b-0">
+          <button type="button" onClick={() => onSelectAisle(r.aisle)} className="font-data text-[20px] font-semibold text-white">
+            Aisle {r.aisle}
+          </button>
+          <div className="flex flex-col gap-1 mt-2 pl-3">
+            {r.sizes.filter((s) => s.empty > 0 || s.staged > 0).map((s) => (
+              <div key={s.size} className="flex items-center justify-between">
+                <button type="button" onClick={() => onSelectSize(s.size)} className="font-data text-[14px] text-[#CFCFCF]">
+                  {s.size}
+                </button>
+                <span><CellValue empty={s.empty} staged={s.staged} /></span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Live matching-aisle/zone info panel (DevNotes/DesignPrompts/Feature-2-STG-Live-Matching-
+ * Aisle-Zone-Info.md) — replaces STG's old single-aisle-map display entirely, in the same
+ * slot. Driven purely by Master Control's Aisle/StorageCode/Size: shows the ELZ format
+ * (grid + zone summary) whenever an Aisle is present, the ELA format (aisle list, tap to
+ * fill Aisle/Size) whenever only a Storage Code is present, or an empty-state placeholder
+ * otherwise (including Size filled alone). Not collapsible; sized to its content rather
+ * than forced to fill all remaining height. Refetches on field changes and whenever a
+ * stage/restage actually commits (`dataVersion`) — never from the fork graphic's own
+ * candidate-location lookups, which are unrelated to these fields.
+ */
+function InfoPanel({ aisle, storageCode, size }: { aisle: string; storageCode: string; size: string }) {
+  const { token } = useAuth();
+  const { setMessage } = useMessageBar();
+  const { setMaster, dataVersion } = useStaging();
+  const [zoneResult, setZoneResult] = useState<ZoneMapResult | null>(null);
+  const [aisleRows, setAisleRows] = useState<AisleRow[] | null>(null);
+  const [notFound, setNotFound] = useState(false);
+
+  const mode: 'none' | 'elz' | 'ela' = aisle ? 'elz' : storageCode ? 'ela' : 'none';
+
+  useEffect(() => {
+    if (mode === 'none') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetch-on-filter-change effect
+      setZoneResult(null);
+      setAisleRows(null);
+      setNotFound(false);
+      return;
+    }
+    let cancelled = false;
+    setNotFound(false);
+    if (mode === 'elz') {
+      const params = new URLSearchParams({ aisle });
+      if (storageCode) params.set('storageCode', storageCode);
+      if (size) params.set('size', size);
+      apiFetch<ZoneMapResult>(`/api/locations/empty-by-zone?${params.toString()}`, token!)
+        .then((data) => { if (!cancelled) setZoneResult(data); })
+        .catch((err) => {
+          if (cancelled) return;
+          if (err instanceof Error && err.message === 'NOT_FOUND') {
+            setZoneResult(null);
+            setNotFound(true);
+          } else {
+            setZoneResult(null);
+            setMessage({ type: 'error', text: 'Zone lookup failed' });
+          }
+        });
+    } else {
+      const params = new URLSearchParams({ storageCode });
+      if (size) params.set('size', size);
+      apiFetch<AisleRow[]>(`/api/locations/empty-by-aisle?${params.toString()}`, token!)
+        .then((data) => { if (!cancelled) setAisleRows(data); })
+        .catch(() => { if (!cancelled) setMessage({ type: 'error', text: 'Aisle lookup failed' }); });
+    }
+    return () => { cancelled = true; };
+  }, [mode, aisle, storageCode, size, token, setMessage, dataVersion]);
+
+  if (mode === 'none') {
+    return (
+      <div className="shrink-0 py-6 flex items-center justify-center">
+        <p className="font-ui text-[15px] text-[#555] text-center px-8">
+          Enter a Storage Code or Aisle to see matches
+        </p>
+      </div>
+    );
+  }
+
+  if (mode === 'elz') {
+    if (notFound || !zoneResult) {
+      return (
+        <div className="shrink-0 py-6 flex items-center justify-center">
+          <p className="font-ui text-[15px] text-[#CC4444]">Aisle {aisle} not found</p>
+        </div>
+      );
+    }
+    const label = storageCode && size ? `${storageCode}-${size}` : storageCode || size || '';
+    return (
+      <div className="shrink-0 max-h-[420px] overflow-hidden flex flex-col">
+        <ElzFormat result={zoneResult} label={label} />
+      </div>
+    );
+  }
+
+  if (!aisleRows) return null;
+  return (
+    <div className="shrink-0 max-h-[420px] overflow-hidden flex flex-col">
+      <ElaFormat
+        rows={aisleRows}
+        size={size}
+        storageCode={storageCode}
+        onSelectAisle={(a) => setMaster({ aisle: String(a) })}
+        onSelectSize={(s) => setMaster({ size: s })}
+      />
     </div>
   );
 }
@@ -534,123 +659,199 @@ function LogPanel() {
 
 // ── Unstage / Restage modal ───────────────────────────────────────────────────
 
-/** IM+ modal for clearing or restaging an aisle's staged locations, with a confirm step before either destructive action. */
-function UnstageModal({ defaultAisle, onClose }: { defaultAisle: string; onClose: () => void }) {
+interface StagedType { storageCode: string; size: string; staged: number; empty: number; max: number }
+interface RestageTypeResult { storageCode: string; size: string; cleared: number; staged: number; shortfall: number }
+interface RestageResponse { results: RestageTypeResult[] }
+interface RowState { active: boolean; quantity: string }
+
+/** Builds the `${storageCode}-${size}` key used to index row state, matching the label shown per row. */
+function typeKey(t: { storageCode: string; size: string }): string {
+  return `${t.storageCode}-${t.size}`;
+}
+
+/**
+ * IM+ popup for per-freight-type unstage/restage in one action (DevNotes/DesignPrompts/
+ * Feature-1-STG-Per-Freight-Type-Unstage-Restage.md). One row per freight type currently
+ * staged in the aisle (1-6, dynamic). Sized to leave the bottom-right Numpad corner
+ * (436×482px) clear, since quantity entry needs it — the panel is capped to the left
+ * ~900px of the content slot rather than truly full-screen.
+ */
+function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }) {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
-  const { addLogEntry } = useStaging();
-  const [mode, setMode] = useState<'clear' | 'restage'>('clear');
-  const [aisle, setAisle] = useState(defaultAisle);
-  const [count, setCount] = useState('');
+  const { addLogEntry, bumpDataVersion } = useStaging();
+  const { hidePanel } = useNumpad();
+  const [types, setTypes] = useState<StagedType[] | null>(null);
+  const [rows, setRows] = useState<Record<string, RowState>>({});
   const [loading, setLoading] = useState(false);
-  const [confirming, setConfirming] = useState(false);
+  const [applying, setApplying] = useState(false);
 
-  /** Submits the clear-aisle or restage-aisle request via POST /api/staging/restage and logs the outcome. */
-  async function submit() {
+  // Six fixed numpad-field instances — Rules of Hooks needs a constant call count every
+  // render; the row set only changes on this initial fetch, never while a field is in use.
+  const qtyFields = [
+    useNumpadField('numpad'), useNumpadField('numpad'), useNumpadField('numpad'),
+    useNumpadField('numpad'), useNumpadField('numpad'), useNumpadField('numpad'),
+  ];
+
+  // Keeps each field's own displayed value in sync with row state after Max/Clear
+  // Restage (which set row state directly, bypassing the numpad) — same pattern as
+  // MasterControl/StackPanel syncing their fields from context after external updates.
+  useEffect(() => {
+    types?.forEach((t, i) => qtyFields[i]?.set(rows[typeKey(t)]?.quantity ?? '0'));
+  }, [types, rows]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     const aisleNum = parseInt(aisle, 10);
-    if (isNaN(aisleNum) || (mode === 'restage' && !count)) return;
+    if (isNaN(aisleNum)) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetch-on-filter-change effect
     setLoading(true);
+    apiFetch<StagedType[]>(`/api/staging/staged-types?aisle=${aisleNum}`, token!)
+      .then((data) => {
+        if (cancelled) return;
+        setTypes(data);
+        setRows(Object.fromEntries(data.map((t) => [typeKey(t), { active: true, quantity: '0' }])));
+      })
+      .catch(() => { if (!cancelled) setMessage({ type: 'error', text: 'Failed to load staged freight types' }); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aisle, token]);
+
+  /** Toggles a row's active/inactive indicator — inactive means "leave this type completely untouched." */
+  function toggleActive(key: string) {
+    setRows((prev) => ({ ...prev, [key]: { ...prev[key], active: !prev[key].active } }));
+  }
+
+  /** Sets a row's quantity, clamping to that row's max — used by the numpad submit, Max, and Clear Restage. */
+  function setQuantity(key: string, raw: string, max: number) {
+    const n = parseInt(raw, 10);
+    const clamped = !raw || isNaN(n) ? '0' : String(Math.min(n, max));
+    setRows((prev) => ({ ...prev, [key]: { ...prev[key], quantity: clamped } }));
+  }
+
+  /** Submits the active rows' quantities via POST /api/staging/restage and reports a per-type summary. */
+  async function apply() {
+    if (!types || applying || loading) return;
+    setApplying(true);
+    setTimeout(() => setApplying(false), 1000);
+    const aisleNum = parseInt(aisle, 10);
+    const activeTypes = types.filter((t) => rows[typeKey(t)]?.active);
     try {
-      const result = await apiFetch<RestageResult>('/api/staging/restage', token!, {
+      const { results } = await apiFetch<RestageResponse>('/api/staging/restage', token!, {
         method: 'POST',
-        body: JSON.stringify({ aisle: aisleNum, count: mode === 'clear' ? 0 : parseInt(count, 10) }),
+        body: JSON.stringify({
+          aisle: aisleNum,
+          types: activeTypes.map((t) => ({
+            storageCode: t.storageCode,
+            size: t.size,
+            quantity: parseInt(rows[typeKey(t)].quantity, 10) || 0,
+          })),
+        }),
       });
-      playAlert('info');
-      if (mode === 'clear') {
-        addLogEntry(`Aisle ${aisle} cleared — ${result.cleared} staged locations released`);
-        setMessage({ type: 'success', text: `Aisle ${aisle} cleared — ${result.cleared} locations released` });
-      } else {
-        const first = result.firstLocation ? fmtLocation(result.firstLocation) : 'no locations';
-        addLogEntry(`Aisle ${aisle} restaged — ${result.staged} locations staged from ${first}`);
-        if (result.shortfall > 0) {
-          playAlert('warning');
-          setMessage({ type: 'warning', text: `Restaged ${result.staged} of ${count} in Aisle ${aisle} — ${result.shortfall} short` });
-        } else {
-          setMessage({ type: 'success', text: `Aisle ${aisle} restaged — ${result.staged} locations staged` });
-        }
-      }
+      const anyShortfall = results.some((r) => r.shortfall > 0);
+      const summary = results.length === 0
+        ? 'No changes'
+        : results
+          .map((r) => {
+            const label = `${r.storageCode}-${r.size}`;
+            const base = r.staged > 0 ? `Restaged ${r.staged} ${label}` : `Cleared ${label}`;
+            return r.shortfall > 0 ? `${base} (${r.shortfall} short)` : base;
+          })
+          .join(' · ');
+      addLogEntry(summary, anyShortfall);
+      playAlert(anyShortfall ? 'warning' : 'info');
+      setMessage({ type: anyShortfall ? 'warning' : 'success', text: summary });
+      bumpDataVersion();
       onClose();
-    } catch (err) {
+    } catch {
       playAlert('error');
-      const code = err instanceof Error ? err.message : '';
-      setMessage({ type: 'error', text: code === 'NOT_FOUND' ? 'Aisle not found' : 'Restage failed — please try again' });
-    } finally {
-      setLoading(false);
+      setMessage({ type: 'error', text: 'Restage failed — please try again' });
     }
   }
 
-  if (confirming) {
-    return (
-      <ConfirmDialog
-        title={mode === 'clear' ? 'Clear all staged locations?' : `Restage ${count || 0} pallets?`}
-        message={
-          mode === 'clear'
-            ? `This clears every staged location in Aisle ${aisle} back to Empty.`
-            : `This clears every staged location in Aisle ${aisle}, then stages the first ${count || 0} locations from the back.`
-        }
-        confirmLabel={mode === 'clear' ? 'Clear Aisle' : 'Restage'}
-        variant="danger"
-        onConfirm={() => { setConfirming(false); submit(); }}
-        onCancel={() => setConfirming(false)}
-      />
-    );
-  }
-
+  // No full-screen backdrop here (unlike other modals) — a click-blocking layer over the
+  // whole screen would cover the bottom-right Numpad corner too, even though it's visually
+  // transparent there, defeating the point of leaving that corner free for quantity entry.
+  // Only the panel itself captures pointer events.
   return (
-    <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-8 w-[480px] flex flex-col gap-5">
-        <h2 className="font-ui text-[22px] font-semibold text-white text-center">Unstage Aisle</h2>
-
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => setMode('clear')}
-            className={`flex-1 h-[52px] rounded-[10px] font-ui text-[15px] font-semibold transition-colors ${mode === 'clear' ? 'bg-[#CC0000] text-white' : 'border border-[#3A3A3A] text-[#9A9A9A]'}`}
-          >
-            Clear all staged locations
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('restage')}
-            className={`flex-1 h-[52px] rounded-[10px] font-ui text-[15px] font-semibold transition-colors ${mode === 'restage' ? 'bg-[#CC0000] text-white' : 'border border-[#3A3A3A] text-[#9A9A9A]'}`}
-          >
-            Restage with N pallets
-          </button>
+    <div className="absolute inset-0 z-50 pointer-events-none">
+      <div className="absolute left-6 top-6 bottom-6 w-[900px] bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-6 flex flex-col gap-4 shadow-[0_0_60px_20px_rgba(0,0,0,0.6)] pointer-events-auto">
+        <div className="flex items-center justify-between shrink-0">
+          <h2 className="font-ui text-[20px] font-semibold text-white">Unstage / Restage</h2>
+          <span className="font-data text-[16px] text-[#9A9A9A]">Aisle {aisle}</span>
         </div>
 
-        <label className="flex flex-col gap-1">
-          <span className="font-ui text-[13px] text-[#9A9A9A] uppercase tracking-wider">Aisle</span>
-          <input
-            type="number"
-            value={aisle}
-            onChange={(e) => setAisle(e.target.value)}
-            className="h-[56px] px-4 rounded-[10px] bg-[#000] border-2 border-[#3A3A3A] font-data text-[22px] text-white focus:outline-none focus:border-[#CC0000]"
-          />
-        </label>
+        <div className="flex-1 overflow-y-auto flex flex-col gap-3">
+          {loading ? null : !types || types.length === 0 ? (
+            <p className="font-ui text-[16px] text-[#555] text-center py-8">Nothing staged in Aisle {aisle}</p>
+          ) : (
+            types.map((t, i) => {
+              const key = typeKey(t);
+              const row = rows[key] ?? { active: true, quantity: '0' };
+              const qty = parseInt(row.quantity, 10) || 0;
+              const overMax = qty > t.max;
+              const field = qtyFields[i];
+              return (
+                <div
+                  key={key}
+                  className={`flex items-center gap-4 px-4 py-3 rounded-[12px] border ${row.active ? 'border-[#3A3A3A] bg-[#111111]' : 'border-[#2A2A2A] bg-[#0A0A0A]'}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleActive(key)}
+                    aria-label={`${row.active ? 'Deactivate' : 'Activate'} ${key}`}
+                    className={`w-[40px] h-[40px] rounded-full border-2 shrink-0 transition-colors ${row.active ? 'bg-[#CC0000] border-[#CC0000]' : 'bg-[#0D0D0D] border-[#3A3A3A]'}`}
+                  />
+                  <div className={`flex-1 flex items-center gap-4 transition-opacity ${row.active ? '' : 'opacity-60 pointer-events-none'}`}>
+                    <span className="font-data text-[20px] font-semibold text-white w-[100px]">{key}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-ui text-[13px] text-[#9A9A9A] uppercase tracking-wider">Qty</span>
+                      <button
+                        type="button"
+                        onClick={() => field.focus((v) => { setQuantity(key, v, t.max); hidePanel(); })}
+                        className={`flex items-center justify-center h-[48px] w-[90px] rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+                      >
+                        <span className="font-data text-[18px] font-medium text-white">
+                          {field.value}
+                        </span>
+                      </button>
+                    </div>
+                    <span className={`font-ui text-[13px] font-medium ${overMax ? 'text-[#CC0000]' : 'text-[#9A9A9A]'}`}>
+                      (max {t.max})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setQuantity(key, String(t.max), t.max)}
+                      className="h-[40px] px-4 rounded-[8px] font-ui text-[13px] font-semibold border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
+                    >
+                      Max
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuantity(key, '0', t.max)}
+                      className="h-[40px] px-4 rounded-[8px] font-ui text-[13px] font-semibold border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
+                    >
+                      Clear Restage
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
 
-        {mode === 'restage' && (
-          <label className="flex flex-col gap-1">
-            <span className="font-ui text-[13px] text-[#9A9A9A] uppercase tracking-wider">Count</span>
-            <input
-              type="number"
-              value={count}
-              onChange={(e) => setCount(e.target.value)}
-              className="h-[56px] px-4 rounded-[10px] bg-[#000] border-2 border-[#3A3A3A] font-data text-[22px] text-white focus:outline-none focus:border-[#CC0000]"
-            />
-          </label>
-        )}
-
-        <div className="flex gap-3">
+        <div className="flex gap-3 shrink-0">
           <button type="button" onClick={onClose} className="flex-1 h-[56px] rounded-[12px] border border-[#3A3A3A] font-ui text-[16px] text-white">
             Cancel
           </button>
           <button
             type="button"
-            onClick={() => setConfirming(true)}
-            disabled={!aisle || (mode === 'restage' && !count) || loading}
+            onClick={apply}
+            disabled={!types || types.length === 0 || loading || applying}
             className="flex-1 h-[56px] rounded-[12px] font-ui text-[16px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40"
           >
-            {mode === 'clear' ? 'Clear Aisle' : 'Restage'}
+            Apply
           </button>
         </div>
       </div>
@@ -664,8 +865,14 @@ function UnstageModal({ defaultAisle, onClose }: { defaultAisle: string; onClose
 function MasterControl({ isIM, onUnstage }: { isIM: boolean; onUnstage: () => void }) {
   const { master, setMaster, stacks, updateStack } = useStaging();
   const { hidePanel } = useNumpad();
-  const aisleField = useNumpadField('numpad');
-  const storageField = useNumpadField('keyboard');
+  // Fixed 3-character field — auto-commits like every other screen's Aisle field (ELZ/SDP/
+  // LocationEntryFields), which Feature 2's live info panel relies on for its "no explicit
+  // submit step" behavior, same reasoning as the Storage Code field below.
+  const aisleField = useNumpadField('numpad', 3);
+  // Fixed 2-character field — auto-commits like every other screen's Storage Code field
+  // (ELA/ELZ/SDP), which Feature 2's live info panel relies on for its "no explicit submit
+  // step" behavior.
+  const storageField = useNumpadField('keyboard', 2);
 
   useEffect(() => { aisleField.set(master.aisle); }, [master.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { storageField.set(master.storageCode); }, [master.storageCode]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -784,13 +991,13 @@ function STGScreen() {
       <MasterControl isIM={isIM} onUnstage={() => setUnstageOpen(true)} />
       <ForkGraphicArea />
 
-      <div className="flex-1 flex flex-col overflow-hidden border-t border-[#1C1C1C]">
-        <ZoneMap aisle={master.aisle} storageCode={master.storageCode} />
+      <div className="flex-1 flex flex-col overflow-y-auto border-t border-[#1C1C1C]">
+        <InfoPanel aisle={master.aisle} storageCode={master.storageCode} size={master.size} />
         <LogPanel />
       </div>
 
       {unstageOpen && (
-        <UnstageModal defaultAisle={master.aisle || stacks[0].aisle} onClose={() => setUnstageOpen(false)} />
+        <UnstageModal aisle={master.aisle || stacks[0].aisle} onClose={() => setUnstageOpen(false)} />
       )}
     </div>
   );

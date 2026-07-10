@@ -92,18 +92,69 @@ async function stageLocations(req: HttpRequest): Promise<unknown> {
   };
 }
 
-// ── POST /api/staging/restage ──────────────────────────────────────────────────
+// ── GET /api/staging/staged-types ──────────────────────────────────────────────
 
 /**
- * Clears every STAGED location in an aisle back to EMPTY, then (if `count` > 0)
- * re-stages the first `count` locations from the back using the same selection
- * logic as a normal stage action — but aisle-wide, with no StorageCode/Size scoping,
- * per the API contract in DevNotes/Screen-Specs/STG.md (the request body carries only
- * `{ aisle, count }`).
+ * Returns the distinct freight types (StorageCode+Size) currently STAGED in an aisle,
+ * each with its current STAGED count and EMPTY count — the row set and `max` value for
+ * STG's per-type Unstage/Restage panel (DevNotes/DesignPrompts/Feature-1-STG-Per-Freight-
+ * Type-Unstage-Restage.md). Only types with at least one STAGED location appear, which is
+ * what naturally bounds the panel to 1-6 rows. Sorted by StorageCode then Size for a
+ * stable row order across repeated fetches (the frontend maps a fixed set of numpad field
+ * instances onto row indices).
  *
- * @param req - HTTP request with body `{ aisle: number; count: number }`
- * @returns `{ cleared: number; staged: number; shortfall: number; firstLocation: string | null }`
- * @throws 400 INVALID_INPUT for missing/negative fields;
+ * @param req - HTTP request with query param `aisle`
+ * @returns `{ storageCode: string; size: string; staged: number; empty: number; max: number }[]`
+ * @throws 400 INVALID_INPUT if `aisle` is missing/non-numeric
+ */
+async function getStagedTypes(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+
+  const params = new URL(req.url).searchParams;
+  const aisleParam = params.get('aisle');
+  if (!aisleParam) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  const aisle = parseInt(aisleParam, 10);
+  if (isNaN(aisle)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
+  const [stagedRows, emptyRows] = await Promise.all([
+    prisma.location.groupBy({
+      by: ['storageCode', 'size'],
+      where: { aisle, status: 'STAGED' },
+      _count: { _all: true },
+    }),
+    prisma.location.groupBy({
+      by: ['storageCode', 'size'],
+      where: { aisle, status: 'EMPTY' },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const emptyByType = new Map(emptyRows.map((r) => [`${r.storageCode}-${r.size}`, r._count._all]));
+
+  return stagedRows
+    .map((r) => {
+      const empty = emptyByType.get(`${r.storageCode}-${r.size}`) ?? 0;
+      return { storageCode: r.storageCode, size: r.size, staged: r._count._all, empty, max: empty + r._count._all };
+    })
+    .sort((a, b) => a.storageCode.localeCompare(b.storageCode) || a.size.localeCompare(b.size));
+}
+
+// ── POST /api/staging/restage ──────────────────────────────────────────────────
+
+interface RestageTypeResult { storageCode: string; size: string; cleared: number; staged: number; shortfall: number }
+
+/**
+ * Per-freight-type unstage/restage in one action, replacing the old all-or-nothing
+ * `{ aisle, count }` contract entirely (DevNotes/DesignPrompts/Feature-1-STG-Per-
+ * Freight-Type-Unstage-Restage.md). For each entry in `types`, clears every currently-
+ * STAGED location of that exact StorageCode+Size in the aisle back to EMPTY, then stages
+ * the first `quantity` EMPTY locations of that same type using the normal back-to-front
+ * selection logic. A type simply absent from `types` is left completely untouched — not
+ * cleared, not restaged (the frontend only ever sends the rows the worker left active).
+ *
+ * @param req - HTTP request with body `{ aisle: number; types: { storageCode: string; size: string; quantity: number }[] }`
+ * @returns `{ results: { storageCode: string; size: string; cleared: number; staged: number; shortfall: number }[] }`
+ * @throws 400 INVALID_INPUT for missing/malformed fields;
  *   403 FORBIDDEN if caller is below IM;
  *   404 NOT_FOUND if the aisle has no location records
  */
@@ -111,55 +162,73 @@ async function restageAisle(req: HttpRequest): Promise<unknown> {
   const auth = await requireAuth(req);
   requireRole(auth, 'IM');
 
-  const body = await req.json() as { aisle: number; count: number };
-  if (!body.aisle || body.count == null || body.count < 0) {
+  const body = await req.json() as {
+    aisle: number;
+    types: { storageCode: string; size: string; quantity: number }[];
+  };
+  if (!body.aisle || !Array.isArray(body.types) || body.types.some((t) => !t.storageCode || !t.size || t.quantity == null || t.quantity < 0)) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
 
   await requireAisleExists(body.aisle);
 
-  const cleared = await prisma.location.updateMany({
-    where: { aisle: body.aisle, status: 'STAGED' },
-    data: { status: 'EMPTY' },
-  });
+  const results: RestageTypeResult[] = [];
 
-  let staged = 0;
-  let firstLocation: string | null = null;
-  let cursor: { bin: number; level: number } | undefined;
-
-  // Per-location STAGE entries here too (see stageLocations' comment above) — a
-  // restaged location's "staged since" moment is this restage, not whenever it was
-  // last staged before being cleared.
-  for (let i = 0; i < body.count; i++) {
-    const next = await findNextStagingLocation(body.aisle, { afterBin: cursor?.bin, afterLevel: cursor?.level });
-    if (!next) break;
-    await prisma.location.update({
-      where: { LocationID: { aisle: next.aisle, bin: next.bin, level: next.level } },
-      data: { status: 'STAGED' },
+  for (const type of body.types) {
+    const cleared = await prisma.location.updateMany({
+      where: { aisle: body.aisle, status: 'STAGED', storageCode: type.storageCode, size: type.size },
+      data: { status: 'EMPTY' },
     });
-    staged++;
-    firstLocation ??= formatLocationId(next.aisle, next.bin, next.level);
-    cursor = { bin: next.bin, level: next.level };
-    await writeLog({
-      userId: auth.zNumber,
-      actionType: 'STAGE',
-      locationAisle: next.aisle,
-      locationBin: next.bin,
-      locationLevel: next.level,
-      details: { method: 'RESTAGE' },
+
+    let staged = 0;
+    let cursor: { bin: number; level: number } | undefined;
+
+    // Per-location STAGE entries here too (see stageLocations' comment above) — a
+    // restaged location's "staged since" moment is this restage, not whenever it was
+    // last staged before being cleared.
+    for (let i = 0; i < type.quantity; i++) {
+      const next = await findNextStagingLocation(body.aisle, {
+        storageCode: type.storageCode,
+        size: type.size,
+        afterBin: cursor?.bin,
+        afterLevel: cursor?.level,
+      });
+      if (!next) break;
+      await prisma.location.update({
+        where: { LocationID: { aisle: next.aisle, bin: next.bin, level: next.level } },
+        data: { status: 'STAGED' },
+      });
+      staged++;
+      cursor = { bin: next.bin, level: next.level };
+      await writeLog({
+        userId: auth.zNumber,
+        actionType: 'STAGE',
+        locationAisle: next.aisle,
+        locationBin: next.bin,
+        locationLevel: next.level,
+        details: { method: 'RESTAGE', storageCode: type.storageCode, size: type.size },
+      });
+    }
+
+    results.push({
+      storageCode: type.storageCode,
+      size: type.size,
+      cleared: cleared.count,
+      staged,
+      shortfall: type.quantity - staged,
     });
   }
 
-  const shortfall = body.count - staged;
-
+  // One combined log entry for the whole action (not per-type clear/stage entries) —
+  // per Feature 1's spec, a single Apply tap is logged as one "restage" action.
   await writeLog({
     userId: auth.zNumber,
     actionType: 'RESTAGE',
     locationAisle: body.aisle,
-    details: { cleared: cleared.count, staged, shortfall, requested: body.count },
+    details: { results },
   });
 
-  return { cleared: cleared.count, staged, shortfall, firstLocation };
+  return { results };
 }
 
 // ── GET /api/staging/next-location ─────────────────────────────────────────────
@@ -217,6 +286,13 @@ app.http('restageAisle', {
   authLevel: 'anonymous',
   route: 'staging/restage',
   handler: withHandler(restageAisle),
+});
+
+app.http('getStagedTypes', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'staging/staged-types',
+  handler: withHandler(getStagedTypes),
 });
 
 app.http('getNextStagingLocation', {

@@ -34,6 +34,12 @@ interface StagingContextValue {
   addLogEntry: (text: string, warning?: boolean) => void;
   logExpanded: boolean;
   setLogExpanded: (v: boolean) => void;
+  /** Bumped whenever a stage/restage action actually commits — the live info panel (Feature
+   *  2) depends on this to refresh its counts, independent of the fork graphic's own
+   *  candidate-location lookups, which must never trigger a refresh (see Feature 2 spec's
+   *  "Independence from the fork graphic" section). */
+  dataVersion: number;
+  bumpDataVersion: () => void;
 }
 
 const StagingContext = createContext<StagingContextValue | null>(null);
@@ -56,6 +62,7 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
   const [master, setMasterState] = useState({ aisle: '', storageCode: '', size: '' });
   const [log, setLog] = useState<StagingLogEntry[]>([]);
   const [logExpanded, setLogExpanded] = useState(false);
+  const [dataVersion, setDataVersion] = useState(0);
 
   /** Merges a partial patch into one stack's state, by index. */
   const updateStack = useCallback((index: 0 | 1 | 2, patch: Partial<StackState>) => {
@@ -86,9 +93,17 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
     setLog((prev) => [{ id: ++logIdCounter, text, warning, timestamp: new Date() }, ...prev]);
   }, []);
 
+  /** Signals that a stage/restage action actually committed, so the live info panel refetches. */
+  const bumpDataVersion = useCallback(() => {
+    setDataVersion((v) => v + 1);
+  }, []);
+
   return (
     <StagingContext.Provider
-      value={{ stacks, updateStack, resetStackAfterStage, master, setMaster, log, addLogEntry, logExpanded, setLogExpanded }}
+      value={{
+        stacks, updateStack, resetStackAfterStage, master, setMaster,
+        log, addLogEntry, logExpanded, setLogExpanded, dataVersion, bumpDataVersion,
+      }}
     >
       {children}
     </StagingContext.Provider>

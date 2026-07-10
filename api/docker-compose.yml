@@ -1,0 +1,18 @@
+services:
+  # SQL Server-compatible engine for local dev/test, so `func start` and Playwright runs
+  # don't consume the shared Azure SQL instance's usage/compute. `mssql/server` is amd64-only;
+  # azure-sql-edge is Microsoft's ARM64-native build, which is what Apple Silicon needs.
+  sqlserver:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: palletiq-local-db
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "PalletIQ-Local-Dev-2026!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - palletiq-local-db-data:/var/opt/mssql
+
+volumes:
+  palletiq-local-db-data:

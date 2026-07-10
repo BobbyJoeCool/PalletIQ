@@ -6,7 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
-- [Legacy — Playwright-Run Findings (2026-07-05)](#legacy--playwright-run-findings-2026-07-05)
+- [1.2.0 — 2026-07-09](#120--2026-07-09)
 - [1.1.5 — 2026-07-08](#115--2026-07-08)
 - [1.1.0 — 2026-07-08](#110--2026-07-08)
 - [1.0.10 — 2026-07-08](#1010--2026-07-08)
@@ -49,13 +49,34 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Major/Important
 
+- [#6](https://github.com/BobbyJoeCool/PalletIQ/issues/6) — Add reason code to edit pallet screen — reopened: the "Type a code…" free-text option brings up the iPad's native keyboard instead of the app's own on-screen keyboard
 - [#14](https://github.com/BobbyJoeCool/PalletIQ/issues/14) — Add ability to put ranges on hold (WLH)
 - [#15](https://github.com/BobbyJoeCool/PalletIQ/issues/15) — Add helper bar button to select a location on hold (WLH)
+- [#65](https://github.com/BobbyJoeCool/PalletIQ/issues/65) — SDP: enlarge the Consolidating and lock toggle buttons
+- [#72](https://github.com/BobbyJoeCool/PalletIQ/issues/72) — PIP: Full Pallet Alt-ID wrong-level popup should collect the correct level instead of just confirming/rejecting
+
+### Minor
+
+- [#55](https://github.com/BobbyJoeCool/PalletIQ/issues/55) — ID field should defocus/blur after scan or entry (PII, LII, IID) — reopened: still reselects on the very first scan of a session
+- [#64](https://github.com/BobbyJoeCool/PalletIQ/issues/64) — SDP: "Applying Size" indicator should sit next to the Consolidation button instead of shifting the screen
+- [#66](https://github.com/BobbyJoeCool/PalletIQ/issues/66) — PII: block Save on edit-pallet when no fields actually changed
+- [#67](https://github.com/BobbyJoeCool/PalletIQ/issues/67) — STG: hot-jumping from ELZ only fills Aisle on the first pallet stack, not all three
+- [#68](https://github.com/BobbyJoeCool/PalletIQ/issues/68) — PAR: DPCI entry should be split into 3 boxes
+- [#69](https://github.com/BobbyJoeCool/PalletIQ/issues/69) — PAR: Location entry should be split into 3 boxes
+- [#74](https://github.com/BobbyJoeCool/PalletIQ/issues/74) — STG: make Unstage Aisle button larger and red
+- [#75](https://github.com/BobbyJoeCool/PalletIQ/issues/75) — STG: refresh of forks elements on defocus is slow
 
 ### Nice-to-have/Cosmetic
 
 - [#46](https://github.com/BobbyJoeCool/PalletIQ/issues/46) — Persist team member activity log across screens for the last 12 hours
 - [#52](https://github.com/BobbyJoeCool/PalletIQ/issues/52) — Demo reseed should generate randomly-staged aisles with realistic timestamps, so SAR looks realistic in demos
+- [#61](https://github.com/BobbyJoeCool/PalletIQ/issues/61) — PIP/SDP: double the font size of the location display
+- [#62](https://github.com/BobbyJoeCool/PalletIQ/issues/62) — PIP/SDP: combine "Pull Quantity" and "Remaining" rows to save space
+- [#63](https://github.com/BobbyJoeCool/PalletIQ/issues/63) — ELA: add a subtle divider between size columns
+- [#70](https://github.com/BobbyJoeCool/PalletIQ/issues/70) — PAR: Demo Helper autofill for Location doesn't fill the Level field
+- [#71](https://github.com/BobbyJoeCool/PalletIQ/issues/71) — PAR: "Cartons" label should read "Cartons per Pallet"
+- [#73](https://github.com/BobbyJoeCool/PalletIQ/issues/73) — STG: move Fill All and Unstage Aisle buttons onto the operator compartment
+- [#76](https://github.com/BobbyJoeCool/PalletIQ/issues/76) — STG: add a manual Refresh button
 
 ### Distant Future
 
@@ -63,83 +84,38 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ---
 
-## Legacy — Playwright-Run Findings (2026-07-05)
+## [1.2.0] — 2026-07-09
 
-Predates the GitHub Issues migration and the file-based bug-report systems that came before it —
-found during a full Playwright run (61 passed / 21 failed) rather than filed as reports. Kept here
-for reference rather than migrated to Issues, since several are test-locator problems rather than
-confirmed app bugs; see
-[DevNotes/TestLogs/playwright-run-2026-07-05.md](DevNotes/TestLogs/playwright-run-2026-07-05.md)
-for full detail, error text, and reproduction steps. Not actively tracked against current app
-behavior — treat anything below as needing re-verification before acting on it.
+First two features of the v1.2.0 batch (see `DevNotes/DesignPrompts/v1.2.0-feature-design-
+prompt.md`) — the remaining three (WLH range holds, WLH held-location picker, app-wide
+activity log) are still to come in a later version:
+[#57](https://github.com/BobbyJoeCool/PalletIQ/issues/57),
+[#58](https://github.com/BobbyJoeCool/PalletIQ/issues/58).
 
-### Empty Locations (ELA / ELZ)
+### 1.2.0 — Added
 
-- [ ] **ELA** — "a valid Storage Code + Size loads a results table" asserts against a hidden
-      `<option>` element instead of the visible size-column header text — a test-locator fix,
-      not necessarily an app bug (`ela.spec.ts:52`)
-- [ ] **ELA** — "Stage Aisle" navigation doesn't show "STG" jump-code text after arriving at
-      `/stage` (`ela.spec.ts:109`) — **superseded**: STG's layout was fully redesigned since; the
-      follow-up work for that redesign is tracked right below
-- [ ] **ELZ** — "Stage Aisle" navigation button click times out — an on-screen numpad/keyboard
-      panel from a prior field entry doesn't fully dismiss and intercepts the click
-      (`elz.spec.ts:65`)
+- **STG: per-freight-type unstage/restage.** The old "Unstage Aisle" modal was all-or-nothing
+  across every freight type staged in an aisle — clearing or restaging a mixed aisle meant
+  touching everything, with no way to isolate one Storage Code + Size combination. It's
+  replaced by a single popup with one row per freight type actually staged in the aisle
+  (dynamic, 1-6 rows): each row can be deactivated to leave that type completely untouched, or
+  given a quantity (clamped to that type's `empty + staged` max) to clear and re-stage just that
+  type. One Apply commits every active row in one action, logged as a single combined entry.
+  ([#58](https://github.com/BobbyJoeCool/PalletIQ/issues/58))
+- **STG: live matching-aisle and zone info.** Entering a Storage Code, Aisle, and/or Size in
+  Master Control now surfaces relevant info live at the bottom of the screen, replacing the old
+  single-aisle physical map: a Storage Code alone lists every matching aisle (tap one to fill
+  Aisle); an Aisle (alone or combined with Storage Code/Size) shows that aisle's physical layout
+  alongside a zone summary narrowed by whichever fields are filled. Previously there was no way
+  to see which aisles even had a given storage code without leaving the screen.
+  ([#57](https://github.com/BobbyJoeCool/PalletIQ/issues/57))
 
-### Location ID Info (LII)
+### 1.2.0 — Fixed
 
-- [ ] Strict-mode locator collision on "Hold" — a field label and the Hold button both match the
-      same text (`lii.spec.ts:19`) — test-locator fix (scope to role)
-
-### Manual Put (MNP)
-
-- [ ] Strict-mode collision on the "9" numpad button — two numeric keypads appear to be mounted
-      at once (`mnp.spec.ts:53`)
-
-### Pallet Reinstate (PAR)
-
-- [ ] Success message ("Pallet … created — stored at …") doesn't appear after creating a located
-      pallet (`par.spec.ts:30`)
-- [ ] "location is not empty" validation error doesn't appear on a bad-location submit
-      (`par.spec.ts:44`)
-
-### Pallet ID Pull (PIP)
-
-- [ ] "scanning a label for a different pull function" passes `undefined` into `hardwareScan()` —
-      looks like a missing test fixture, not yet confirmed as an app bug (`pip.spec.ts:35`)
-- [ ] "✗ Alt ID" button never becomes clickable while verifying (`pip.spec.ts:111`)
-- [ ] "✓ Alt ID" button never becomes clickable while verifying (`pip.spec.ts:123`)
-
-### Staged Aisle Report (SAR)
-
-- [ ] Neither the empty-state message nor result rows render for the "most staged" column
-      (`sar.spec.ts:20`) — may be seed-data dependent rather than a code bug
-
-### System Directed Put (SDP)
-
-- [ ] "Pallet not found" error message doesn't appear for an unknown pallet ID (`sdp.spec.ts:61`)
-- [ ] Strict-mode collision on the "9" numpad button, same family as the MNP one above
-      (`sdp.spec.ts:70`)
-- [ ] "Wrong location — directed to …" error doesn't appear on an incorrect confirm
-      (`sdp.spec.ts:105`)
-- [ ] "Put complete — …" success message doesn't appear on a correct confirm (`sdp.spec.ts:114`)
-
-### Stage Aisle (STG)
-
-- [ ] Stage button never becomes enabled after filling Aisle/Storage/Size/Quantity
-      (`stg.spec.ts:62`, `:67`, `:101`)
-- [ ] Strict-mode collision on "Unstage Aisle" — the button label and the modal heading share the
-      same text (`stg.spec.ts:111`)
-- **Note:** the two items above are against STG's *old* layout, predating its redesign.
-
-### STG Redesign Follow-Ups
-
-- [ ] Update `DevNotes/Screen-Specs/STG.md` to describe the new layout (fork graphic, pallet-box
-      fields, Master Control's 4-column structure, the bottom zone map, relocated Log Panel)
-- [ ] Rewrite `tests/e2e/stg.spec.ts` against the new DOM — replaces the two old-layout items
-      above rather than fixing them in place; add new coverage for Master Control's Aisle field
-      feeding "Fill All" and for the zone map's idle → loaded states
-
----
+- **STG's Storage Code and Aisle fields (Master Control) now auto-commit at their fixed
+  lengths** (2 and 3 characters), matching every other screen's identical fields. Previously
+  they required an explicit Enter/OK, which the new live info panel's "updates as you type, no
+  submit step" behavior depended on.
 
 ## [1.1.5] — 2026-07-08
 
