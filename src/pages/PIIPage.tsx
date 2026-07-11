@@ -127,6 +127,14 @@ export function PIIPage() {
   }, [palletField, screenState, loadPallet]);
 
   useEffect(() => {
+    // React re-runs this effect whenever the dependency's value changes in *either*
+    // direction — including the very first successful scan, which flips it true→false
+    // (ready→loaded). Without this guard that transition re-scheduled a focus call too,
+    // reopening the numpad right after `loadPallet`'s own `hidePanel()` had just closed it
+    // (issue #55 — only ever visible on the first scan of a session, since every load
+    // after that starts from 'loaded' already, so the dependency stays false→false and
+    // the effect doesn't re-run at all).
+    if (screenState !== 'ready') return;
     const id = setTimeout(() => focusPalletField(), 50);
     return () => clearTimeout(id);
     // Only re-run when returning to the ready state — not on every render.

@@ -22,6 +22,25 @@ test.describe('PII — Pallet ID Info', () => {
     await expect(page.getByText('Current Location', { exact: true })).toBeVisible();
   });
 
+  // Issue #55: the Pallet ID field's auto-focus-on-ready effect used to re-fire on the
+  // ready→loaded transition too (React re-runs an effect on any dependency change, not
+  // just the direction that mattered), reopening the numpad right after a successful
+  // load had just closed it — but only ever on the very first scan of a session, since
+  // every load after that starts from 'loaded' already and the dependency doesn't change.
+  // `beforeEach` navigates fresh for every test, so this is exactly that first-scan case.
+  test('the numpad closes after the very first scan of a session', async ({ page }) => {
+    await page.getByRole('button', { name: '✓ Scan PID' }).click();
+    await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="numpad-panel"]')).not.toBeVisible();
+    // The regression this guards against is a *delayed* re-focus (a 50ms setTimeout) that
+    // reopens the numpad after it briefly closes — a bare `not.toBeVisible()` above would
+    // pass as soon as it caught the panel closed on its very first poll, before that delayed
+    // re-open ever got a chance to fire. Waiting past the 50ms window before re-asserting is
+    // what actually catches it.
+    await page.waitForTimeout(200);
+    await expect(page.locator('[data-testid="numpad-panel"]')).not.toBeVisible();
+  });
+
   test('an unknown pallet ID shows a not-found error', async ({ page }) => {
     await page.getByRole('button', { name: '✗ Bad PID' }).click();
     await expect(page.getByText('Pallet not found')).toBeVisible();

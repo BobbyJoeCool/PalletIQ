@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.4.5 — 2026-07-11](#145--2026-07-11)
 - [1.4.4 — 2026-07-11](#144--2026-07-11)
 - [1.4.3 — 2026-07-11](#143--2026-07-11)
 - [1.4.2 — 2026-07-11](#142--2026-07-11)
@@ -63,7 +64,6 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Minor
 
-- [#55](https://github.com/BobbyJoeCool/PalletIQ/issues/55) — ID field should defocus/blur after scan or entry (PII, LII, IID) — reopened: still reselects on the very first scan of a session
 - [#64](https://github.com/BobbyJoeCool/PalletIQ/issues/64) — SDP: "Applying Size" indicator should sit next to the Consolidation button instead of shifting the screen
 - [#66](https://github.com/BobbyJoeCool/PalletIQ/issues/66) — PII: block Save on edit-pallet when no fields actually changed
 - [#68](https://github.com/BobbyJoeCool/PalletIQ/issues/68) — PAR: DPCI entry should be split into 3 boxes
@@ -84,6 +84,19 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
 
 ---
+
+## [1.4.5] — 2026-07-11
+
+### 1.4.5 — Fixed
+
+- **PII: the Pallet ID field no longer reopens the numpad after the first scan of a
+  session.** The field's auto-focus-on-ready effect re-ran on the ready→loaded
+  transition too (a React effect re-runs on any dependency change, not just the
+  direction that mattered), reopening the numpad right after a successful load had just
+  closed it — visible only on the very first scan of a session, since every load after
+  that starts from the loaded state already and the dependency no longer changes. Now
+  guarded to only act when actually entering the ready state.
+  ([#55](https://github.com/BobbyJoeCool/PalletIQ/issues/55))
 
 ## [1.4.4] — 2026-07-11
 
