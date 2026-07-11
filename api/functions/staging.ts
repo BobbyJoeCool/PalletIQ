@@ -234,14 +234,23 @@ async function restageAisle(req: HttpRequest): Promise<unknown> {
 // ── GET /api/staging/next-location ─────────────────────────────────────────────
 
 /**
- * Returns the next available EMPTY, non-contracted location for staging in an aisle,
- * scoped to a StorageCode+Size, optionally positioned after a given bin/level cursor.
- * Used both to build a stack's live destination-location list (called repeatedly,
- * walking the cursor forward) and for the post-stage/restage log look-ahead.
+ * Returns up to `count` available EMPTY, non-contracted locations for staging in an
+ * aisle, scoped to a StorageCode+Size, optionally positioned after a given bin/level
+ * cursor. Used both to build/refresh a stack's live destination-location list and for
+ * the post-stage/restage log look-ahead (`count` omitted, defaulting to 1).
+ *
+ * Walks the bin/level cursor forward server-side across up to `count` locations in this
+ * one request — previously the client walked this cursor itself, issuing one HTTP
+ * round-trip per location (issue #75: each additional pallet in a stack's Quantity added
+ * a full network round-trip to the list refresh, which is what made it feel slow on
+ * every field defocus/commit, even though each individual DB lookup is a fast, single
+ * indexed query on its own).
  *
  * @param req - HTTP request with query params `aisle`, `storageCode`, `size` (all
- *   required), and optional `afterBin`, `afterLevel`
- * @returns `{ nextLocation: string | null }`
+ *   required), optional `afterBin`, `afterLevel`, and optional `count` (default 1, the
+ *   number of locations to return in one call)
+ * @returns `{ locations: string[] }` — 0 to `count` location IDs, walking forward;
+ *   shorter than `count` if the aisle runs out of eligible locations first
  * @throws 400 INVALID_INPUT if any required query param is missing or non-numeric
  */
 async function getNextStagingLocation(req: HttpRequest): Promise<unknown> {
@@ -259,17 +268,27 @@ async function getNextStagingLocation(req: HttpRequest): Promise<unknown> {
 
   const afterBinParam = params.get('afterBin');
   const afterLevelParam = params.get('afterLevel');
-  const afterBin = afterBinParam ? parseInt(afterBinParam, 10) : undefined;
-  const afterLevel = afterLevelParam ? parseInt(afterLevelParam, 10) : undefined;
+  let afterBin = afterBinParam ? parseInt(afterBinParam, 10) : undefined;
+  let afterLevel = afterLevelParam ? parseInt(afterLevelParam, 10) : undefined;
 
-  const next = await findNextStagingLocation(aisle, {
-    storageCode: storageCode.toUpperCase(),
-    size: size.toUpperCase(),
-    afterBin,
-    afterLevel,
-  });
+  const countParam = params.get('count');
+  const count = countParam ? Math.max(1, parseInt(countParam, 10) || 1) : 1;
 
-  return { nextLocation: next ? formatLocationId(next.aisle, next.bin, next.level) : null };
+  const locations: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const next = await findNextStagingLocation(aisle, {
+      storageCode: storageCode.toUpperCase(),
+      size: size.toUpperCase(),
+      afterBin,
+      afterLevel,
+    });
+    if (!next) break;
+    locations.push(formatLocationId(next.aisle, next.bin, next.level));
+    afterBin = next.bin;
+    afterLevel = next.level;
+  }
+
+  return { locations };
 }
 
 // ── Route registrations ───────────────────────────────────────────────────────

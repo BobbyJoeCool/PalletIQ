@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.4.2 — 2026-07-11](#142--2026-07-11)
 - [1.4.1 — 2026-07-11](#141--2026-07-11)
 - [1.4.0 — 2026-07-11](#140--2026-07-11)
 - [1.3.1 — 2026-07-10](#131--2026-07-10)
@@ -65,7 +66,6 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#66](https://github.com/BobbyJoeCool/PalletIQ/issues/66) — PII: block Save on edit-pallet when no fields actually changed
 - [#68](https://github.com/BobbyJoeCool/PalletIQ/issues/68) — PAR: DPCI entry should be split into 3 boxes
 - [#69](https://github.com/BobbyJoeCool/PalletIQ/issues/69) — PAR: Location entry should be split into 3 boxes
-- [#75](https://github.com/BobbyJoeCool/PalletIQ/issues/75) — STG: refresh of forks elements on defocus is slow
 
 ### Nice-to-have/Cosmetic
 
@@ -84,6 +84,19 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
 
 ---
+
+## [1.4.2] — 2026-07-11
+
+### 1.4.2 — Fixed
+
+- **STG: the automatic destination-location refresh on field defocus is no longer slow.**
+  `GET /api/staging/next-location` gained an optional `count` param — the server now walks
+  the bin/level cursor internally across up to `count` locations in one request. The
+  frontend previously issued one HTTP round-trip per pallet in a stack's Quantity to build
+  the same list (fetching location 1, then 2, then 3, ...); each individual lookup was a
+  fast, single indexed query, but that many sequential round-trips per field commit is what
+  made the refresh feel slow. Now a single request returns the whole list.
+  ([#75](https://github.com/BobbyJoeCool/PalletIQ/issues/75))
 
 ## [1.4.1] — 2026-07-11
 

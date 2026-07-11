@@ -43,10 +43,10 @@ interface AisleSizeCount { size: string; empty: number; staged: number }
 interface AisleRow { aisle: number; totalEmpty: number; sizes: AisleSizeCount[] }
 
 /**
- * Repeatedly calls GET /api/staging/next-location, walking the bin/level cursor forward
- * each time, to build a list of up to `count` destination locations for the front stack.
- * The public API only returns one location per call (see api/functions/staging.ts), so
- * building an N-location list is inherently N sequential round trips. Since issue #77
+ * Fetches up to `count` destination locations for the front stack in a single request —
+ * the server walks the bin/level cursor forward internally now (issue #75: this used to
+ * issue one HTTP round-trip per location, which is what made the list refresh feel slow
+ * on every field defocus/commit, especially for a large Quantity). Since issue #77
  * collapsed STG down to one stageable position, there's no longer a sibling-stack
  * exclusion set to thread through here (contrast the pre-#77 version of this function).
  */
@@ -57,23 +57,12 @@ async function fetchStagingLocations(
   size: string,
   count: number,
 ): Promise<string[]> {
-  const results: string[] = [];
-  let afterBin: number | undefined;
-  let afterLevel: number | undefined;
-  for (let attempts = 0; results.length < count && attempts < count + 5; attempts++) {
-    const params = new URLSearchParams({ aisle, storageCode, size });
-    if (afterBin != null) params.set('afterBin', String(afterBin));
-    if (afterLevel != null) params.set('afterLevel', String(afterLevel));
-    const { nextLocation } = await apiFetch<{ nextLocation: string | null }>(
-      `/api/staging/next-location?${params.toString()}`,
-      token,
-    );
-    if (!nextLocation) break;
-    afterBin = parseInt(nextLocation.slice(3, 6), 10);
-    afterLevel = parseInt(nextLocation.slice(6, 8), 10);
-    results.push(nextLocation);
-  }
-  return results;
+  const params = new URLSearchParams({ aisle, storageCode, size, count: String(count) });
+  const { locations } = await apiFetch<{ locations: string[] }>(
+    `/api/staging/next-location?${params.toString()}`,
+    token,
+  );
+  return locations;
 }
 
 // ── Small display helpers ──────────────────────────────────────────────────────
