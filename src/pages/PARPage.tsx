@@ -185,14 +185,18 @@ export function PARPage() {
     const sample = await fillSample();
     if (!sample) return;
     try {
-      const { locationId } = await apiFetch<{ locationId: string }>('/api/demo/location?status=empty', token!);
+      // locationId is only aisle+bin (6 digits) — level comes back as its own field (see
+      // api/functions/samples.ts's sampleLocation) and must be appended to form the full
+      // 8-digit barcode the Location field/submit expect, or parseFullLocationBarcode
+      // rejects it as malformed (issue #70 — this used to leave Level off entirely).
+      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=empty', token!);
       dpciField.set(sample.dpci);
       vcpField.set(String(sample.vcp));
       sspField.set(String(sample.ssp));
       palletsField.set(String(sample.pallets));
       cartonsField.set(String(sample.cartons));
       sspsQtyField.set(String(sample.ssps));
-      locationField.set(locationId);
+      locationField.set(locationId + String(level).padStart(2, '0'));
     } catch {
       setMessage({ type: 'error', text: 'Demo fill unavailable' });
     }
@@ -216,14 +220,16 @@ export function PARPage() {
     const sample = await fillSample();
     if (!sample) return;
     try {
-      const { locationId } = await apiFetch<{ locationId: string }>('/api/demo/location?status=occupied', token!);
+      // See demoToLocation's comment above — level must be appended to form the full
+      // 8-digit barcode (issue #70).
+      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=occupied', token!);
       dpciField.set(sample.dpci);
       vcpField.set(String(sample.vcp));
       sspField.set(String(sample.ssp));
       palletsField.set(String(sample.pallets));
       cartonsField.set(String(sample.cartons));
       sspsQtyField.set(String(sample.ssps));
-      locationField.set(locationId);
+      locationField.set(locationId + String(level).padStart(2, '0'));
     } catch {
       setMessage({ type: 'error', text: 'Demo fill unavailable' });
     }

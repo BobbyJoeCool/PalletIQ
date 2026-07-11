@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.4.4 — 2026-07-11](#144--2026-07-11)
 - [1.4.3 — 2026-07-11](#143--2026-07-11)
 - [1.4.2 — 2026-07-11](#142--2026-07-11)
 - [1.4.1 — 2026-07-11](#141--2026-07-11)
@@ -75,7 +76,6 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#61](https://github.com/BobbyJoeCool/PalletIQ/issues/61) — PIP/SDP: double the font size of the location display
 - [#62](https://github.com/BobbyJoeCool/PalletIQ/issues/62) — PIP/SDP: combine "Pull Quantity" and "Remaining" rows to save space
 - [#63](https://github.com/BobbyJoeCool/PalletIQ/issues/63) — ELA: add a subtle divider between size columns
-- [#70](https://github.com/BobbyJoeCool/PalletIQ/issues/70) — PAR: Demo Helper autofill for Location doesn't fill the Level field
 - [#73](https://github.com/BobbyJoeCool/PalletIQ/issues/73) — STG: move Fill All and Unstage Aisle buttons onto the operator compartment
 - [#76](https://github.com/BobbyJoeCool/PalletIQ/issues/76) — STG: add a manual Refresh button
 
@@ -84,6 +84,21 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
 
 ---
+
+## [1.4.4] — 2026-07-11
+
+### 1.4.4 — Fixed
+
+- **PAR: the "✓ To Location" and "✗ Bad Location" demo buttons now fill a complete
+  location.** `GET /api/demo/location` returns the aisle+bin and level as separate fields;
+  both demo handlers were writing only the aisle+bin portion into the Location field,
+  leaving it 6 digits instead of the 8 the barcode parser requires — submitting either
+  demo fill as-is would fail with a generic invalid-input error rather than actually
+  demonstrating the intended outcome. Both handlers now compose the full location before
+  filling the field. This also turned out to be the actual cause of two Playwright
+  failures (`par.spec.ts:30`/`:44`) previously believed to be unrelated pre-existing
+  flakiness — both are green again now that the demo buttons they exercise fill a valid
+  location. ([#70](https://github.com/BobbyJoeCool/PalletIQ/issues/70))
 
 ## [1.4.3] — 2026-07-11
 
