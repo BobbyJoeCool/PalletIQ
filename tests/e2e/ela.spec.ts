@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { hardwareScan } from './helpers';
+import { hardwareScan, pickCode } from './helpers';
 
 // Aisle 304 is a standard "L"-type aisle (see api/prisma/seed.ts's AISLE_PATTERN),
 // storage code CR (aisles 304-310), size L on levels 2-5 (512 locations at 10% empty
@@ -35,7 +35,7 @@ test.describe('ELA — Empty Locations by Aisle', () => {
   test('shows an idle prompt until both Storage Code and Size are filled', async ({ page }) => {
     await expect(page.getByText('Enter a Storage Code and select a Size to see available locations')).toBeVisible();
 
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, LIVE_STORAGE);
 
     // Storage Code alone is not enough — Size is still required.
@@ -43,26 +43,28 @@ test.describe('ELA — Empty Locations by Aisle', () => {
   });
 
   test('a Storage Code with no matching seed data shows the no-results message', async ({ page }) => {
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, UNKNOWN_STORAGE);
-    await page.locator('select').selectOption(LIVE_SIZE);
+    await pickCode(page, 'Size', LIVE_SIZE);
 
     await expect(page.getByText(`No empty or staged locations found for ${UNKNOWN_STORAGE} — ${LIVE_SIZE}`)).toBeVisible();
   });
 
   test('a valid Storage Code + Size loads a results table with an aisle row', async ({ page }) => {
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, LIVE_STORAGE);
-    await page.locator('select').selectOption(LIVE_SIZE);
+    await pickCode(page, 'Size', LIVE_SIZE);
 
-    await expect(page.getByText(LIVE_SIZE, { exact: true }).first()).toBeVisible(); // size column header
+    // Size column header — scoped to the results table (not the Size field's own button,
+    // which also now shows "L" once picked — see issue #80's dropdown-helper field).
+    await expect(page.locator('div.flex-1.overflow-hidden').getByText(LIVE_SIZE, { exact: true }).first()).toBeVisible();
     await expect(page.getByRole('button').filter({ hasText: new RegExp(`^${LIVE_AISLE}`) })).toBeVisible();
   });
 
   test('selecting a row activates navigation buttons; tapping it again deselects', async ({ page }) => {
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, LIVE_STORAGE);
-    await page.locator('select').selectOption(LIVE_SIZE);
+    await pickCode(page, 'Size', LIVE_SIZE);
 
     const viewZoneMap = page.getByRole('button', { name: 'View Zone Map' });
     const stageAisle = page.getByRole('button', { name: 'Stage Aisle' });
@@ -80,37 +82,39 @@ test.describe('ELA — Empty Locations by Aisle', () => {
   });
 
   test('changing a filter clears the current selection', async ({ page }) => {
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, LIVE_STORAGE);
-    await page.locator('select').selectOption(LIVE_SIZE);
+    await pickCode(page, 'Size', LIVE_SIZE);
 
     const row = page.getByRole('button').filter({ hasText: new RegExp(`^${LIVE_AISLE}`) });
     await row.click();
     await expect(page.getByRole('button', { name: 'View Zone Map' })).toBeEnabled();
 
-    // Re-select the same size — filter "changes" (re-fires the query) and must clear selection.
-    await page.locator('select').selectOption({ index: 0 });
-    await page.locator('select').selectOption(LIVE_SIZE);
+    // Re-picking the same Size still fires ELA's onChange (which unconditionally clears the
+    // current selection) — the dropdown-helper popup has no blank/reset option to route
+    // through first, unlike the old native <select>, but the app doesn't need one to prove
+    // "changing" (re-committing) the filter clears the selection.
+    await pickCode(page, 'Size', LIVE_SIZE);
     await expect(page.getByRole('button', { name: 'View Zone Map' })).toBeDisabled();
   });
 
   test('"View Zone Map" navigates to ELZ pre-populated with aisle and storage code', async ({ page }) => {
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, LIVE_STORAGE);
-    await page.locator('select').selectOption(LIVE_SIZE);
+    await pickCode(page, 'Size', LIVE_SIZE);
 
     await page.getByRole('button').filter({ hasText: new RegExp(`^${LIVE_AISLE}`) }).click();
     await page.getByRole('button', { name: 'View Zone Map' }).click();
 
     await expect(page).toHaveURL('/empty/zone');
     await expect(page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button')).toHaveText(LIVE_AISLE);
-    await expect(page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button')).toHaveText(LIVE_STORAGE);
+    await expect(page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first()).toHaveText(LIVE_STORAGE);
   });
 
   test('"Stage Aisle" navigates to the (not yet built) STG screen', async ({ page }) => {
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, LIVE_STORAGE);
-    await page.locator('select').selectOption(LIVE_SIZE);
+    await pickCode(page, 'Size', LIVE_SIZE);
 
     await page.getByRole('button').filter({ hasText: new RegExp(`^${LIVE_AISLE}`) }).click();
     await page.getByRole('button', { name: 'Stage Aisle' }).click();

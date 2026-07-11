@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { HoldPanel } from '../components/shared/HoldPanel';
+import { SizeField } from '../components/shared/SizeField';
+import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
@@ -10,10 +12,11 @@ import { useNavLock } from '../context/NavLockContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
-import { useNumpadField } from '../lib/useNumpadField';
 import { fmtLocation } from '../lib/fmt';
-
-const SIZES = ['XS', 'HS', 'S', 'M', 'L'];
+import { SIZE_NAMES } from '../lib/sizes';
+import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
+import { useNumpadField } from '../lib/useNumpadField';
+import { useStorageCodes } from '../lib/useStorageCodes';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -182,7 +185,7 @@ type ScreenState = 'entry' | 'directed';
 export function SDPPage() {
   const { token, user } = useAuth();
   const { setMessage } = useMessageBar();
-  const { deliverScan, hidePanel } = useNumpad();
+  const { deliverScan } = useNumpad();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
   const routerLocation = useLocation();
   const prefill = (routerLocation.state as NavState | null) ?? null;
@@ -201,6 +204,7 @@ export function SDPPage() {
   // Entry-state field values.
   const [zoneOverride, setZoneOverride]     = useState<number | null>(null);
   const [sizeOverride, setSizeOverride]     = useState('');
+  const [storageOverride, setStorageOverride] = useState('');
   const [consolidating, setConsolidating]   = useState(false);
   const [sizeLocked, setSizeLocked]         = useState(false);
   const [storageLocked, setStorageLocked]   = useState(false);
@@ -220,8 +224,20 @@ export function SDPPage() {
   const aisleField    = useNumpadField('numpad', 3);
   const palletField   = useNumpadField();
   const confirmField  = useNumpadField();
-  const storageField  = useNumpadField('keyboard', 2);
-  const zoneField     = useNumpadField('numpad', 1);
+
+  // Narrows the Storage Code/Size override dropdown-helpers (issue #80) to what's actually
+  // present once an aisle is entered — Zone override never narrows (a straight 1-4
+  // dropdown, per the issue) and Aisle/Bin/Pallet ID aren't candidates for this treatment
+  // at all (too impractical as a list, per the issue's own scope note).
+  const aisleNum = parseInt(aisleField.value, 10);
+  const aisleTypes = useAisleFreightTypes(isNaN(aisleNum) ? null : aisleNum);
+  const fullStorageCodes = useStorageCodes();
+  const storageCodeOptions = aisleTypes && fullStorageCodes
+    ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
+    : undefined;
+  const sizeOptions = aisleTypes
+    ? aisleTypes.sizesFor(storageOverride || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
+    : undefined;
 
   // Pre-populate the Aisle field from router state (e.g. SAR's row-select navigation) on mount.
   useEffect(() => {
@@ -268,22 +284,11 @@ export function SDPPage() {
     confirmField.focus(handleLocationConfirm);
   }, [confirmField]);
 
-  /** Registers the IM+ Storage Code override field's keyboard handler; dismisses the panel and advances to Pallet ID on confirm. */
-  const focusStorageField = useCallback(() => {
-    storageField.focus(() => {
-      hidePanel();
-      setTimeout(() => focusPalletField(), 50);
-    });
-  }, [storageField, hidePanel, focusPalletField]);
-
-  /** Registers the IM+ Zone override field's numpad handler; parses the digit and dismisses the panel on confirm. */
-  const focusZoneField = useCallback(() => {
-    zoneField.focus((v) => {
-      const n = parseInt(v.trim(), 10);
-      setZoneOverride(isNaN(n) ? null : n);
-      hidePanel();
-    });
-  }, [zoneField, hidePanel]);
+  /** Storage Code override committed via the shared field's onChange — advances to Pallet ID, matching the old numpad-driven behavior. */
+  const handleStorageOverrideChange = useCallback((v: string) => {
+    setStorageOverride(v);
+    setTimeout(() => focusPalletField(), 50);
+  }, [focusPalletField]);
 
   useEffect(() => {
     if (screenState === 'entry') {
@@ -367,7 +372,7 @@ export function SDPPage() {
       if (isNaN(palletId)) throw Object.assign(new Error('PALLET_NOT_FOUND'), { status: 404 });
 
       const sizeVal    = sizeOverride;
-      const storageVal = storageField.value.trim().toUpperCase();
+      const storageVal = storageOverride;
 
       const result = await apiFetch<DirectedResult>('/api/puts/directed', token!, {
         method: 'POST',
@@ -568,14 +573,13 @@ export function SDPPage() {
       postResetFocusRef.current = 'aisle';
       aisleField.clear();
       setSizeOverride('');
-      storageField.clear();
-      zoneField.clear();
+      setStorageOverride('');
       setZoneOverride(null);
     } else {
       postResetFocusRef.current = 'pallet';
       if (!sizeLocked)    setSizeOverride('');
-      if (!storageLocked) storageField.clear();
-      if (!zoneLocked)    { zoneField.clear(); setZoneOverride(null); }
+      if (!storageLocked) setStorageOverride('');
+      if (!zoneLocked)    setZoneOverride(null);
     }
   }
 
@@ -657,22 +661,8 @@ export function SDPPage() {
           </div>
           {isIM && (
             <>
-              <div className="w-[160px] flex flex-col gap-1">
-                <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-                  Size
-                </span>
-                <select
-                  aria-label="Size"
-                  value={sizeOverride}
-                  onChange={(e) => setSizeOverride(e.target.value)}
-                  disabled={locked}
-                  className="h-[72px] px-4 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] font-data text-[24px] font-medium text-white focus:outline-none focus:border-[#CC0000] hover:border-[#555] disabled:opacity-40 transition-colors"
-                >
-                  <option value="">—</option>
-                  {SIZES.map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
+              <div className="flex flex-col gap-1">
+                <SizeField value={sizeOverride} onChange={setSizeOverride} options={sizeOptions} disabled={locked} />
                 <button
                   type="button"
                   onClick={() => setSizeLocked(l => !l)}
@@ -682,14 +672,8 @@ export function SDPPage() {
                   {sizeLocked ? 'Locked' : 'Lock'}
                 </button>
               </div>
-              <div className="w-[180px] flex flex-col gap-1">
-                <FieldDisplay
-                  label="Storage"
-                  value={storageField.value}
-                  onFocus={focusStorageField}
-                  active={storageField.isActive}
-                  locked={locked}
-                />
+              <div className="flex flex-col gap-1">
+                <StorageCodeField value={storageOverride} onChange={handleStorageOverrideChange} options={storageCodeOptions} label="Storage" disabled={locked} />
                 <button
                   type="button"
                   onClick={() => setStorageLocked(l => !l)}
@@ -700,13 +684,20 @@ export function SDPPage() {
                 </button>
               </div>
               <div className="w-[140px] flex flex-col gap-1">
-                <FieldDisplay
-                  label="Zone"
-                  value={zoneField.value}
-                  onFocus={focusZoneField}
-                  active={zoneField.isActive}
-                  locked={locked}
-                />
+                {/* Zone override is a straight dropdown, never narrowed and never a
+                    free-text+popup field (issue #80 — unlike Storage Code/Size, the user
+                    explicitly wants this one to always just list 1-4). */}
+                <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider text-center">Zone</span>
+                <select
+                  aria-label="Zone"
+                  value={zoneOverride ?? ''}
+                  onChange={(e) => setZoneOverride(e.target.value ? parseInt(e.target.value, 10) : null)}
+                  disabled={locked}
+                  className="h-[64px] px-4 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] font-data text-[26px] font-medium text-white text-center focus:outline-none focus:border-[#CC0000] hover:border-[#555] disabled:opacity-40 transition-colors"
+                >
+                  <option value="">—</option>
+                  {[1, 2, 3, 4].map((z) => <option key={z} value={z}>{z}</option>)}
+                </select>
                 <button
                   type="button"
                   onClick={() => setZoneLocked(l => !l)}
@@ -723,13 +714,13 @@ export function SDPPage() {
         {/* Applying-overrides summary (issue #50) — every selected override is combined
             with AND when the system searches for a location, but nothing on screen
             confirmed that plainly, which read as "it only applies one." */}
-        {isIM && (sizeOverride || storageField.value || zoneField.value) && (
+        {isIM && (sizeOverride || storageOverride || zoneOverride != null) && (
           <p className="font-ui text-[13px] text-[#9A9A9A]">
             Applying:{' '}
             {[
               sizeOverride && `Size ${sizeOverride}`,
-              storageField.value && `Storage ${storageField.value}`,
-              zoneField.value && `Zone ${zoneField.value}`,
+              storageOverride && `Storage ${storageOverride}`,
+              zoneOverride != null && `Zone ${zoneOverride}`,
             ].filter(Boolean).join(' + ')}
           </p>
         )}

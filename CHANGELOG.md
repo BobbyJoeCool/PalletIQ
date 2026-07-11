@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.4.0 — 2026-07-11](#140--2026-07-11)
 - [1.3.1 — 2026-07-10](#131--2026-07-10)
 - [1.3.0 — 2026-07-10](#130--2026-07-10)
 - [1.2.0 — 2026-07-09](#120--2026-07-09)
@@ -82,6 +83,32 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
 
 ---
+
+## [1.4.0] — 2026-07-11
+
+### 1.4.0 — Added
+
+- **App-wide code-picker fields for Storage Code and Size.** Any field whose value
+  comes from a small set of codes now lets you type what you know, or tap a chevron
+  button to open a popup listing every option as `{code} — {full name}` (e.g.
+  `CR — Conveyable Reserve`) instead of just the bare abbreviation
+  (`src/components/shared/CodePickerField.tsx`). `StorageCodeField` and `SizeField`
+  are rebuilt on this shared primitive; `SizeField` also gains full display names
+  (XS — Extra Small (Hand Put), HS — Half Small, S — Small, M — Medium, L — Large).
+  Wherever a screen already knows the aisle — STG's master control, ELZ's filter,
+  and SDP's Directed Put overrides — the popup narrows to only the codes/sizes
+  actually present in that aisle, sourced from the existing
+  `GET /api/locations/empty-by-zone` endpoint; without an aisle in context it lists
+  every code via a new `GET /api/storage-codes` endpoint. Narrowing only ever
+  affects the field's own popup — it never filters a separate zone-map or summary
+  display on the same screen (ELZ's aisle grid and per-zone summary panel stay
+  unfiltered regardless of which Storage Code was picked to load them). SDP's Zone
+  override was deliberately left as a plain fixed dropdown (1–4) rather than a
+  code-picker — zones have no full name to disambiguate and the set never depends
+  on aisle context. Workstation fields and Reason Code were considered but held
+  back: Workstation doesn't currently have a defined set of values to pick from,
+  and Reason Code is deferred until its own database table exists.
+  ([#80](https://github.com/BobbyJoeCool/PalletIQ/issues/80))
 
 ## [1.3.1] — 2026-07-10
 

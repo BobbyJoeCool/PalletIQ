@@ -7,7 +7,9 @@ import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
+import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
 import { useNumpadField } from '../lib/useNumpadField';
+import { useStorageCodes } from '../lib/useStorageCodes';
 
 interface Breakdown {
   storageCode: string;
@@ -56,6 +58,16 @@ export function ELZPage() {
   const [result, setResult] = useState<EmptyByZoneResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
+
+  // Narrows the Storage Code dropdown-helper (issue #80) to codes actually present in
+  // this aisle, once one is entered — the zone map/summary below stays fully unfiltered
+  // regardless (that's the existing, separate ELZ.md behavior; narrowing only ever
+  // applies to this entry field's own popup, never to the map/summary display).
+  const aisleTypes = useAisleFreightTypes(aisle);
+  const fullStorageCodes = useStorageCodes();
+  const storageCodeOptions = aisleTypes && fullStorageCodes
+    ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
+    : undefined;
 
   // Pre-populate the Aisle field display from router state (ELA "View Zone Map" / STG) on
   // mount — Storage Code's pre-population is handled by StorageCodeField's own value-sync effect.
@@ -129,7 +141,7 @@ export function ELZPage() {
             {aisleField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
           </button>
         </div>
-        <StorageCodeField value={storageCode} onChange={setStorageCode} />
+        <StorageCodeField value={storageCode} onChange={setStorageCode} options={storageCodeOptions} />
       </div>
 
       {/* Main area: grid + zone summary */}

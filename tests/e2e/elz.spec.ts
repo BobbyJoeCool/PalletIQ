@@ -41,7 +41,7 @@ test.describe('ELZ — Empty Locations by Zone', () => {
   test('an aisle with no location records shows the not-found message', async ({ page }) => {
     await page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button').click();
     await hardwareScan(page, UNKNOWN_AISLE);
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, LIVE_STORAGE);
 
     await expect(page.getByText(`No locations found for Aisle ${UNKNOWN_AISLE} — ${LIVE_STORAGE}`)).toBeVisible();
@@ -50,7 +50,7 @@ test.describe('ELZ — Empty Locations by Zone', () => {
   test('a valid Aisle + Storage Code renders the aisle grid and zone summary', async ({ page }) => {
     await page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button').click();
     await hardwareScan(page, LIVE_AISLE);
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, LIVE_STORAGE);
 
     // Grid: 4 zone headers (each spanning an Odd+Even pair) plus the Odd/Even sub-headers.
@@ -67,7 +67,7 @@ test.describe('ELZ — Empty Locations by Zone', () => {
   test('"Stage Aisle" navigates to the (not yet built) STG screen with the aisle carried over', async ({ page }) => {
     await page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button').click();
     await hardwareScan(page, LIVE_AISLE);
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await hardwareScan(page, LIVE_STORAGE);
 
     await page.getByRole('button', { name: 'Stage Aisle' }).click();
@@ -86,7 +86,7 @@ test.describe('ELZ — Empty Locations by Zone', () => {
   test('Aisle and Storage Code auto-submit at their max length without an explicit OK tap', async ({ page }) => {
     await page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button').click();
     await tapKeys(page, LIVE_AISLE);
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await tapKeys(page, LIVE_STORAGE);
 
     await expect(page.getByText('Zone Summary')).toBeVisible();

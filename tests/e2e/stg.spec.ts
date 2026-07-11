@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { tapKeys } from './helpers';
+import { pickCode, tapKeys } from './helpers';
 
 // Chosen for a healthy empty CR-L count under the current seed. Aisle 304 (this spec's
 // original choice, pre-issue-#77) is now fully staged — see api/prisma/seed.ts's demo-
@@ -109,11 +109,11 @@ test.describe('STG — Stage Aisle', () => {
   });
 
   test('master control "Fill All" only fills the front stack when it has no Quantity yet', async ({ page }) => {
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await tapKeys(page, LIVE_STORAGE); // fixed 2-char length — auto-commits
     await page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button').click();
     await tapKeys(page, LIVE_AISLE); // fixed 3-char length — auto-commits
-    await page.getByLabel('Master Size').selectOption(LIVE_SIZE);
+    await pickCode(page, 'Master Size', LIVE_SIZE);
 
     const fillAllBtn = page.getByRole('button', { name: 'Fill All' });
     await expect(fillAllBtn).toBeEnabled();
@@ -151,11 +151,11 @@ test.describe('STG — Stage Aisle', () => {
   });
 
   test('the manual Refresh button reports success without changing any field', async ({ page }) => {
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await tapKeys(page, LIVE_STORAGE); // fixed 2-char length — auto-commits
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(page.getByText('Refreshed')).toBeVisible();
-    await expect(page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button')).toHaveText(LIVE_STORAGE);
+    await expect(page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first()).toHaveText(LIVE_STORAGE);
   });
 
   test('rejecting the suggested location holds it and suggests a new one, without staging anything', async ({ page }) => {

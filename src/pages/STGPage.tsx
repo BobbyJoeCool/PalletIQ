@@ -14,8 +14,10 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
-import { SIZES } from '../lib/sizes';
+import { SIZES, SIZE_NAMES } from '../lib/sizes';
+import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
 import { useNumpadField } from '../lib/useNumpadField';
+import { useStorageCodes } from '../lib/useStorageCodes';
 
 interface NavState {
   aisle?: number;
@@ -956,12 +958,24 @@ function MasterControl({ onRefresh }: { onRefresh: () => void }) {
     aisleField.focus((v) => { setMaster({ aisle: v.trim() }); hidePanel(); });
   }, [aisleField, hidePanel, setMaster]);
 
+  // Narrows the Storage Code/Size dropdown-helpers (issue #80) to what's actually present
+  // once an aisle is entered — the live info panel below stays fully unfiltered regardless.
+  const aisleNum = parseInt(master.aisle, 10);
+  const aisleTypes = useAisleFreightTypes(isNaN(aisleNum) ? null : aisleNum);
+  const fullStorageCodes = useStorageCodes();
+  const storageCodeOptions = aisleTypes && fullStorageCodes
+    ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
+    : undefined;
+  const sizeOptions = aisleTypes
+    ? aisleTypes.sizesFor(master.storageCode || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
+    : undefined;
+
   return (
     <div className="flex items-end justify-between pt-3 pb-4 border-b border-[#1C1C1C] shrink-0 px-4">
       <div className="flex items-end gap-4">
-        <StorageCodeField value={master.storageCode} onChange={(v) => setMaster({ storageCode: v })} size="compact" />
+        <StorageCodeField value={master.storageCode} onChange={(v) => setMaster({ storageCode: v })} options={storageCodeOptions} size="compact" />
         <FieldDisplay label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} width="w-[120px]" />
-        <SizeField value={master.size} onChange={(v) => setMaster({ size: v })} size="compact" ariaLabel="Master Size" />
+        <SizeField value={master.size} onChange={(v) => setMaster({ size: v })} options={sizeOptions} size="compact" ariaLabel="Master Size" />
       </div>
 
       {/* Manual Refresh (issue #76) — reloads the live info panel and the front stack's

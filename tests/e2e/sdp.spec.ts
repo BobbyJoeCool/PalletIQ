@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { tapKeys, messageBarTone } from './helpers';
+import { pickCode, tapKeys, messageBarTone } from './helpers';
 
 // Aisle 304 is a standard aisle seeded with plenty of EMPTY locations (see api/prisma/seed.ts,
 // AISLE_PATTERN). If the dev DB has been heavily exercised without a re-seed, this aisle can
@@ -163,13 +163,10 @@ test.describe('SDP — System Directed Put flow', () => {
   test('the "Applying" summary lists every selected override', async ({ page }) => {
     await expect(page.getByText('Applying:')).not.toBeVisible();
 
-    await page.getByRole('button', { name: 'M', exact: true }).click(); // Size quick-pick
-
-    // The Zone wrapper also contains a "Lock" toggle button — target the field display
-    // button specifically (its accessible name starts as the placeholder "—").
-    const zoneField = page.locator('div.flex.flex-col.gap-1', { hasText: 'Zone' }).getByRole('button', { name: '—' });
-    await zoneField.click();
-    await tapKeys(page, '2');
+    await pickCode(page, 'Size', 'M');
+    // Zone override is a plain, never-narrowed dropdown (issue #80) — not the free-text +
+    // dropdown-helper pattern Size/Storage use.
+    await page.getByLabel('Zone', { exact: true }).selectOption('2');
 
     const summary = page.getByText(/^Applying:/);
     await expect(summary).toBeVisible();

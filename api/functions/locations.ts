@@ -95,6 +95,26 @@ async function getLocation(req: HttpRequest, _ctx: InvocationContext): Promise<u
 }
 
 /**
+ * Full Storage Code reference list (issue #80) — every `{code, desc}` pair, e.g.
+ * `{ code: "CR", desc: "Conveyable Reserve" }`. Feeds the un-narrowed case of the shared
+ * StorageCodeField's dropdown-helper popup (screens with no aisle entered yet to narrow
+ * by); the narrowed case is derived client-side from `GET /api/locations/empty-by-zone`
+ * instead, which already returns exactly the storage codes present in a given aisle.
+ *
+ * @returns `{ code: string; desc: string }[]`, sorted alphabetically by code
+ */
+async function getStorageCodes(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+
+  const codes = await prisma.storageCode.findMany({
+    select: { id: true, desc: true },
+    orderBy: { id: 'asc' },
+  });
+
+  return codes.map((c) => ({ code: c.id, desc: c.desc }));
+}
+
+/**
  * Empty Locations by Aisle (ELA). Returns, per aisle, the count of EMPTY and STAGED
  * locations for every size present in that aisle at the given Storage Code — the GPMer's
  * primary space-finding tool before bringing pallet stacks into the building. See
@@ -375,6 +395,13 @@ app.http('getLocation', {
   // always digit strings (see parseLocationBarcode), so this is a non-breaking constraint.
   route: 'locations/{id:int}',
   handler: withHandler(getLocation),
+});
+
+app.http('getStorageCodes', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'storage-codes',
+  handler: withHandler(getStorageCodes),
 });
 
 app.http('getLocationsEmptyByAisle', {

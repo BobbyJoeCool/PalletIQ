@@ -1,45 +1,46 @@
-import { useEffect } from 'react';
-import { useNumpadField } from '../../lib/useNumpadField';
+import { useStorageCodes } from '../../lib/useStorageCodes';
+import { CodePickerField, type CodeOption } from './CodePickerField';
 
 interface StorageCodeFieldProps {
   value: string;
   onChange: (value: string) => void;
+  /** Narrowed list of codes actually available in the current context (e.g. present in an
+   *  already-entered aisle) — issue #80. Omit to show the full reference list, fetched
+   *  from `GET /api/storage-codes`. */
+  options?: CodeOption[];
   /** `compact` matches STG's Master Control bar; `default` matches full-screen filter bars
    *  (ELA/ELZ/LII). Styling is variant-based, not free className passthrough (issue #78). */
   size?: 'compact' | 'default';
   label?: string;
+  disabled?: boolean;
 }
 
 /**
  * Shared 2-character Storage Code entry field (issue #78) — keyboard-driven, uppercases and
  * auto-commits at 2 characters via useNumpadField's maxLength, matching the fixed-length
- * field convention already used identically across ELA/ELZ/STG/SDP/LII.
+ * field convention already used identically across ELA/ELZ/STG/SDP/LII. A helper button
+ * opens a dropdown popup of available codes with full names (issue #80) — narrowed to
+ * what's actually present when the caller knows enough context to narrow, or the full
+ * `GET /api/storage-codes` reference list otherwise.
  */
-export function StorageCodeField({ value, onChange, size = 'default', label = 'Storage Code' }: StorageCodeFieldProps) {
-  const field = useNumpadField('keyboard', 2);
-  useEffect(() => { field.set(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function focusField() {
-    field.focus((v) => onChange(v.trim().toUpperCase()));
-  }
-
-  const boxHeight = size === 'compact' ? 'h-[52px]' : 'h-[64px]';
-  const textSize = size === 'compact' ? 'text-[20px]' : 'text-[26px]';
-  const width = size === 'compact' ? 'w-[160px]' : 'w-[220px]';
+export function StorageCodeField({ value, onChange, options, size = 'default', label = 'Storage Code', disabled = false }: StorageCodeFieldProps) {
+  // Always called (Rules of Hooks) — its cached result is simply unused once the caller
+  // supplies a narrowed `options` list.
+  const fullList = useStorageCodes();
 
   return (
-    <div className={`flex flex-col gap-1 ${width}`}>
-      {label && <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider text-center">{label}</span>}
-      <button
-        type="button"
-        onClick={focusField}
-        className={`flex items-center justify-center ${boxHeight} px-4 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-      >
-        <span className={`font-data ${textSize} font-medium text-white tracking-[0.04em]`}>
-          {field.value || <span className="text-[#444]">—</span>}
-        </span>
-        {field.isActive && <span className="inline-block w-[2px] h-[24px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-      </button>
-    </div>
+    <CodePickerField
+      value={value}
+      onChange={onChange}
+      options={options ?? fullList ?? []}
+      optionsLoading={!options && fullList === null}
+      panel="keyboard"
+      maxLength={2}
+      transform={(v) => v.toUpperCase()}
+      size={size}
+      label={label}
+      ariaLabel={label}
+      disabled={disabled}
+    />
   );
 }

@@ -68,3 +68,14 @@ export async function messageBarTone(page: Page): Promise<'info' | 'warning' | '
   if (cls.includes('F0A500')) return 'warning';
   return 'unknown';
 }
+
+/**
+ * Picks a value from a CodePickerField-based field's dropdown-helper popup (issue #80 —
+ * StorageCodeField/SizeField), e.g. `pickCode(page, 'Size', 'L')`. `fieldAriaLabel` must
+ * match that field's own `label`/`ariaLabel` prop (STG's Master Control Size uses "Master
+ * Size", not "Size" — check the component's own aria-label before assuming the default).
+ */
+export async function pickCode(page: Page, fieldAriaLabel: string, code: string) {
+  await page.getByRole('button', { name: `${fieldAriaLabel} options`, exact: true }).click();
+  await page.getByRole('button', { name: new RegExp(`^${code} —`) }).click();
+}
