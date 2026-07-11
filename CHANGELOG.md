@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.4.1 — 2026-07-11](#141--2026-07-11)
 - [1.4.0 — 2026-07-11](#140--2026-07-11)
 - [1.3.1 — 2026-07-10](#131--2026-07-10)
 - [1.3.0 — 2026-07-10](#130--2026-07-10)
@@ -83,6 +84,26 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
 
 ---
+
+## [1.4.1] — 2026-07-11
+
+### 1.4.1 — Fixed
+
+- **STG: restored three independent stack-entry boxes on the forks.** v1.3.0/issue #77's
+  single-stageable-"front stack" redesign turned out not to match how staging actually
+  works physically — reported as a Blocker/Major bug (production). Three stack boxes
+  ("On Deck," "Next," "Staging" left to right) ride the forks again, each with its own
+  Aisle/Storage Code/Size/Quantity, but only "Staging" (front, furthest from the operator)
+  ever computes destination locations or can be staged — "On Deck"/"Next" are pure data
+  entry for what's queued up behind it. Staging "Staging" compacts the queue: whichever of
+  the other two is filled slides all the way into "Staging," skipping past an empty slot
+  in between if one exists. Master Control's "Fill All" and ELA/ELZ's "Stage Aisle"
+  pre-population both apply to every slot again, restoring the pre-#77 behavior.
+  The destination-location list also moves into a dedicated **Locations** panel as large
+  tappable bubbles (5 per column, wrapping into more columns beyond that — some HS stacks
+  run up to 10 pallets) instead of a small inline text list, and the fork graphic shrinks
+  further (fixed width, `object-contain` instead of `object-fill`, so `Triple.png` no
+  longer distorts) to make room. ([#81](https://github.com/BobbyJoeCool/PalletIQ/issues/81))
 
 ## [1.4.0] — 2026-07-11
 

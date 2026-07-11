@@ -9,24 +9,22 @@ const LIVE_AISLE = '305';
 const LIVE_STORAGE = 'CR';
 const LIVE_SIZE = 'L';
 
-/** The front-stack box's root container, scoped by its specific class combination —
- *  needed because an unscoped `hasText: 'Aisle'` button lookup also matches the
- *  "Unstage Aisle" button (both contain the substring "Aisle"). */
-function frontStackBox(page: Page) {
-  return page.locator('div.w-\\[300px\\].shrink-0.flex.flex-col.gap-2');
+/** Scopes one of the three stack boxes riding the forks (issue #81) by its visible label —
+ *  "Staging" (front/rightmost, the only slot that ever computes locations or stages),
+ *  "Next", or "On Deck" (see STGPage.tsx's STACK_LABELS). Needed because all three render
+ *  identical Aisle/Storage/Size/Qty fields, and an unscoped `hasText: 'Aisle'` lookup would
+ *  also match the "Unstage Aisle" button. */
+function stackBox(page: Page, label: 'Staging' | 'Next' | 'On Deck') {
+  return page.locator('div.flex-1.min-w-0.flex.flex-col.items-stretch.gap-1.h-full', { hasText: label });
 }
 
-/** Scopes a labeled field box in the front-stack panel (Aisle/Storage/Qty) — issue #77
- *  collapsed STG down to one stageable "front stack" box (label + value share the same
- *  `<button>`, per PalletBox — see STGPage.tsx), so there's only ever one of each label,
- *  unlike the pre-#77 three-independent-stacks UI this superseded. Master Control's own
- *  Aisle/Storage Code fields render their label in a sibling `<span>` outside the button
- *  (see FieldDisplay/StorageCodeField), so this never ambiguously matches those instead. */
-function frontField(page: Page, label: string) {
-  return frontStackBox(page).locator('button', { hasText: label }).first();
+/** Scopes a labeled field button (Aisle/Storage/Qty) within a given stack box — label and
+ *  value share the same `<button>`, per PalletBox. */
+function stackField(page: Page, boxLabel: 'Staging' | 'Next' | 'On Deck', fieldLabel: string) {
+  return stackBox(page, boxLabel).locator('button', { hasText: fieldLabel }).first();
 }
 
-/** Front-stack Aisle/Storage/Qty have no fixed length (unlike Master Control's Aisle/
+/** Stack-box Aisle/Storage/Qty have no fixed length (unlike Master Control's Aisle/
  *  Storage, which auto-commit at a fixed length — see useNumpadField's maxLength), so
  *  committing them needs an explicit OK tap. On-screen taps are used rather than
  *  `hardwareScan` here: `deliverScan`'s synthetic-Enter handoff (NumpadContext's
@@ -40,30 +38,40 @@ async function tapAndCommit(page: Page, keys: string) {
   await page.getByRole('button', { name: 'OK', exact: true }).click();
 }
 
-/** Fills the front stack with the live Aisle/Storage/Size and a given quantity. */
-async function fillFrontStack(page: Page, quantity = '5') {
-  await frontField(page, 'Aisle').click();
+/** Fills one stack box with the live Aisle/Storage/Size and a given quantity. */
+async function fillStack(page: Page, boxLabel: 'Staging' | 'Next' | 'On Deck', quantity = '5') {
+  await stackField(page, boxLabel, 'Aisle').click();
   await tapAndCommit(page, LIVE_AISLE);
-  await frontField(page, 'Storage').click();
+  await stackField(page, boxLabel, 'Storage').click();
   await tapAndCommit(page, LIVE_STORAGE);
-  await page.getByLabel('Front Stack Size').selectOption(LIVE_SIZE);
-  await frontField(page, 'Qty').click();
+  await stackBox(page, boxLabel).locator('select').selectOption(LIVE_SIZE);
+  await stackField(page, boxLabel, 'Qty').click();
   await tapAndCommit(page, quantity);
 }
 
-/** The "Pallets Go To" destination-location list/box next to the front-stack fields —
- *  scoped to its specific class combination (not a bare `div`), since a generic `hasText`
- *  match would otherwise also match every broader ancestor div up the tree. */
-function locationsBox(page: Page) {
-  return page.locator('div.flex-1.min-w-0.flex.flex-col.gap-1', { hasText: 'Pallets Go To' });
+/** The Locations panel showing the front ("Staging") stack's computed destination-location
+ *  bubbles — scoped to its specific class combination (not a bare `div`), since a generic
+ *  `hasText` match would otherwise also match every broader ancestor div up the tree. */
+function locationsPanel(page: Page) {
+  return page.locator('div.w-\\[340px\\].shrink-0', { hasText: 'Locations' });
+}
+
+/** Just the bubble list within the Locations panel — excludes the panel's own STAGE
+ *  button, which also happens to be a `<button>`. Scoping to this instead of the whole
+ *  panel avoids a race where `getByRole('button').first()` can resolve to STAGE (the only
+ *  button present before the async location fetch resolves) rather than the first bubble. */
+function locationBubbles(page: Page) {
+  return page.getByTestId('location-bubbles');
 }
 
 /**
- * Covers STG's front-stack fill/stage flow (issue #77's single-stageable-position
- * redesign), master control "Fill All", the location suggestion reject/hold flow, the
- * manual Refresh button (issue #76), the Unstage-Aisle role gate and per-type panel
- * (issue #58, styled larger/red per issue #74), and the collapsible log panel. See
- * DevNotes/Screen-Specs/STG.md.
+ * Covers STG's three-stack-queue fill/stage flow (issue #81 — three independent stack
+ * boxes ride the forks; only the front "Staging" slot ever computes locations or stages,
+ * and staging it compacts the queue so a filled "Next"/"On Deck" slot slides up), master
+ * control "Fill All" (restored to fill all three slots), the location suggestion
+ * reject/hold flow, the manual Refresh button (issue #76), the Unstage-Aisle role gate and
+ * per-type panel (issue #58, styled larger/red per issue #74), and the collapsible log
+ * panel. See DevNotes/Screen-Specs/STG.md.
  *
  * Not covered:
  * - The Unstage/Restage modal's actual Apply submission — exercised for visibility/row
@@ -88,13 +96,13 @@ test.describe('STG — Stage Aisle', () => {
   });
 
   test('filling Aisle + Storage + Size + Quantity populates destination locations and enables Stage', async ({ page }) => {
-    await fillFrontStack(page);
+    await fillStack(page, 'Staging');
     await expect(page.getByRole('button', { name: 'STAGE', exact: true })).toBeEnabled();
-    await expect(locationsBox(page)).toContainText(/\d{3}-\d{3}-\d{2}/);
+    await expect(locationsPanel(page)).toContainText(/\d{3}-\d{3}-\d{2}/);
   });
 
   test('staging completes and resets the front stack while keeping Aisle/Storage/Size', async ({ page }) => {
-    await fillFrontStack(page);
+    await fillStack(page, 'Staging');
     await expect(page.getByRole('button', { name: 'STAGE', exact: true })).toBeEnabled();
     await page.getByRole('button', { name: 'STAGE', exact: true }).click();
 
@@ -102,27 +110,64 @@ test.describe('STG — Stage Aisle', () => {
     // in the log panel's collapsed preview (a <button>, not a plain span); either match
     // confirms the stage actually happened.
     await expect(page.getByText(new RegExp(`pallets staged in Aisle ${LIVE_AISLE}`)).first()).toBeVisible();
-    // Quantity clears (Stage disables again) but Aisle/Storage persist for a repeat stage.
+    // Quantity clears (Stage disables again) but Aisle/Storage persist for a repeat stage,
+    // since nothing was queued behind it to slide into the front slot instead.
     await expect(page.getByRole('button', { name: 'STAGE', exact: true })).toBeDisabled();
-    await expect(frontField(page, 'Aisle')).toContainText(LIVE_AISLE);
-    await expect(frontField(page, 'Storage')).toContainText(LIVE_STORAGE);
+    await expect(stackField(page, 'Staging', 'Aisle')).toContainText(LIVE_AISLE);
+    await expect(stackField(page, 'Staging', 'Storage')).toContainText(LIVE_STORAGE);
   });
 
-  test('master control "Fill All" only fills the front stack when it has no Quantity yet', async ({ page }) => {
+  test('staging the front slot shifts a queued "Next" stack into its place', async ({ page }) => {
+    await fillStack(page, 'Staging', '1');
+    await fillStack(page, 'Next', '2');
+    await page.getByRole('button', { name: 'STAGE', exact: true }).click();
+    await expect(page.getByText(new RegExp(`pallets staged in Aisle ${LIVE_AISLE}`)).first()).toBeVisible();
+
+    // "Next"'s data (Qty 2) slid up into "Staging"; "Next" is now the empty slot.
+    await expect(stackField(page, 'Staging', 'Qty')).toContainText('2');
+    await expect(stackField(page, 'Staging', 'Aisle')).toContainText(LIVE_AISLE);
+    await expect(stackField(page, 'Next', 'Qty')).toContainText('—');
+    await expect(page.getByRole('button', { name: 'STAGE', exact: true })).toBeEnabled();
+  });
+
+  test('staging the front slot skips an empty "Next" and pulls "On Deck" all the way up', async ({ page }) => {
+    await fillStack(page, 'Staging', '1');
+    await fillStack(page, 'On Deck', '3'); // "Next" (the slot in between) stays empty
+    await page.getByRole('button', { name: 'STAGE', exact: true }).click();
+    await expect(page.getByText(new RegExp(`pallets staged in Aisle ${LIVE_AISLE}`)).first()).toBeVisible();
+
+    // "On Deck"'s data (Qty 3) jumps past the empty "Next" slot straight into "Staging".
+    await expect(stackField(page, 'Staging', 'Qty')).toContainText('3');
+    await expect(stackField(page, 'Staging', 'Aisle')).toContainText(LIVE_AISLE);
+    await expect(stackField(page, 'Next', 'Qty')).toContainText('—');
+    await expect(stackField(page, 'On Deck', 'Qty')).toContainText('—');
+  });
+
+  test('master control "Fill All" fills every stack slot that has no Quantity yet', async ({ page }) => {
     await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
     await tapKeys(page, LIVE_STORAGE); // fixed 2-char length — auto-commits
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button').click();
+    // Scoped by Master Control's specific width class (w-[120px], see FieldDisplay usage in
+    // STGPage.tsx) — an unscoped `hasText: 'Aisle'` lookup now also matches all three stack
+    // boxes' own "Aisle" fields (issue #81's StackBox wrapper happens to share the generic
+    // "flex flex-col gap-1" classes with FieldDisplay's wrapper).
+    await page.locator('div.flex.flex-col.gap-1.w-\\[120px\\]', { hasText: 'Aisle' }).getByRole('button').click();
     await tapKeys(page, LIVE_AISLE); // fixed 3-char length — auto-commits
     await pickCode(page, 'Master Size', LIVE_SIZE);
 
     const fillAllBtn = page.getByRole('button', { name: 'Fill All' });
     await expect(fillAllBtn).toBeEnabled();
     await fillAllBtn.click();
-    await expect(frontField(page, 'Storage')).toContainText(LIVE_STORAGE);
-    await expect(frontField(page, 'Aisle')).toContainText(LIVE_AISLE);
+    for (const label of ['Staging', 'Next', 'On Deck'] as const) {
+      await expect(stackField(page, label, 'Storage')).toContainText(LIVE_STORAGE);
+      await expect(stackField(page, label, 'Aisle')).toContainText(LIVE_AISLE);
+    }
 
-    // Once the front stack already has a Quantity, Fill All has nothing left to do.
-    await frontField(page, 'Qty').click();
+    // Once every slot already has a Quantity, Fill All has nothing left to do.
+    await stackField(page, 'Staging', 'Qty').click();
+    await tapAndCommit(page, '1');
+    await stackField(page, 'Next', 'Qty').click();
+    await tapAndCommit(page, '1');
+    await stackField(page, 'On Deck', 'Qty').click();
     await tapAndCommit(page, '1');
     await expect(fillAllBtn).toBeDisabled();
   });
@@ -134,7 +179,7 @@ test.describe('STG — Stage Aisle', () => {
   });
 
   test('log entries appear after staging and persist in the expanded view', async ({ page }) => {
-    await fillFrontStack(page);
+    await fillStack(page, 'Staging');
     await page.getByRole('button', { name: 'STAGE', exact: true }).click();
     // .first() — the same text appears twice once staged: once in the message bar, once
     // in the log panel's collapsed preview (a <button>, not a plain span); either match
@@ -159,8 +204,8 @@ test.describe('STG — Stage Aisle', () => {
   });
 
   test('rejecting the suggested location holds it and suggests a new one, without staging anything', async ({ page }) => {
-    await fillFrontStack(page);
-    const suggestionBtn = locationsBox(page).getByRole('button').first();
+    await fillStack(page, 'Staging');
+    const suggestionBtn = locationBubbles(page).getByRole('button').first();
     const rejected = await suggestionBtn.textContent();
 
     await suggestionBtn.click();
@@ -172,25 +217,25 @@ test.describe('STG — Stage Aisle', () => {
     await expect(page.getByText(new RegExp(`${rejected} held`))).toBeVisible();
     // Staging never happened — Stage is still enabled with the same Quantity/aisle intact.
     await expect(page.getByRole('button', { name: 'STAGE', exact: true })).toBeEnabled();
-    await expect(locationsBox(page).getByRole('button').first()).not.toHaveText(rejected ?? '');
+    await expect(locationBubbles(page).getByRole('button').first()).not.toHaveText(rejected ?? '');
   });
 
   test('cancelling the reject/hold dialog leaves the original suggestion untouched', async ({ page }) => {
-    await fillFrontStack(page);
-    const suggestionBtn = locationsBox(page).getByRole('button').first();
+    await fillStack(page, 'Staging');
+    const suggestionBtn = locationBubbles(page).getByRole('button').first();
     const original = await suggestionBtn.textContent();
 
     await suggestionBtn.click();
     await expect(page.getByText('Reject suggested location?')).toBeVisible();
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page.getByText('Reject suggested location?')).not.toBeVisible();
-    await expect(locationsBox(page).getByRole('button').first()).toHaveText(original ?? '');
+    await expect(locationBubbles(page).getByRole('button').first()).toHaveText(original ?? '');
   });
 
   test('IM sees the larger, red Unstage Aisle button and can open its per-type panel', async ({ page }) => {
     // The per-type panel only has rows for freight types actually STAGED in the aisle
     // (GET /api/staging/staged-types) — stage one first so there's a CR-L row to assert on.
-    await fillFrontStack(page, '1');
+    await fillStack(page, 'Staging', '1');
     await page.getByRole('button', { name: 'STAGE', exact: true }).click();
     // .first() — the same text appears twice once staged: once in the message bar, once
     // in the log panel's collapsed preview (a <button>, not a plain span); either match
