@@ -270,7 +270,7 @@ export function PARPage() {
       </div>
       <div className="flex flex-wrap gap-4">
         <FieldDisplay label="Pallets" value={palletsField.value} onFocus={focusPallets} active={palletsField.isActive} width="w-[160px]" />
-        <FieldDisplay label="Cartons" value={cartonsField.value} onFocus={focusCartons} active={cartonsField.isActive} width="w-[160px]" />
+        <FieldDisplay label="Cartons per Pallet" value={cartonsField.value} onFocus={focusCartons} active={cartonsField.isActive} width="w-[220px]" />
         <FieldDisplay label="SSPs" value={sspsQtyField.value} onFocus={focusSspsQty} active={sspsQtyField.isActive} width="w-[160px]" />
       </div>
       <FieldDisplay

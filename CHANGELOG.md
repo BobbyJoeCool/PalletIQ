@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.4.3 — 2026-07-11](#143--2026-07-11)
 - [1.4.2 — 2026-07-11](#142--2026-07-11)
 - [1.4.1 — 2026-07-11](#141--2026-07-11)
 - [1.4.0 — 2026-07-11](#140--2026-07-11)
@@ -75,7 +76,6 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#62](https://github.com/BobbyJoeCool/PalletIQ/issues/62) — PIP/SDP: combine "Pull Quantity" and "Remaining" rows to save space
 - [#63](https://github.com/BobbyJoeCool/PalletIQ/issues/63) — ELA: add a subtle divider between size columns
 - [#70](https://github.com/BobbyJoeCool/PalletIQ/issues/70) — PAR: Demo Helper autofill for Location doesn't fill the Level field
-- [#71](https://github.com/BobbyJoeCool/PalletIQ/issues/71) — PAR: "Cartons" label should read "Cartons per Pallet"
 - [#73](https://github.com/BobbyJoeCool/PalletIQ/issues/73) — STG: move Fill All and Unstage Aisle buttons onto the operator compartment
 - [#76](https://github.com/BobbyJoeCool/PalletIQ/issues/76) — STG: add a manual Refresh button
 
@@ -84,6 +84,14 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
 
 ---
+
+## [1.4.3] — 2026-07-11
+
+### 1.4.3 — Fixed
+
+- **PAR: relabeled the "Cartons" field to "Cartons per Pallet"** for clarity — it's the
+  cartons-per-pallet quantity used to compute pallet contents, not a lone "cartons" total.
+  ([#71](https://github.com/BobbyJoeCool/PalletIQ/issues/71))
 
 ## [1.4.2] — 2026-07-11
 
