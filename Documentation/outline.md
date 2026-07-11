@@ -305,7 +305,7 @@ Below or alongside the grid, a **per-zone summary** (combining both odd and even
 - Entry points: Home menu, Empty Locations by Aisle (per-aisle button), Empty Locations by Zone (per-aisle button) — all pre-populate the aisle.
 - Purpose: a General Pallet Mover (GPMer) brings a pallet stack into an aisle via a fork-truck graphic; only the front (furthest-from-operator) position is ever stageable. The worker enters the Storage Code, Size, and quantity, and the system assigns each pallet a destination location, marking it `STAGED` rather than `STORED` — a placeholder reservation that a subsequent Put confirms. The system's suggested next location can be rejected (puts it on hold with a reason code and suggests another) without staging anything.
 - Staging always fills an aisle from the back forward (highest bin, lowest level first) — the reverse of Directed Put's front-to-back zone fill — so the two workflows can operate on the same aisle from opposite ends without colliding.
-- `STAGED` locations are valid Directed Put candidates alongside `EMPTY` ones (excluded only when the putting worker has Consolidating mode on). A Manual Put onto a `STAGED` location is allowed but shows a non-blocking warning.
+- `STAGED` locations are preferred Directed Put candidates over `EMPTY` ones when the putting worker does not have Consolidating mode on (excluded entirely, in favor of `EMPTY` only, when Consolidating is on). A Manual Put onto a `STAGED` location is allowed but shows a non-blocking warning.
 - IM and above can Unstage (clear) or Restage an aisle's `STAGED` locations via a modal on the Stage Aisle screen.
 
 ---

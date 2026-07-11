@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.3.1 — 2026-07-10](#131--2026-07-10)
 - [1.3.0 — 2026-07-10](#130--2026-07-10)
 - [1.2.0 — 2026-07-09](#120--2026-07-09)
 - [1.1.5 — 2026-07-08](#115--2026-07-08)
@@ -50,7 +51,6 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Major/Important
 
-- [#6](https://github.com/BobbyJoeCool/PalletIQ/issues/6) — Add reason code to edit pallet screen — reopened: the "Type a code…" free-text option brings up the iPad's native keyboard instead of the app's own on-screen keyboard
 - [#14](https://github.com/BobbyJoeCool/PalletIQ/issues/14) — Add ability to put ranges on hold (WLH)
 - [#15](https://github.com/BobbyJoeCool/PalletIQ/issues/15) — Add helper bar button to select a location on hold (WLH)
 - [#65](https://github.com/BobbyJoeCool/PalletIQ/issues/65) — SDP: enlarge the Consolidating and lock toggle buttons
@@ -82,6 +82,20 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
 
 ---
+
+## [1.3.1] — 2026-07-10
+
+### 1.3.1 — Added
+
+- **SDP: prefer Staged-flagged locations over empty ones when not consolidating.**
+  Directed-put location-finding used to treat STAGED and EMPTY locations as equally
+  valid candidates, picked by proximity order alone. Now, whenever Consolidating mode is
+  off, every eligible STAGED location is considered before any EMPTY one (proximity
+  ordering still applies within each group) — a location can end up empty for reasons
+  unrelated to staging (a hold lifted, a pull, etc.), so new pallets should land next to
+  what was already staged for them rather than scattering into those. Consolidating
+  mode's own logic (EMPTY only) is unchanged.
+  ([#79](https://github.com/BobbyJoeCool/PalletIQ/issues/79))
 
 ## [1.3.0] — 2026-07-10
 
