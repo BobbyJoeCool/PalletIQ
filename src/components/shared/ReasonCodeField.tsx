@@ -49,7 +49,12 @@ export function ReasonCodeField({ codes, value, onChange, size = 'default', labe
     <div className="flex flex-col gap-2">
       {label && <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">{label}</span>}
       <select
-        aria-label={label}
+        // Falls back to a fixed accessible name when the caller passes an empty label to
+        // suppress the visible heading (e.g. HoldPanel, which shows its own "Reason code
+        // for {type}" heading right above) — an empty aria-label leaves the select with no
+        // accessible name at all, which both breaks screen-reader users and made this field
+        // unreachable via getByLabel in HoldPanel's own tests.
+        aria-label={label || 'Reason Code'}
         value={selection}
         onChange={(e) => selectCode(e.target.value)}
         className={`${boxHeight} px-3 rounded-[10px] bg-[#0D0D0D] border-2 border-[#3A3A3A] font-data ${textSize} text-white focus:outline-none focus:border-[#CC0000]`}

@@ -172,37 +172,51 @@ export function PIIPage() {
   }
 
   /** Submits only the edit-mode fields that actually changed via PATCH /api/pallets/:pid, then re-loads the pallet. */
+  /**
+   * The PATCH body fields that actually differ from the loaded pallet — parsed/semantic
+   * comparison (e.g. VCP typed as "012" counts as unchanged if it was already 12), not a
+   * raw string comparison. Recomputed as the worker edits; also drives the Save button's
+   * disabled state (issue #66 — Save used to go through with an empty body, silently
+   * "succeeding" without changing anything, as long as a reason code happened to be picked).
+   */
+  const changedFields = useMemo(() => {
+    if (!pallet) return {};
+    const body: Record<string, unknown> = {};
+
+    const dept = parseInt(editDpci.dept, 10);
+    const cls = parseInt(editDpci.class, 10);
+    const itm = parseInt(editDpci.item, 10);
+    if (!isNaN(dept) && !isNaN(cls) && !isNaN(itm) &&
+        (dept !== pallet.dpci.dept || cls !== pallet.dpci.class || itm !== pallet.dpci.item)) {
+      body.dpci = { dept, class: cls, item: itm };
+    }
+    const vcp = parseInt(editVcp, 10);
+    if (!isNaN(vcp) && vcp !== pallet.vcp) body.vcp = vcp;
+    const ssp = parseInt(editSsp, 10);
+    if (!isNaN(ssp) && ssp !== pallet.ssp) body.ssp = ssp;
+    const cartons = parseInt(editCartons, 10);
+    if (!isNaN(cartons) && cartons !== pallet.currentCartons) body.currentCartons = cartons;
+    const ssps = parseInt(editSSPs, 10);
+    if (!isNaN(ssps) && ssps !== pallet.currentSSPs) body.currentSSPs = ssps;
+    const pallets = parseInt(editPallets, 10);
+    if (!isNaN(pallets) && pallets !== pallet.currentPallets) body.currentPallets = pallets;
+
+    return body;
+  }, [pallet, editDpci, editVcp, editSsp, editCartons, editSSPs, editPallets]);
+
+  const hasChanges = Object.keys(changedFields).length > 0;
+
   async function saveEdit() {
-    if (!pallet || saving) return;
+    if (!pallet || saving || !hasChanges) return;
     setSaving(true);
     try {
-      const body: Record<string, unknown> = {};
+      const body: Record<string, unknown> = { ...changedFields };
 
-      const dept = parseInt(editDpci.dept, 10);
-      const cls = parseInt(editDpci.class, 10);
-      const itm = parseInt(editDpci.item, 10);
-      if (!isNaN(dept) && !isNaN(cls) && !isNaN(itm) &&
-          (dept !== pallet.dpci.dept || cls !== pallet.dpci.class || itm !== pallet.dpci.item)) {
-        body.dpci = { dept, class: cls, item: itm };
+      if (!reasonCode) {
+        setMessage({ type: 'error', text: 'A reason code is required to save changes' });
+        return;
       }
-      const vcp = parseInt(editVcp, 10);
-      if (!isNaN(vcp) && vcp !== pallet.vcp) body.vcp = vcp;
-      const ssp = parseInt(editSsp, 10);
-      if (!isNaN(ssp) && ssp !== pallet.ssp) body.ssp = ssp;
-      const cartons = parseInt(editCartons, 10);
-      if (!isNaN(cartons) && cartons !== pallet.currentCartons) body.currentCartons = cartons;
-      const ssps = parseInt(editSSPs, 10);
-      if (!isNaN(ssps) && ssps !== pallet.currentSSPs) body.currentSSPs = ssps;
-      const pallets = parseInt(editPallets, 10);
-      if (!isNaN(pallets) && pallets !== pallet.currentPallets) body.currentPallets = pallets;
-
-      if (Object.keys(body).length > 0) {
-        if (!reasonCode) {
-          setMessage({ type: 'error', text: 'A reason code is required to save changes' });
-          return;
-        }
-        body.reasonCode = reasonCode;
-      }
+      body.reasonCode = reasonCode;
 
       await apiFetch(`/api/pallets/${pallet.pid}`, token!, {
         method: 'PATCH',
@@ -343,7 +357,7 @@ export function PIIPage() {
                 <button type="button" onClick={cancelEdit} className="h-[56px] px-6 rounded-[12px] font-ui text-[16px] font-medium border border-[#3A3A3A] text-white">
                   Cancel
                 </button>
-                <button type="button" onClick={saveEdit} disabled={saving} className="h-[56px] px-6 rounded-[12px] font-ui text-[16px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40">
+                <button type="button" onClick={saveEdit} disabled={saving || !hasChanges} className="h-[56px] px-6 rounded-[12px] font-ui text-[16px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40">
                   Save
                 </button>
               </>

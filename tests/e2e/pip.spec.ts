@@ -6,7 +6,7 @@ test.use({ storageState: 'playwright/.auth/worker.json' });
 /**
  * Covers every decision diamond in Documentation/Flowcharts-ERDs/pip-flow.mmd.
  *
- * Not covered — node PID_OK / ALT_OK -> WRONG_PULL_FUNCTION: by the time a label reaches
+ * Not covered — node PID_OK / UPC_OK / LOC_BIN -> WRONG_PULL_FUNCTION: by the time a label reaches
  * the `verifying` state, node FN_CHECK has already gated it to the selected pull function,
  * so /api/pulls/verify's WRONG_PULL_FUNCTION response is a defensive server-side check with
  * no reachable path through the UI to trigger it.
@@ -51,14 +51,21 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     await selectFunction(page, 'Carton Air');
     await page.getByRole('button', { name: '✓ Scan Label' }).click();
 
-    await expect(page.getByText('Location', { exact: true })).toBeVisible();
+    // "Location" now appears twice — once as the resolved-location DataRow, once as the
+    // new input field's label (issue #82) — .first() targets the DataRow specifically;
+    // the field itself is asserted again, unambiguously, further down.
+    await expect(page.getByText('Location', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Item', { exact: true })).toBeVisible();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
-    await expect(page.getByText('Pull qty', { exact: true })).toBeVisible();
-    await expect(page.getByText('In location', { exact: true })).toBeVisible();
+    // Combined Current/Pull/Remaining quantity table (issue #62) — replaces the old
+    // three separate "Pull qty"/"In location"/"Remaining" rows.
+    await expect(page.getByText('Current', { exact: true })).toBeVisible();
+    await expect(page.getByText('Pull', { exact: true })).toBeVisible();
     await expect(page.getByText('Remaining', { exact: true })).toBeVisible();
     await expect(page.getByText('Pallet ID', { exact: true })).toBeVisible();
-    await expect(page.getByText('Alternate ID', { exact: true })).toBeVisible();
+    // Issue #82 — UPC and Location fields replace the old single Alternate ID field.
+    await expect(page.getByText('UPC', { exact: true })).toBeVisible();
+    await expect(page.getByText('Location', { exact: true }).last()).toBeVisible();
   });
 
   // Node RESCAN {New label scanned while verifying?} -> Yes
@@ -110,29 +117,54 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     await expect(page.getByText(/^Last Pull .* — /)).toBeVisible();
   });
 
-  // Node ALT_OK {Result?} -> ALTERNATE_MISMATCH
-  test('an invalid Alternate ID shows an error and stays in verifying', async ({ page }) => {
+  // Node UPC_OK {Result?} -> ALTERNATE_MISMATCH, via the UPC field (issue #82 split)
+  test('an invalid UPC shows an error and stays in verifying', async ({ page }) => {
     await selectFunction(page, 'Carton Air');
     await page.getByRole('button', { name: '✓ Scan Label' }).click();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
 
-    // The Alt ID demo buttons only render once the Alternate ID field is focused
-    // (PID auto-focuses on entering verifying; Alt ID doesn't) — tap it first.
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Alternate ID' }).getByRole('button').click();
-    await page.getByRole('button', { name: '✗ Alt ID' }).click();
+    // The UPC demo buttons only render once the UPC field is focused (PID auto-focuses
+    // on entering verifying; UPC/Location don't) — tap it first.
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'UPC' }).getByRole('button').click();
+    await page.getByRole('button', { name: '✗ UPC' }).click();
 
-    await expect(page.getByText('Invalid Alternate ID')).toBeVisible();
+    await expect(page.getByText('Invalid UPC')).toBeVisible();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
   });
 
-  // Node ALT_OK {Result?} -> OK -> SUCCESS (verification via the alternate path instead of Pallet ID)
-  test('verifying by Alternate ID completes the pull', async ({ page }) => {
+  // Node UPC_OK {Result?} -> OK -> SUCCESS, via the UPC field
+  test('verifying by UPC completes the pull', async ({ page }) => {
     await selectFunction(page, 'Carton Air');
     await page.getByRole('button', { name: '✓ Scan Label' }).click();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
 
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Alternate ID' }).getByRole('button').click();
-    await page.getByRole('button', { name: '✓ Alt ID' }).click();
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'UPC' }).getByRole('button').click();
+    await page.getByRole('button', { name: '✓ UPC' }).click();
+
+    await expect(page.getByText(/^Last Pull .* — /)).toBeVisible();
+  });
+
+  // Node LOC_BIN {Result?} -> ALTERNATE_MISMATCH, via the Location field (issue #82 split)
+  test('an invalid Location shows an error and stays in verifying', async ({ page }) => {
+    await selectFunction(page, 'Carton Air');
+    await page.getByRole('button', { name: '✓ Scan Label' }).click();
+    await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
+
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Location' }).getByRole('button').click();
+    await page.getByRole('button', { name: '✗ Location' }).click();
+
+    await expect(page.getByText('Invalid Location')).toBeVisible();
+    await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
+  });
+
+  // Node LOC_BIN {Result?} -> OK -> SUCCESS, via the Location field
+  test('verifying by Location completes the pull', async ({ page }) => {
+    await selectFunction(page, 'Carton Air');
+    await page.getByRole('button', { name: '✓ Scan Label' }).click();
+    await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
+
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Location' }).getByRole('button').click();
+    await page.getByRole('button', { name: '✓ Location' }).click();
 
     await expect(page.getByText(/^Last Pull .* — /)).toBeVisible();
   });
@@ -155,14 +187,35 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     await expect(page.getByText('Invalid status: PULLED')).toBeVisible();
   });
 
-  // Issues #48/#49: FP Alt-ID level mismatch prompts a confirm dialog instead of rejecting
-  // outright. Mocked at the API layer — crafting real seed data where a pallet's actual
-  // level is known to differ from a scannable one would be too flaky to rely on.
-  test('an FP level mismatch on Alt ID prompts a confirm dialog; confirming completes the pull', async ({ page }) => {
+  // Issues #48/#49/#72: FP Location-field level mismatch prompts a popup to type the level
+  // the pallet was actually pulled from (not just confirm/reject the scanned-but-wrong one).
+  // Mocked at the API layer — crafting real seed data where a pallet's actual level is
+  // known to differ from a scannable one would be too flaky to rely on.
+  test('an FP level mismatch on Location prompts a correction popup; entering the actual level completes the pull', async ({ page }) => {
+    // The seed data has no FP-function labels at all (see api/prisma/seed.ts's demo-label
+    // comment — every seeded label defaults to CA), so /api/demo/label?fn=FP always 404s.
+    // Mock the label lookup too, not just verify, so this test doesn't depend on seed data
+    // that structurally can't support it.
+    await page.route('**/api/demo/label*', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ labelId: 'TESTLABEL1' }),
+    }));
+    await page.route('**/api/labels/TESTLABEL1', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        label: { id: 'TESTLABEL1', pullFunction: 'FP', quantity: { pallets: 1, cartons: 0, ssps: 0 }, dpci: '085-02-0006', descShort: 'Test Item' },
+        pallet: { id: 12345, quantity: { pallets: 1, cartons: 0, ssps: 0 } },
+        location: { id: '30105601' },
+      }),
+    }));
+
     let verifyCalls = 0;
+    let secondCallBody: { location?: string; confirmLevelMismatch?: boolean } | null = null;
     await page.route('**/api/pulls/verify', async (route) => {
       verifyCalls++;
-      const body = route.request().postDataJSON() as { confirmLevelMismatch?: boolean };
+      const body = route.request().postDataJSON() as { confirmLevelMismatch?: boolean; location?: string };
       if (!body.confirmLevelMismatch) {
         await route.fulfill({
           status: 400,
@@ -170,6 +223,7 @@ test.describe('PIP — Pallet ID Pull flow', () => {
           body: JSON.stringify({ error: 'LEVEL_MISMATCH', scannedLevel: 1, actualLevel: 4 }),
         });
       } else {
+        secondCallBody = body;
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -182,15 +236,25 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     await page.getByRole('button', { name: '✓ Scan Label' }).click();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
 
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Alternate ID' }).getByRole('button').click();
-    await page.getByRole('button', { name: '✓ Alt ID' }).click();
+    // Focus the Location field, then deliver the scan directly via the hardware-scan path
+    // rather than the "✓ Location" footer demo button — a more direct simulation of a real
+    // barcode scan than a demo button click. The scanned value's digits don't matter to the
+    // mocked /api/pulls/verify route above, only whether confirmLevelMismatch is set.
+    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Location' }).getByRole('button').click();
+    await hardwareScan(page, '30105601');
 
-    await expect(page.getByText("Level doesn't match")).toBeVisible();
-    await expect(page.getByText(/You scanned Level 1.*Level 4/)).toBeVisible();
+    const dialog = page.getByTestId('level-correction-dialog');
+    await expect(dialog.getByText('What level was this pallet actually pulled from?')).toBeVisible();
+    await expect(dialog.getByText(/You scanned Level 1.*Level 4/)).toBeVisible();
 
-    await page.getByRole('button', { name: 'Confirm Pull' }).click();
+    // Type the corrected level (4) on the popup's own keypad and confirm.
+    await dialog.getByRole('button', { name: '4', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Confirm Level' }).click();
 
     await expect(page.getByText(/^Last Pull .* — /)).toBeVisible();
     expect(verifyCalls).toBe(2);
+    // The resubmitted location's level digits are the worker's correction (04), not the
+    // original scanned-but-wrong level (01) — aisle+bin are carried over unchanged.
+    expect(secondCallBody?.location?.slice(-2)).toBe('04');
   });
 });

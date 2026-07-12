@@ -149,8 +149,10 @@ export function ELAPage() {
                   Aisle
                 </span>
               </div>
-              {sizeCols.map((s) => (
-                <div key={s} className="flex-1 px-4 py-3 text-center">
+              {/* Subtle divider between size columns (issue #63) — border-l on every column
+                  after the first also separates the size columns from the Aisle column. */}
+              {sizeCols.map((s, i) => (
+                <div key={s} className={`flex-1 px-4 py-3 text-center ${i > 0 ? 'border-l border-[#1F1F1F]' : ''}`}>
                   <span className="font-ui text-[14px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
                     {s}
                   </span>
@@ -170,10 +172,10 @@ export function ELAPage() {
                   <div className="w-[140px] px-4 py-3 text-left">
                     <span className="font-data text-[20px] font-semibold text-white">{row.aisle}</span>
                   </div>
-                  {sizeCols.map((s) => {
+                  {sizeCols.map((s, i) => {
                     const cell = row.sizes.find((sz) => sz.size === s);
                     return (
-                      <div key={s} className="flex-1 px-4 py-3 text-center">
+                      <div key={s} className={`flex-1 px-4 py-3 text-center ${i > 0 ? 'border-l border-[#1F1F1F]' : ''}`}>
                         {cell && <CellValue empty={cell.empty} staged={cell.staged} large />}
                       </div>
                     );

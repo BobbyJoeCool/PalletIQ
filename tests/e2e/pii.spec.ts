@@ -60,6 +60,28 @@ test.describe('PII — Pallet ID Info', () => {
     await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible();
   });
 
+  // Issue #66: Save used to go through with an empty PATCH body (no-op "success") as
+  // long as a reason code happened to be picked. Entering edit mode with no field
+  // actually changed should leave Save disabled; changing one field should enable it.
+  test('Save is disabled until a field actually changes', async ({ page }) => {
+    await page.getByRole('button', { name: '✓ Scan PID' }).click();
+    await page.getByRole('button', { name: 'Edit' }).click();
+
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    const vcpField = page.getByLabel('VCP', { exact: true });
+    const original = await vcpField.inputValue();
+    await vcpField.fill(String(Number(original) + 1));
+    await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled();
+
+    // Same value, different formatting (e.g. a leading zero) — parsed comparison means
+    // this still counts as unchanged, not a raw string difference.
+    await vcpField.fill(original);
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+    await vcpField.fill(`0${original}`);
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
   test('"Go to Location ID" is disabled for an unlocated pallet, enabled for a located one', async ({ page }) => {
     // Demo pallet defaults to a stored (located) pallet — see api/functions/samples.ts.
     await page.getByRole('button', { name: '✓ Scan PID' }).click();

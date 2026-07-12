@@ -563,10 +563,14 @@ function buildLocationsAndPallets() {
   const bins1to84 = Array.from({ length: 84 }, (_, i) => i + 1)
   addAisle(803, bins1to84, 10, () => 1, () => 'XS', () => 'BS')
 
-  applyStaging(locations)
+  const staged = applyStaging(locations)
 
-  return { locations, pallets }
+  return { locations, pallets, staged }
 }
+
+/** One location staged by `applyStaging`, carried forward so a matching ActivityLog
+ *  entry (issue #52) can be generated for it after locations are inserted. */
+type StagedLocation = { aisle: number; bin: number; level: number; storageCode: string; size: string }
 
 /**
  * Demo staging data: converts a portion of each designated aisle's EMPTY locations to
@@ -578,8 +582,12 @@ function buildLocationsAndPallets() {
  * Fill order matches `findNextStagingLocation` (api/lib/stagingLogic.ts) exactly — highest
  * bin first, then lowest level within a bin — since that's the real order a GPMer would
  * fill an aisle from the back, not a random scatter.
+ *
+ * @returns every location just staged, for `buildStagingActivityLog` to generate a
+ *   matching ActivityLog STAGE entry against — SAR (Staged Aisle Report) derives a
+ *   location's "staged since" age from that log, not from any column on Location itself.
  */
-function applyStaging(locations: LocationRow[]) {
+function applyStaging(locations: LocationRow[]): StagedLocation[] {
   const STAGED_AISLES: Record<number, number> = {
     304: 1.00, // L / CR — fully staged
     306: 0.25, // M / CR
@@ -591,6 +599,7 @@ function applyStaging(locations: LocationRow[]) {
     701: 0.60, // mixed / RF
   }
 
+  const staged: StagedLocation[] = []
   for (const [aisleStr, pct] of Object.entries(STAGED_AISLES)) {
     const aisle = Number(aisleStr)
     const empties = locations
@@ -598,8 +607,57 @@ function applyStaging(locations: LocationRow[]) {
       .sort((a, b) => b.bin - a.bin || a.level - b.level)
 
     const stageCount = Math.round(empties.length * pct)
-    for (let i = 0; i < stageCount; i++) empties[i].status = 'STAGED'
+    for (let i = 0; i < stageCount; i++) {
+      empties[i].status = 'STAGED'
+      staged.push({ aisle, bin: empties[i].bin, level: empties[i].level, storageCode: empties[i].storageCode, size: empties[i].size })
+    }
   }
+  return staged
+}
+
+/**
+ * Builds one ActivityLog STAGE row per staged location (issue #52), with a realistic
+ * timestamp instead of "just now" — SAR's oldest-staged-location age otherwise reads as
+ * age-zero for the entire demo dataset, which doesn't look like real usage. Timestamps
+ * are random within the last 8 hours, except for 1-2 "outlier" locations per staged
+ * aisle seeded further back (1-3 days) for variety, matching how a real aisle would have
+ * some long-sitting staged pallets mixed in with recent ones. `userId` is randomized
+ * across the seeded demo users, since staging is accessible to every role.
+ */
+function buildStagingActivityLog(staged: StagedLocation[]) {
+  const now = Date.now()
+  const HOUR = 60 * 60 * 1000
+  const userPool = ['z002p21', 'z002p22', 'z002p23', 'z002p24', 'z002p25']
+
+  // Group by aisle so each aisle gets its own 1-2 outliers, not a global pool of them.
+  const byAisle = new Map<number, StagedLocation[]>()
+  for (const loc of staged) {
+    if (!byAisle.has(loc.aisle)) byAisle.set(loc.aisle, [])
+    byAisle.get(loc.aisle)!.push(loc)
+  }
+
+  const rows: { userId: string; actionType: string; locationAisle: number; locationBin: number; locationLevel: number; details: string; timestamp: Date }[] = []
+  for (const locs of byAisle.values()) {
+    const outlierCount = Math.min(locs.length, randomInt(1, 2))
+    const outlierIndexes = new Set<number>()
+    while (outlierIndexes.size < outlierCount) outlierIndexes.add(randomInt(0, locs.length - 1))
+
+    locs.forEach((loc, i) => {
+      const timestamp = outlierIndexes.has(i)
+        ? new Date(now - randomInt(24, 72) * HOUR) // 1-3 days back
+        : new Date(now - randomInt(0, 8 * 60 - 1) * 60_000) // last 8 hours
+      rows.push({
+        userId: randomFrom(userPool),
+        actionType: 'STAGE',
+        locationAisle: loc.aisle,
+        locationBin: loc.bin,
+        locationLevel: loc.level,
+        details: JSON.stringify({ storageCode: loc.storageCode, size: loc.size }),
+        timestamp,
+      })
+    })
+  }
+  return rows
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -663,10 +721,16 @@ async function main() {
   })), 100, (chunk) => prisma.item.createMany({ data: chunk as Parameters<typeof prisma.item.createMany>[0]['data'] }))
 
   // 4. Locations + Pallets
-  const { locations, pallets } = buildLocationsAndPallets()
+  const { locations, pallets, staged } = buildLocationsAndPallets()
 
   await insertInChunks('locations', locations, 500,
     (chunk) => prisma.location.createMany({ data: chunk })
+  )
+
+  // 4b. Staging activity log (issue #52) — gives SAR realistic "staged since" ages
+  // instead of every seeded staged location reading as age-zero.
+  await insertInChunks('staging activity log entries', buildStagingActivityLog(staged), 500,
+    (chunk) => prisma.activityLog.createMany({ data: chunk })
   )
 
   await insertInChunks('pallets', pallets, 500,

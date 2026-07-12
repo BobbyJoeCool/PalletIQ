@@ -88,17 +88,21 @@ export function ELZPage() {
     });
   }, [aisleField, hidePanel]);
 
-  // Query trigger: grid loads once both fields have values; re-runs on either change.
+  // Query trigger: grid loads from Aisle alone (issue #60 — Storage Code is no longer
+  // required); re-runs on either field's change. When Storage Code is present the zone
+  // summary narrows to it, same as before — the grid itself is never filtered by it.
   // (aisle/storageCode only ever move from empty to a submitted value — see focusAisleField
   // and focusStorageField — so there's no complete-to-incomplete transition to reset here.)
   useEffect(() => {
-    if (aisle == null || !storageCode) return;
+    if (aisle == null) return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetch-on-filter-change effect
     setLoading(true);
     setNotFound(false);
+    const params = new URLSearchParams({ aisle: String(aisle) });
+    if (storageCode) params.set('storageCode', storageCode);
     apiFetch<EmptyByZoneResult>(
-      `/api/locations/empty-by-zone?aisle=${aisle}&storageCode=${encodeURIComponent(storageCode)}`,
+      `/api/locations/empty-by-zone?${params.toString()}`,
       token!,
     )
       .then((data) => { if (!cancelled) setResult(data); })
@@ -147,10 +151,10 @@ export function ELZPage() {
       {/* Main area: grid + zone summary */}
       <div className="flex-1 flex gap-5 overflow-hidden">
         <div className="flex-1 overflow-auto">
-          {aisle == null || !storageCode ? (
+          {aisle == null ? (
             <div className="w-full h-full flex items-center justify-center">
               <p className="font-ui text-[18px] text-[#555]">
-                Enter an Aisle and Storage Code to view the zone map
+                Enter an Aisle to view the zone map
               </p>
             </div>
           ) : loading ? (
@@ -160,7 +164,7 @@ export function ELZPage() {
           ) : notFound || !result ? (
             <div className="w-full h-full flex items-center justify-center">
               <p className="font-ui text-[18px] text-[#555]">
-                No locations found for Aisle {aisle} — {storageCode}
+                No locations found for Aisle {aisle}{storageCode ? ` — ${storageCode}` : ''}
               </p>
             </div>
           ) : (

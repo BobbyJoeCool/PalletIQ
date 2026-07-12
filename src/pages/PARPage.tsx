@@ -1,4 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DpciField, type DpciValue } from '../components/shared/DpciField';
+import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
@@ -7,6 +9,13 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { useNumpadField } from '../lib/useNumpadField';
+
+/** Splits a formatted "078-01-0004" DPCI string (as returned by the sample-reinstate
+ *  demo endpoint) into DpciField's `{ dept, class, item }` shape. */
+function parseDpciString(s: string): DpciValue {
+  const [dept, cls, item] = s.split('-');
+  return { dept: dept ?? '', class: cls ?? '', item: item ?? '' };
+}
 
 interface ReinstateResult { palletId: number; status: 'PUT_PENDING' | 'STORED'; locationId: string | null }
 interface SampleReinstate { dpci: string; vcp: number; ssp: number; pallets: number; cartons: number; ssps: number }
@@ -45,35 +54,34 @@ export function PARPage() {
   const { hidePanel } = useNumpad();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
 
-  const dpciField = useNumpadField('keyboard');
+  const [dpci, setDpci] = useState<DpciValue>({ dept: '', class: '', item: '' });
   const vcpField = useNumpadField();
   const sspField = useNumpadField();
   const palletsField = useNumpadField();
   const cartonsField = useNumpadField();
   const sspsQtyField = useNumpadField();
-  const locationField = useNumpadField();
+  const [location, setLocation] = useState('');
 
   const [locationHighlight, setLocationHighlight] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  /** Registers the DPCI field's keyboard handler; on confirm, validates format and confirms the DPCI exists via the API (no pre-fill — Item has no vcp/ssp). */
-  const focusDpci = useCallback(() => {
-    dpciField.focus(async (v) => {
-      const trimmed = v.trim().toUpperCase();
-      dpciField.set(trimmed);
-      hidePanel();
-      const digits = trimmed.replace(/-/g, '');
-      if (!/^\d{9}$/.test(digits)) return;
-      try {
-        // Item model has no vcp/ssp (see IIDPage.tsx's note) — nothing to pre-fill from
-        // the item lookup itself; this call only confirms the DPCI exists ahead of submit.
-        await apiFetch(`/api/items/dpci/${digits}`, token!);
-      } catch {
-        playAlert('error');
-        setMessage({ type: 'error', text: 'DPCI not found' });
-      }
+  const dpciDigits = `${dpci.dept}${dpci.class}${dpci.item}`;
+
+  // DPCI-exists check (issue #68): DpciField is a plain controlled 3-box input with no
+  // explicit "confirm" step (unlike the old single on-screen-keyboard field), so the
+  // check now fires the moment all 3 boxes look complete (3/2/4 digits) instead of on a
+  // field confirm event. Item has no vcp/ssp (see IIDPage.tsx's note) — nothing to
+  // pre-fill from the lookup itself; this only confirms the DPCI exists ahead of submit.
+  useEffect(() => {
+    if (!/^\d{9}$/.test(dpciDigits)) return;
+    let cancelled = false;
+    apiFetch(`/api/items/dpci/${dpciDigits}`, token!).catch(() => {
+      if (cancelled) return;
+      playAlert('error');
+      setMessage({ type: 'error', text: 'DPCI not found' });
     });
-  }, [dpciField, hidePanel, token, setMessage]);
+    return () => { cancelled = true; };
+  }, [dpciDigits, token, setMessage]);
 
   /** Registers the VCP field's numpad handler. */
   const focusVcp = useCallback(() => vcpField.focus((v) => { vcpField.set(v.trim()); hidePanel(); }), [vcpField, hidePanel]);
@@ -85,12 +93,12 @@ export function PARPage() {
   const focusCartons = useCallback(() => cartonsField.focus((v) => { cartonsField.set(v.trim()); hidePanel(); }), [cartonsField, hidePanel]);
   /** Registers the SSPs quantity field's numpad handler. */
   const focusSspsQty = useCallback(() => sspsQtyField.focus((v) => { sspsQtyField.set(v.trim()); hidePanel(); }), [sspsQtyField, hidePanel]);
-  /** Registers the optional Location field's numpad handler; clears any prior "not empty" highlight on confirm. */
-  const focusLocation = useCallback(() => {
-    locationField.focus((v) => { locationField.set(v.trim()); setLocationHighlight(false); hidePanel(); });
-  }, [locationField, hidePanel]);
+  /** LocationEntryFields' onResolved — records the resolved location and clears any prior "not empty" highlight. */
+  const handleLocationResolved = useCallback((v: string) => {
+    setLocation(v);
+    setLocationHighlight(false);
+  }, []);
 
-  const dpciDigits = dpciField.value.replace(/-/g, '');
   const canSubmit =
     /^\d{9}$/.test(dpciDigits) &&
     vcpField.value.trim() !== '' &&
@@ -101,13 +109,13 @@ export function PARPage() {
 
   /** Resets every field on the form and clears the location "not empty" highlight. */
   function clearForm() {
-    dpciField.clear();
+    setDpci({ dept: '', class: '', item: '' });
     vcpField.clear();
     sspField.clear();
     palletsField.clear();
     cartonsField.clear();
     sspsQtyField.clear();
-    locationField.clear();
+    setLocation('');
     setLocationHighlight(false);
   }
 
@@ -126,7 +134,7 @@ export function PARPage() {
           pallets: parseInt(palletsField.value, 10),
           cartons: parseInt(cartonsField.value, 10),
           ssps: parseInt(sspsQtyField.value, 10),
-          locationId: locationField.value.trim() || null,
+          locationId: location || null,
         }),
       });
 
@@ -145,7 +153,7 @@ export function PARPage() {
         setMessage({ type: 'error', text: 'Location not found' });
       } else if (code === 'LOCATION_NOT_EMPTY') {
         setLocationHighlight(true);
-        setMessage({ type: 'error', text: `Location ${fmtLocation(locationField.value.trim())} is not empty — must be EMPTY to reinstate here` });
+        setMessage({ type: 'error', text: `Location ${fmtLocation(location)} is not empty — must be EMPTY to reinstate here` });
       } else {
         setMessage({ type: 'error', text: 'Create failed — please try again' });
       }
@@ -170,13 +178,13 @@ export function PARPage() {
   const demoCreate = useCallback(async () => {
     const sample = await fillSample();
     if (!sample) return;
-    dpciField.set(sample.dpci);
+    setDpci(parseDpciString(sample.dpci));
     vcpField.set(String(sample.vcp));
     sspField.set(String(sample.ssp));
     palletsField.set(String(sample.pallets));
     cartonsField.set(String(sample.cartons));
     sspsQtyField.set(String(sample.ssps));
-    locationField.clear();
+    setLocation('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fillSample]);
 
@@ -190,13 +198,13 @@ export function PARPage() {
       // 8-digit barcode the Location field/submit expect, or parseFullLocationBarcode
       // rejects it as malformed (issue #70 — this used to leave Level off entirely).
       const { locationId, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=empty', token!);
-      dpciField.set(sample.dpci);
+      setDpci(parseDpciString(sample.dpci));
       vcpField.set(String(sample.vcp));
       sspField.set(String(sample.ssp));
       palletsField.set(String(sample.pallets));
       cartonsField.set(String(sample.cartons));
       sspsQtyField.set(String(sample.ssps));
-      locationField.set(locationId + String(level).padStart(2, '0'));
+      setLocation(locationId + String(level).padStart(2, '0'));
     } catch {
       setMessage({ type: 'error', text: 'Demo fill unavailable' });
     }
@@ -205,13 +213,13 @@ export function PARPage() {
 
   /** Fills the form with a DPCI that doesn't exist, simulating a rejected create. */
   const demoBadDpci = useCallback(() => {
-    dpciField.set('999999000');
+    setDpci({ dept: '999', class: '99', item: '9000' });
     vcpField.set('12');
     sspField.set('12');
     palletsField.set('1');
     cartonsField.set('12');
     sspsQtyField.set('0');
-    locationField.clear();
+    setLocation('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -223,13 +231,13 @@ export function PARPage() {
       // See demoToLocation's comment above — level must be appended to form the full
       // 8-digit barcode (issue #70).
       const { locationId, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=occupied', token!);
-      dpciField.set(sample.dpci);
+      setDpci(parseDpciString(sample.dpci));
       vcpField.set(String(sample.vcp));
       sspField.set(String(sample.ssp));
       palletsField.set(String(sample.pallets));
       cartonsField.set(String(sample.cartons));
       sspsQtyField.set(String(sample.ssps));
-      locationField.set(locationId + String(level).padStart(2, '0'));
+      setLocation(locationId + String(level).padStart(2, '0'));
     } catch {
       setMessage({ type: 'error', text: 'Demo fill unavailable' });
     }
@@ -269,8 +277,15 @@ export function PARPage() {
 
   return (
     <div className="absolute inset-0 flex flex-col p-6 gap-5 select-none overflow-y-auto">
-      <div className="flex flex-wrap gap-4">
-        <FieldDisplay label="DPCI" value={dpciField.value} onFocus={focusDpci} active={dpciField.isActive} width="w-[240px]" />
+      <div className="flex flex-wrap items-end gap-4">
+        {/* 3-box DPCI entry (issue #68) — matches how DPCI is entered/displayed elsewhere
+            in the app (e.g. PII's edit mode), instead of the old single keyboard field.
+            Wrapped with our own vertical label to match FieldDisplay's convention used by
+            the rest of this row; DpciField's own label is suppressed (label=""). */}
+        <div className="flex flex-col gap-1">
+          <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
+          <DpciField value={dpci} onChange={setDpci} label="" />
+        </div>
         <FieldDisplay label="VCP" value={vcpField.value} onFocus={focusVcp} active={vcpField.isActive} width="w-[140px]" />
         <FieldDisplay label="SSP" value={sspField.value} onFocus={focusSsp} active={sspField.isActive} width="w-[140px]" />
       </div>
@@ -279,14 +294,15 @@ export function PARPage() {
         <FieldDisplay label="Cartons per Pallet" value={cartonsField.value} onFocus={focusCartons} active={cartonsField.isActive} width="w-[220px]" />
         <FieldDisplay label="SSPs" value={sspsQtyField.value} onFocus={focusSspsQty} active={sspsQtyField.isActive} width="w-[160px]" />
       </div>
-      <FieldDisplay
-        label="Location (optional)"
-        value={locationField.value}
-        onFocus={focusLocation}
-        active={locationField.isActive}
-        highlight={locationHighlight}
-        width="w-[240px]"
-      />
+      {/* 3-box Aisle/Bin/Level entry (issue #69) — same treatment as the DPCI fix above.
+          Location stays optional here (unlike LII/WLH): leaving all three boxes blank is
+          valid, and the shared LocationEntryFields component's value/highlight props
+          (added for this issue) let the demo buttons prefill it and let a rejected submit
+          highlight it, without forcing completion. */}
+      <div className="flex flex-col gap-1">
+        <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">Location (optional)</span>
+        <LocationEntryFields value={location} onResolved={handleLocationResolved} highlight={locationHighlight} autoFocus={false} />
+      </div>
 
       <button
         type="button"

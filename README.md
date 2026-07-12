@@ -28,7 +28,7 @@ PalletIQ is designed as a focused improvement on a real system I used for years.
 
 PalletIQ covers four core functions:
 
-- **Pull** — a single screen handling every pull type (Carton Air, Full Pallet, Bulk, Carton Floor), driven by pull labels and confirmed through a two-path verification system (Pallet ID or an alternate UPC/location scan).
+- **Pull** — a single screen handling every pull type (Carton Air, Full Pallet, Bulk, Carton Floor), driven by pull labels and confirmed through independent Pallet ID, UPC, or Location verification fields — any one completing the pull.
 - **Put** — both directed put-away (the system tells you where to go, with zone logic that respects how aisles actually get staged) and manual put (you tell the system where you put it, with safety checks).
 - **Pallet ID and Location ID lookup** — full detail screens for any pallet or any location, reachable by tapping any pallet or location reference anywhere in the app.
 - **Empty Locations** — both an aisle-level summary and a visual, zone-by-zone map of an aisle's open locations, built for the person physically staging that aisle.

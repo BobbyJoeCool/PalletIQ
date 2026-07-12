@@ -9,9 +9,13 @@ import { HOLD_REASON_CODES } from '../../lib/holdReasonCodes';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ReasonCodeField } from './ReasonCodeField';
 
-type HoldCategory = 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM';
+export type HoldCategory = 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM';
 
-const HOLD_LABELS: Record<HoldCategory, { name: string; blocks: string; placeRole: Role }> = {
+// Exported for WLH's Range mode (issue #14), which needs the same hold-type names/roles
+// for its own hold-type button list — a range action has no single "current hold" to
+// react to the way HoldPanel's own placeableTypes computation does, so it can't just
+// reuse this component wholesale, but shouldn't duplicate these labels either.
+export const HOLD_LABELS: Record<HoldCategory, { name: string; blocks: string; placeRole: Role }> = {
   HOLD_IN:   { name: 'Hold Inbound',   blocks: 'Blocks new puts to this location',                    placeRole: 'IM' },
   HOLD_OUT:  { name: 'Hold Outbound',  blocks: 'Blocks new label generation for this location',       placeRole: 'IM' },
   HOLD_BOTH: { name: 'Hold Both',      blocks: 'Blocks puts and new label generation',                placeRole: 'WORKER' },

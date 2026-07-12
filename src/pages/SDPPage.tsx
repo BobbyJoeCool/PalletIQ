@@ -667,7 +667,7 @@ export function SDPPage() {
                   type="button"
                   onClick={() => setSizeLocked(l => !l)}
                   disabled={locked}
-                  className={`h-[26px] px-3 rounded-[6px] font-ui text-[12px] font-medium self-start transition-colors disabled:opacity-40 ${sizeLocked ? 'bg-[#003366] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
+                  className={`h-[52px] px-6 rounded-[10px] font-ui text-[24px] font-medium self-center transition-colors disabled:opacity-40 ${sizeLocked ? 'bg-[#003366] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
                 >
                   {sizeLocked ? 'Locked' : 'Lock'}
                 </button>
@@ -678,7 +678,7 @@ export function SDPPage() {
                   type="button"
                   onClick={() => setStorageLocked(l => !l)}
                   disabled={locked}
-                  className={`h-[26px] px-3 rounded-[6px] font-ui text-[12px] font-medium self-start transition-colors disabled:opacity-40 ${storageLocked ? 'bg-[#003366] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
+                  className={`h-[52px] px-6 rounded-[10px] font-ui text-[24px] font-medium self-center transition-colors disabled:opacity-40 ${storageLocked ? 'bg-[#003366] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
                 >
                   {storageLocked ? 'Locked' : 'Lock'}
                 </button>
@@ -702,7 +702,7 @@ export function SDPPage() {
                   type="button"
                   onClick={() => setZoneLocked(l => !l)}
                   disabled={locked}
-                  className={`h-[26px] px-3 rounded-[6px] font-ui text-[12px] font-medium self-start transition-colors disabled:opacity-40 ${zoneLocked ? 'bg-[#003366] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
+                  className={`h-[52px] px-6 rounded-[10px] font-ui text-[24px] font-medium self-center transition-colors disabled:opacity-40 ${zoneLocked ? 'bg-[#003366] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
                 >
                   {zoneLocked ? 'Locked' : 'Lock'}
                 </button>
@@ -711,21 +711,12 @@ export function SDPPage() {
           )}
         </div>
 
-        {/* Applying-overrides summary (issue #50) — every selected override is combined
-            with AND when the system searches for a location, but nothing on screen
-            confirmed that plainly, which read as "it only applies one." */}
-        {isIM && (sizeOverride || storageOverride || zoneOverride != null) && (
-          <p className="font-ui text-[13px] text-[#9A9A9A]">
-            Applying:{' '}
-            {[
-              sizeOverride && `Size ${sizeOverride}`,
-              storageOverride && `Storage ${storageOverride}`,
-              zoneOverride != null && `Zone ${zoneOverride}`,
-            ].filter(Boolean).join(' + ')}
-          </p>
-        )}
-
-        {/* Consolidating toggle (IM+ only) + directed-to readout */}
+        {/* Consolidating toggle (IM+ only) + Applying-overrides badge / directed-to readout.
+            issue #64: the Applying summary used to be its own paragraph above this row,
+            shifting the whole layout when it appeared/disappeared/got replaced by "Put in."
+            Now it lives in this same row, next to Consolidating, and is mutually exclusive
+            with "Put in" (screenState !== 'directed' vs. === 'directed') — the slot's
+            *content* changes but nothing outside this row ever moves. */}
         {(isIM || (screenState === 'directed' && directed)) && (
           <div className="flex items-center gap-4">
             {isIM && (
@@ -733,10 +724,23 @@ export function SDPPage() {
                 type="button"
                 onClick={() => setConsolidating(c => !c)}
                 disabled={locked}
-                className={`h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium transition-colors disabled:opacity-40 ${consolidating ? 'bg-[#CC0000] text-white' : 'border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555]'}`}
+                className={`h-[57px] px-6 rounded-[10px] font-ui text-[22px] font-medium transition-colors disabled:opacity-40 ${consolidating ? 'bg-[#CC0000] text-white' : 'border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555]'}`}
               >
                 Consolidating
               </button>
+            )}
+            {/* Applying-overrides summary (issue #50) — every selected override is combined
+                with AND when the system searches for a location, but nothing on screen
+                confirmed that plainly, which read as "it only applies one." */}
+            {isIM && screenState !== 'directed' && (sizeOverride || storageOverride || zoneOverride != null) && (
+              <span className="px-3 py-1.5 rounded-[10px] border border-[#3A3A3A] font-ui text-[13px] text-[#9A9A9A]">
+                Applying:{' '}
+                {[
+                  sizeOverride && `Size ${sizeOverride}`,
+                  storageOverride && `Storage ${storageOverride}`,
+                  zoneOverride != null && `Zone ${zoneOverride}`,
+                ].filter(Boolean).join(' + ')}
+              </span>
             )}
             {screenState === 'directed' && directed && (
               <span className="flex items-center gap-3 px-4 py-1.5 rounded-[10px] bg-[#CC0000]/10 border-2 border-[#CC0000]/40">
@@ -746,7 +750,7 @@ export function SDPPage() {
                 <LiveId
                   type="location"
                   id={directed.directedLocation}
-                  className="!text-[32px] !font-bold !text-[#FF1A1A]"
+                  className="!text-[64px] !font-bold !text-[#FF1A1A]"
                 />
               </span>
             )}

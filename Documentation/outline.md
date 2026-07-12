@@ -111,9 +111,9 @@ A location barcode encodes Aisle (3 digits) + Bin (3 digits) + Level (2 digits) 
 
 Because handheld scanners cannot always reach upper levels, **the system reads only the first 6 digits (Aisle + Bin) of any scanned location barcode and discards the level.** A put or pull is confirmed at the bin level, not the specific level, regardless of which level's barcode was physically scanned.
 
-**Exception — PIP Alternate ID on a Full Pallet (FP) pull.** Because FP takes every carton and empties the location entirely, and a single bin can have several stacked levels each potentially holding a different pallet/DPCI, PIP's Alternate ID verification checks that the level matches too when the pull function is FP, once aisle + bin already match. CA and CF keep the bin-level-only rule described above regardless of what level (if any) was scanned.
+**Exception — PIP's Location field on a Full Pallet (FP) pull.** Because FP takes every carton and empties the location entirely, and a single bin can have several stacked levels each potentially holding a different pallet/DPCI, PIP's Location-field verification checks that the level matches too when the pull function is FP, once aisle + bin already match. CA and CF keep the bin-level-only rule described above regardless of what level (if any) was scanned.
 
-If the scanned level doesn't match the pallet's actual level on an FP pull, the worker isn't rejected outright — PIP shows a confirm dialog ("Level doesn't match — you scanned Level X, actual is Level Y") so they can either back out (treated as an ordinary invalid Alternate ID) or confirm the pull anyway, in case the level markings are stale or the barcode was misread. A true aisle/bin mismatch is still rejected immediately with no confirm step, on any pull function.
+If the scanned level doesn't match the pallet's actual level on an FP pull, the worker isn't rejected outright — PIP opens a popup asking what level the pallet was actually pulled from, and the worker types it in (accepted as their attestation, not re-validated against the record); that corrected level replaces the scanned one and the pull completes. Backing out of the popup is treated as an ordinary invalid Location. A true aisle/bin mismatch is still rejected immediately with no popup, on any pull function.
 
 ---
 
@@ -157,12 +157,13 @@ XS-size locations are always CA regardless of level. Pull function selection on 
 
 If the scanned label's status is not Pending, the system plays an audio alert and the message bar shows `Invalid status: {status}`. The screen does not advance to State 2 in this case.
 
-**State 3 — Verification.** Two distinct fields handle pull confirmation:
+**State 3 — Verification.** Three independent fields handle pull confirmation (the old single "Alternate ID" field was split into its own UPC and Location fields in issue #82):
 
 - **Pallet ID field** (auto-focused after a label scan) — accepts only the pallet ID associated with the label's location. A mismatch triggers an audio alert and message bar text `Incorrect Pallet ID`.
-- **Alternate ID field** — accepts the item's UPC, a scanned location barcode, or a manually typed location. A mismatch triggers an audio alert and message bar text `Invalid Alternate ID`.
+- **UPC field** — accepts the item's UPC. A mismatch triggers an audio alert and message bar text `Invalid UPC`.
+- **Location field** — accepts a scanned location barcode or a manually typed location. A mismatch triggers an audio alert and message bar text `Invalid Location`. On a Full Pallet (FP) pull, see the Location Barcode Handling exception above for what happens when aisle+bin match but level doesn't.
 
-Either field completing successfully confirms the pull — they are two paths to the same outcome, not sequential steps.
+Any one field completing successfully confirms the pull — they are three paths to the same outcome, not sequential steps.
 
 On successful verification:
 
@@ -318,6 +319,12 @@ A persistent, queryable record of transactional events — not a flat file, stor
 **Logged events** include, at minimum: put confirmed, pull confirmed, pallet moved, hold placed, hold removed, pallet field edited, location unassigned, blocked put, and the Manual Put pallet-ID scan described above.
 
 Each entry captures, at minimum: timestamp, acting user, action type, and the relevant pallet ID / location ID / DPCI, with action-specific details (e.g. old value/new value on an edit, hold reason code) captured in a flexible field rather than a rigid fixed-column structure.
+
+### App-Wide Activity Overlay
+
+Every authenticated screen's header carries a persistent **"☰ Activity"** button, alongside the existing Back, Home, and Jump controls. Tapping it opens a full-screen overlay showing the logged-in worker's own complete activity across every function for the last rolling 12 hours — a Put shows up even while the worker is on the Pull screen, a Stage shows up even while on Location Hold, and so on. Entries are chronological, most recent first, each rendered as a function tag + timestamp on one line (e.g. `PUT · 10:42 AM`) with a free-form detail line below it (e.g. `Put pallet to 305-12-2`). The window is recalculated fresh from stored timestamps every time the overlay opens, so it survives a reload rather than resetting with the session.
+
+This is separate from each screen's own existing session-local log/history panel (e.g. STG's collapsed bar, or the history lists on PIP/SDP/MNP) — those still show only that one screen's own session activity and were deliberately left unchanged; the header's Activity overlay is the one new, cross-function view.
 
 ---
 

@@ -29,42 +29,40 @@ flowchart TD
     S3[State: verifying\nstores labelData\npidField auto-focuses\nvia useEffect on screenState]
 
     S3 --> RESCAN{New label\nscanned while verifying?}
-    RESCAN -->|Yes — handleLabelScan\nissue #45: no status-bar\nupdate on a plain rescan| RELOAD[Clear PID + Alt fields\nreload label data\nsilently]
+    RESCAN -->|Yes — handleLabelScan\nissue #45: no status-bar\nupdate on a plain rescan| RELOAD[Clear PID + UPC + Location fields\nreload label data\nsilently]
     RELOAD --> S3
 
     S3 --> VER_PATH{Worker scans one of:}
 
     VER_PATH -->|Pallet ID\nPID field| PID_VERIFY[POST /api/pulls/verify\nwith palletId\napi/functions/pulls.ts — verifyPull]
-    VER_PATH -->|Alternate ID\nAlt ID field| ALT_VERIFY[POST /api/pulls/verify\nwith alternateId\napi/functions/pulls.ts — verifyPull]
+    VER_PATH -->|UPC\nUPC field — issue #82| UPC_VERIFY[POST /api/pulls/verify\nwith upc\napi/functions/pulls.ts — verifyPull]
+    VER_PATH -->|Location\nLocation field — issue #82| LOC_VERIFY[POST /api/pulls/verify\nwith location\napi/functions/pulls.ts — verifyPull]
 
     PID_VERIFY --> PID_OK{Result?}
     PID_OK -->|PALLET_MISMATCH| ERR_PID[Error: Incorrect Pallet ID\npidField cleared + re-focused]
     PID_OK -->|WRONG_PULL_FUNCTION| ERR_PID2[Error: Pull function mismatch]
     PID_OK -->|OK| SUCCESS
 
-    ALT_VERIFY --> ALT_UPC{UPC match?}
-    ALT_UPC -->|Yes| ALT_OK
-    ALT_UPC -->|No| ALT_BIN{aisle+bin match?}
-    ALT_BIN -->|No| ALT_OK
-    ALT_BIN -->|Yes| ALT_FN{pullFunction?}
-    ALT_FN -->|CA/CF\nlevel ignored| ALT_OK
-    ALT_FN -->|FP| ALT_LEVEL{level also\nmatches?}
-    ALT_LEVEL -->|Yes| ALT_OK
-    ALT_LEVEL -->|No — issues #48/#49\nLEVEL_MISMATCH 400| CONFIRM[ConfirmDialog:\nLevel doesn't match\nYou scanned Level X /\nactual is Level Y]
-    CONFIRM -->|Cancel — cancelLevelMismatch| ERR_ALT
-    CONFIRM -->|Confirm Pull —\nresubmit with\nconfirmLevelMismatch: true| ALT_OK
+    UPC_VERIFY --> UPC_OK{UPC match\nagainst pallet's DPCI?}
+    UPC_OK -->|No — ALTERNATE_MISMATCH| ERR_UPC[Error: Invalid UPC\nupcField cleared + re-focused]
+    UPC_OK -->|Yes| SUCCESS
 
-    ALT_OK{Result?}
-    ALT_OK -->|ALTERNATE_MISMATCH| ERR_ALT[Error: Invalid Alternate ID\naltField cleared + re-focused]
-    ALT_OK -->|WRONG_PULL_FUNCTION| ERR_ALT2[Error: Pull function mismatch]
-    ALT_OK -->|OK| SUCCESS
+    LOC_VERIFY --> LOC_BIN{aisle+bin match?}
+    LOC_BIN -->|No — ALTERNATE_MISMATCH| ERR_LOC[Error: Invalid Location\nlocationField cleared + re-focused]
+    LOC_BIN -->|Yes| LOC_FN{pullFunction?}
+    LOC_FN -->|CA/CF\nlevel ignored| SUCCESS
+    LOC_FN -->|FP| LOC_LEVEL{level also\nmatches?}
+    LOC_LEVEL -->|Yes| SUCCESS
+    LOC_LEVEL -->|No — issues #48/#49\nLEVEL_MISMATCH 400| CORRECT[LevelCorrectionDialog — issue #72:\nWhat level was this pallet\nactually pulled from?\nworker types the level]
+    CORRECT -->|Cancel — cancelLevelMismatch\ntreated as Invalid Location| ERR_LOC
+    CORRECT -->|Confirm Level —\nresubmit corrected level +\nconfirmLevelMismatch: true| SUCCESS
 
     ERR_PID --> S3
     ERR_PID2 --> S3
-    ERR_ALT --> S3
-    ERR_ALT2 --> S3
+    ERR_UPC --> S3
+    ERR_LOC --> S3
 
-    SUCCESS[onPullSuccess\nlabel marked PULLED\nquantities deducted\nwriteLog PUT_PULL]
+    SUCCESS[onPullSuccess\nlabel marked PULLED\nquantities deducted\nwriteLog PULL]
 
     SUCCESS --> HIST[Append history entry\nlocation + updatedQty + timestamp]
     HIST --> MSG[MessageBar: success\nPull location + remaining qty]
@@ -78,6 +76,6 @@ flowchart TD
     style ERR_L3 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_PID fill:#330000,stroke:#660000,color:#ff8080
     style ERR_PID2 fill:#330000,stroke:#660000,color:#ff8080
-    style ERR_ALT fill:#330000,stroke:#660000,color:#ff8080
-    style ERR_ALT2 fill:#330000,stroke:#660000,color:#ff8080
-    style CONFIRM fill:#332200,stroke:#665500,color:#ffcc66
+    style ERR_UPC fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_LOC fill:#330000,stroke:#660000,color:#ff8080
+    style CORRECT fill:#332200,stroke:#665500,color:#ffcc66

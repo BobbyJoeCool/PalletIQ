@@ -6,6 +6,7 @@ import { NavLockProvider, useNavLockContext } from '../../context/NavLockContext
 import { NumpadProvider, useNumpad } from '../../context/NumpadContext';
 import { Keyboard } from '../input/Keyboard';
 import { Numpad } from '../input/Numpad';
+import { ActivityLogOverlay } from './ActivityLogOverlay';
 import { Footer } from './Footer';
 import { Header } from './Header';
 import { HotJump } from './HotJump';
@@ -50,6 +51,7 @@ const SCANNER_THRESHOLD_MS = 50;
 function ShellInner() {
   const location = useLocation();
   const [jumpOpen, setJumpOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const { activePanel, deliverScan, hidePanel, setKeyHandler } = useNumpad();
   const { locked: navLocked } = useNavLockContext();
 
@@ -98,7 +100,13 @@ function ShellInner() {
 
   return (
     <div className="fixed inset-0 flex flex-col bg-black">
-      <Header title={title} onJump={() => setJumpOpen(true)} disableNav={isHome} locked={navLocked} />
+      <Header
+        title={title}
+        onJump={() => setJumpOpen(true)}
+        onActivity={() => setActivityOpen(true)}
+        disableNav={isHome}
+        locked={navLocked}
+      />
       <MessageBar />
 
       {/* Main content slot — 792 px tall (1024 − 104 − 74 − 54) */}
@@ -111,6 +119,7 @@ function ShellInner() {
       <Footer />
 
       {jumpOpen && <HotJump onClose={() => setJumpOpen(false)} />}
+      {activityOpen && <ActivityLogOverlay onClose={() => setActivityOpen(false)} />}
     </div>
   );
 }

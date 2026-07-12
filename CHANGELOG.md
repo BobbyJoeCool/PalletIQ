@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.5.0 — 2026-07-12](#150--2026-07-12)
 - [1.4.5 — 2026-07-11](#145--2026-07-11)
 - [1.4.4 — 2026-07-11](#144--2026-07-11)
 - [1.4.3 — 2026-07-11](#143--2026-07-11)
@@ -57,31 +58,118 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Major/Important
 
-- [#14](https://github.com/BobbyJoeCool/PalletIQ/issues/14) — Add ability to put ranges on hold (WLH)
-- [#15](https://github.com/BobbyJoeCool/PalletIQ/issues/15) — Add helper bar button to select a location on hold (WLH)
-- [#65](https://github.com/BobbyJoeCool/PalletIQ/issues/65) — SDP: enlarge the Consolidating and lock toggle buttons
-- [#72](https://github.com/BobbyJoeCool/PalletIQ/issues/72) — PIP: Full Pallet Alt-ID wrong-level popup should collect the correct level instead of just confirming/rejecting
+No issues currently open in this category.
 
 ### Minor
 
-- [#64](https://github.com/BobbyJoeCool/PalletIQ/issues/64) — SDP: "Applying Size" indicator should sit next to the Consolidation button instead of shifting the screen
-- [#66](https://github.com/BobbyJoeCool/PalletIQ/issues/66) — PII: block Save on edit-pallet when no fields actually changed
-- [#68](https://github.com/BobbyJoeCool/PalletIQ/issues/68) — PAR: DPCI entry should be split into 3 boxes
-- [#69](https://github.com/BobbyJoeCool/PalletIQ/issues/69) — PAR: Location entry should be split into 3 boxes
+No issues currently open in this category.
 
 ### Nice-to-have/Cosmetic
 
-- [#46](https://github.com/BobbyJoeCool/PalletIQ/issues/46) — Persist team member activity log across screens for the last 12 hours
-- [#52](https://github.com/BobbyJoeCool/PalletIQ/issues/52) — Demo reseed should generate randomly-staged aisles with realistic timestamps, so SAR looks realistic in demos
-- [#61](https://github.com/BobbyJoeCool/PalletIQ/issues/61) — PIP/SDP: double the font size of the location display
-- [#62](https://github.com/BobbyJoeCool/PalletIQ/issues/62) — PIP/SDP: combine "Pull Quantity" and "Remaining" rows to save space
-- [#63](https://github.com/BobbyJoeCool/PalletIQ/issues/63) — ELA: add a subtle divider between size columns
 - [#73](https://github.com/BobbyJoeCool/PalletIQ/issues/73) — STG: move Fill All and Unstage Aisle buttons onto the operator compartment
 - [#76](https://github.com/BobbyJoeCool/PalletIQ/issues/76) — STG: add a manual Refresh button
 
 ### Distant Future
 
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
+
+---
+
+## [1.5.0] — 2026-07-12
+
+A large batch closing 15 issues in one build session — two substantial new features (WLH
+Range Holds, the app-wide 12-hour Activity Log), a UPC/Location field split on PIP, and a
+dozen smaller fixes/refinements across ELA, ELZ, PII, PAR, SDP, and PIP:
+[#14](https://github.com/BobbyJoeCool/PalletIQ/issues/14),
+[#15](https://github.com/BobbyJoeCool/PalletIQ/issues/15),
+[#46](https://github.com/BobbyJoeCool/PalletIQ/issues/46),
+[#52](https://github.com/BobbyJoeCool/PalletIQ/issues/52),
+[#60](https://github.com/BobbyJoeCool/PalletIQ/issues/60),
+[#61](https://github.com/BobbyJoeCool/PalletIQ/issues/61),
+[#62](https://github.com/BobbyJoeCool/PalletIQ/issues/62),
+[#63](https://github.com/BobbyJoeCool/PalletIQ/issues/63),
+[#64](https://github.com/BobbyJoeCool/PalletIQ/issues/64),
+[#65](https://github.com/BobbyJoeCool/PalletIQ/issues/65),
+[#66](https://github.com/BobbyJoeCool/PalletIQ/issues/66),
+[#68](https://github.com/BobbyJoeCool/PalletIQ/issues/68),
+[#69](https://github.com/BobbyJoeCool/PalletIQ/issues/69),
+[#72](https://github.com/BobbyJoeCool/PalletIQ/issues/72), and
+[#82](https://github.com/BobbyJoeCool/PalletIQ/issues/82).
+
+### 1.5.0 — Added
+
+- **WLH: Range Mode.** Places or releases a hold across every location in a single-aisle
+  bin range (Start/End Bin, optionally restricted to odd or even bins) instead of one
+  location at a time — a new Single Location | Range toggle, IM+ only. Placing a range
+  hold applies a priority hierarchy (Hold Inbound = Hold Outbound < Hold Both < Hold
+  Permanent) so an existing higher-priority hold on any one location in the range is
+  never silently downgraded — opposing directional holds combine into Hold Both instead.
+  A confirmation step previews the exact range size before committing, and the outcome
+  (placed/upgraded/blocked, or released) is reported in the Message Bar as a breakdown.
+  ([#14](https://github.com/BobbyJoeCool/PalletIQ/issues/14))
+- **WLH: Find Held Location / Find Available Location.** Two new helper-bar buttons pick
+  one location at random — either currently on hold, or currently free of any hold — and
+  load it into the main entry area, the same as if it had been typed or scanned. Tapping
+  again re-rolls a new pick. ([#15](https://github.com/BobbyJoeCool/PalletIQ/issues/15))
+- **App-wide 12-hour Activity Log.** A new "Activity" button in the Header, available on
+  every authenticated screen, opens a full-screen overlay of the logged-in worker's
+  complete activity across every function (Put, Pull, Stage, Hold, etc.) for the last
+  rolling 12 hours — backed by real stored activity data, so it survives reloads and
+  isn't scoped to the current session. Each screen's own existing session-local
+  log/history display (STG's collapsed bar, PIP/SDP/MNP's history panels) is unchanged
+  and separate from this new overlay. ([#46](https://github.com/BobbyJoeCool/PalletIQ/issues/46))
+
+### 1.5.0 — Changed
+
+- **PIP: Alternate ID split into independent UPC and Location fields**, side by side,
+  replacing the old single combined field that silently guessed which format was
+  scanned. Confirming either field alone still immediately attempts a verify, exactly as
+  the combined field did — a UI/contract split, not a new "fill both" step. The backend
+  contract for `POST /api/pulls/verify` changes accordingly, from one `alternateId`
+  string to two independent `upc`/`location` params.
+  ([#82](https://github.com/BobbyJoeCool/PalletIQ/issues/82))
+- **PIP: Full Pallet Location wrong-level mismatch now collects the correct level**
+  instead of just confirming or rejecting the scanned-but-wrong one — a popup lets the
+  worker type the level the pallet was actually pulled from, which is then submitted in
+  place of the scanned level and recorded in the activity log for a paper trail.
+  ([#72](https://github.com/BobbyJoeCool/PalletIQ/issues/72))
+- **PIP/SDP: doubled the font size of the resolved-location display** for legibility at a
+  glance. ([#61](https://github.com/BobbyJoeCool/PalletIQ/issues/61))
+- **PIP/SDP: combined the Pull-Quantity and Remaining rows into one Current/Pull/Remaining
+  table**, freeing up space for the larger location display above.
+  ([#62](https://github.com/BobbyJoeCool/PalletIQ/issues/62))
+- **PAR: DPCI and Location entry are now split into 3 boxes each**, matching the pattern
+  already used elsewhere in the app, instead of a single free-text field per value.
+  ([#68](https://github.com/BobbyJoeCool/PalletIQ/issues/68),
+  [#69](https://github.com/BobbyJoeCool/PalletIQ/issues/69))
+- **SDP: enlarged the Consolidating button (50%) and the three lock-toggle buttons
+  (100%)** for easier tapping. ([#65](https://github.com/BobbyJoeCool/PalletIQ/issues/65))
+- **SDP: the "Applying Size" indicator now sits next to the Consolidating button**
+  instead of shifting the rest of the screen down a row.
+  ([#64](https://github.com/BobbyJoeCool/PalletIQ/issues/64))
+- **ELZ: the zone map now renders from Aisle alone** — Storage Code is no longer required
+  to see the physical layout grid, matching ELA's already-optional pattern.
+  ([#60](https://github.com/BobbyJoeCool/PalletIQ/issues/60))
+- **ELA: added a subtle divider between size columns** for readability when several are
+  shown side by side. ([#63](https://github.com/BobbyJoeCool/PalletIQ/issues/63))
+- **PII: Save is now disabled until a field actually changes**, preventing a no-op save
+  (and its reason-code prompt) when nothing was actually edited.
+  ([#66](https://github.com/BobbyJoeCool/PalletIQ/issues/66))
+- **Demo reseed now generates realistic staged-aisle ages** instead of every staged
+  location showing zero time-in-stage, so SAR (Staged Aisle Report) looks realistic in
+  demos. ([#52](https://github.com/BobbyJoeCool/PalletIQ/issues/52))
+
+### 1.5.0 — Fixed
+
+- **PIP: fixed a focus-management race** where entering the verifying state's
+  auto-focus-Pallet-ID effect could, in rare timing, steal focus back from the field a
+  worker had just manually selected, misrouting whatever they scanned next. Found and
+  fixed while verifying the UPC/Location split above — this race predates that split and
+  very likely explains flakiness previously seen in the old combined Alternate ID field
+  too.
+- **HoldPanel's reason-code dropdown now has a proper accessible name** even when its
+  visible heading is suppressed (as WLH's single-location hold flow does) — previously
+  had no accessible name at all in that configuration.
 
 ---
 

@@ -2,7 +2,7 @@ import { app } from '@azure/functions';
 import type { HttpRequest, InvocationContext } from '@azure/functions';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
-import { requireAuth, requireRole } from '../lib/permissions.js';
+import { requireAuth, requireRole, hasMinRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { sideOf } from '../lib/zoneLogic.js';
@@ -285,6 +285,246 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
   return { aisle, levels, zoneSummary };
 }
 
+/**
+ * Picks one location currently on hold, at random (issue #15 — WLH's "find a held
+ * location" helper-bar button, per DevNotes/DesignPrompts/Feature-4-WLH-Find-Held-Location.md).
+ * Not filtered by aisle, hold type, or anything else — works app-wide, and re-rolls a new
+ * random pick on every call, letting the worker "find one, then find another" by tapping
+ * repeatedly. Uses the same random-skip approach as the demo endpoints in samples.ts.
+ *
+ * @returns `{ locationId: string }` — 8-digit Aisle+Bin+Level id
+ * @throws 404 NOT_FOUND if no locations currently have a hold
+ */
+async function getRandomHeldLocation(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+
+  const where = { holdCategory: { not: null } };
+  const count = await prisma.location.count({ where });
+  if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+  const skip = Math.floor(Math.random() * count);
+  const location = await prisma.location.findFirst({ where, skip, select: { aisle: true, bin: true, level: true } });
+
+  return { locationId: formatLocationId(location!.aisle, location!.bin, location!.level) };
+}
+
+/**
+ * Picks one location currently free of any hold, at random (issue #15's second helper-bar
+ * button — the inverse of getRandomHeldLocation). Occupancy status (EMPTY/STORED/RESERVED/
+ * STAGED/PULL_PENDING) doesn't matter here — hold is an independent field from status, so
+ * any of those qualify as long as holdCategory is null.
+ *
+ * @returns `{ locationId: string }` — 8-digit Aisle+Bin+Level id
+ * @throws 404 NOT_FOUND if every location in the warehouse currently has a hold
+ */
+async function getRandomUnheldLocation(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+
+  const where = { holdCategory: null };
+  const count = await prisma.location.count({ where });
+  if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+  const skip = Math.floor(Math.random() * count);
+  const location = await prisma.location.findFirst({ where, skip, select: { aisle: true, bin: true, level: true } });
+
+  return { locationId: formatLocationId(location!.aisle, location!.bin, location!.level) };
+}
+
+// ── Range Hold (issue #14) ────────────────────────────────────────────────────
+//
+// A range is confined to a single aisle: one Aisle value, a Start/End Bin range within it,
+// and every level in each matching bin — no Level entry. See
+// DevNotes/DesignPrompts/Feature-3-WLH-Range-Hold.md for the full settled design.
+
+/** Range-mode's own floor, on top of whatever role a hold type already requires for a
+ *  single location — the more restrictive of the two always applies (enforced as two
+ *  separate requireRole calls in placeRangeHold/releaseRangeHold, not by computing a max). */
+const RANGE_FLOOR_ROLE: Role = 'IM';
+
+interface RangeParams { aisle: number; startBin: number; endBin: number; binSide: 'ALL' | 'ODD' | 'EVEN' }
+
+/** Parses and validates the range-request fields shared by all three range endpoints. */
+function parseRangeParams(raw: { aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown }): RangeParams {
+  const aisle = typeof raw.aisle === 'number' ? raw.aisle : NaN;
+  const startBin = typeof raw.startBin === 'number' ? raw.startBin : NaN;
+  const endBin = typeof raw.endBin === 'number' ? raw.endBin : NaN;
+  const binSide = raw.binSide === 'ODD' || raw.binSide === 'EVEN' ? raw.binSide : 'ALL';
+  if (!Number.isInteger(aisle) || !Number.isInteger(startBin) || !Number.isInteger(endBin) || startBin > endBin) {
+    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  }
+  return { aisle, startBin, endBin, binSide };
+}
+
+/** Builds the explicit list of bin numbers in [startBin, endBin] matching the side filter —
+ *  passed to Prisma as `bin: { in: bins }`, since side (odd/even) can't be expressed as a
+ *  Prisma `where` predicate directly. */
+function binsInRange({ startBin, endBin, binSide }: RangeParams): number[] {
+  const bins: number[] = [];
+  for (let b = startBin; b <= endBin; b++) {
+    if (binSide === 'ODD' && b % 2 === 0) continue;
+    if (binSide === 'EVEN' && b % 2 !== 0) continue;
+    bins.push(b);
+  }
+  return bins;
+}
+
+/**
+ * Returns the count of locations matching a range, before committing to a Place/Release
+ * action — feeds the confirmation modal's "N locations in range" summary. No role gate
+ * beyond the Range-mode IM+ floor; the actual Place/Release role checks happen at
+ * submission time in placeRangeHold/releaseRangeHold.
+ *
+ * @param req - HTTP request with query params `aisle`, `startBin`, `endBin`, `binSide?`
+ * @returns `{ total: number }`
+ * @throws 400 INVALID_INPUT for a bad range; 403 FORBIDDEN if caller is below IM
+ */
+async function getRangeLocationCount(req: HttpRequest): Promise<unknown> {
+  const auth = await requireAuth(req);
+  requireRole(auth, RANGE_FLOOR_ROLE);
+
+  const params = new URL(req.url).searchParams;
+  const range = parseRangeParams({
+    aisle: params.has('aisle') ? Number(params.get('aisle')) : undefined,
+    startBin: params.has('startBin') ? Number(params.get('startBin')) : undefined,
+    endBin: params.has('endBin') ? Number(params.get('endBin')) : undefined,
+    binSide: params.get('binSide') ?? undefined,
+  });
+
+  const total = await prisma.location.count({ where: { aisle: range.aisle, bin: { in: binsInRange(range) } } });
+  return { total };
+}
+
+// Hold hierarchy for Range Place, low to high: HI = HO < HB < HP (Range mode only — the
+// single-location Place flow always overwrites outright, no hierarchy). Determines the new
+// hold value and outcome bucket for locations currently holding `existing`; depends only on
+// the (requested, existing) pair, not on any individual location's identity, which is what
+// lets placeRangeHold batch-update by distinct existing-hold bucket instead of row-by-row.
+type PlaceOutcome = 'placed' | 'upgraded' | 'blocked';
+function resolveRangePlace(requested: string, existing: string | null): { next: string; outcome: PlaceOutcome } {
+  if (requested === 'HOLD_PERM') return { next: 'HOLD_PERM', outcome: 'placed' };
+  if (requested === 'HOLD_BOTH') {
+    return existing === 'HOLD_PERM' ? { next: existing, outcome: 'blocked' } : { next: 'HOLD_BOTH', outcome: 'placed' };
+  }
+  // requested is HOLD_IN or HOLD_OUT
+  const opposite = requested === 'HOLD_IN' ? 'HOLD_OUT' : 'HOLD_IN';
+  if (existing === opposite) return { next: 'HOLD_BOTH', outcome: 'upgraded' };
+  if (existing === 'HOLD_BOTH' || existing === 'HOLD_PERM') return { next: existing, outcome: 'blocked' };
+  return { next: requested, outcome: 'placed' };
+}
+
+/**
+ * Places a hold across every location in a single-aisle bin range (issue #14). Requires
+ * IM+ to use Range mode at all, on top of whichever role the requested hold type already
+ * requires for a single location — e.g. Permanent still requires Lead+ even in Range mode,
+ * since an IM doesn't meet Permanent's own single-location floor either (checked as two
+ * separate requireRole calls, so the stricter one naturally wins). Evaluates the hold
+ * hierarchy independently per distinct existing-hold bucket (see resolveRangePlace), since
+ * a single range action can produce a mix of placed/upgraded/blocked outcomes across it.
+ *
+ * @param req - HTTP request with body
+ *   `{ aisle, startBin, endBin, binSide?, holdType, reasonCode }`
+ * @returns `{ total, placed, upgraded, blocked }`
+ * @throws 400 INVALID_INPUT for a bad range or missing/invalid holdType or reasonCode;
+ *   403 FORBIDDEN if the caller doesn't meet both the Range-mode IM+ floor and the hold
+ *   type's own single-location role requirement
+ */
+async function placeRangeHold(req: HttpRequest): Promise<unknown> {
+  const auth = await requireAuth(req);
+  requireRole(auth, RANGE_FLOOR_ROLE);
+
+  const body = await req.json() as {
+    aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown;
+    holdType?: string; reasonCode?: string;
+  };
+  const range = parseRangeParams(body);
+  if (!body.holdType || !(body.holdType in HOLD_PLACE_MIN_ROLE) || !body.reasonCode) {
+    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  }
+  requireRole(auth, HOLD_PLACE_MIN_ROLE[body.holdType]);
+
+  const bins = binsInRange(range);
+
+  // Snapshot every bucket's count BEFORE any writes — updating bucket-by-bucket in a single
+  // pass would let an earlier write (e.g. null → HOLD_IN) get counted *again* by a later
+  // bucket in the same request whose existing-value happens to equal what was just written
+  // (exactly HOLD_IN here), double-counting those rows. Counting everything up front against
+  // the pre-write state, then applying writes from that frozen snapshot, avoids it.
+  const buckets: { existing: string | null; count: number }[] = [];
+  for (const existing of [null, 'HOLD_IN', 'HOLD_OUT', 'HOLD_BOTH', 'HOLD_PERM'] as const) {
+    const count = await prisma.location.count({ where: { aisle: range.aisle, bin: { in: bins }, holdCategory: existing } });
+    if (count > 0) buckets.push({ existing, count });
+  }
+
+  let placed = 0, upgraded = 0, blocked = 0;
+  for (const { existing, count } of buckets) {
+    const { next, outcome } = resolveRangePlace(body.holdType, existing);
+    if (outcome === 'blocked') {
+      blocked += count;
+      continue;
+    }
+    await prisma.location.updateMany({ where: { aisle: range.aisle, bin: { in: bins }, holdCategory: existing }, data: { holdCategory: next } });
+    if (outcome === 'upgraded') upgraded += count; else placed += count;
+  }
+  const total = placed + upgraded + blocked;
+
+  await writeLog({
+    userId: auth.zNumber,
+    actionType: 'RANGE_HOLD',
+    locationAisle: range.aisle,
+    details: {
+      startBin: range.startBin, endBin: range.endBin, binSide: range.binSide,
+      holdType: body.holdType, reasonCode: body.reasonCode, placed, upgraded, blocked,
+    },
+  });
+
+  return { total, placed, upgraded, blocked };
+}
+
+/**
+ * Releases (clears) whatever hold, if any, currently exists on every location in a
+ * single-aisle bin range (issue #14) — no hierarchy involved, Release always just clears.
+ * Requires IM+ to attempt at all; clearing a Permanent hold specifically still requires
+ * Lead+, checked per existing-hold bucket found in the range — an IM's range-release simply
+ * skips any Permanent-held locations it encounters (reported as blocked) rather than
+ * failing the whole action outright.
+ *
+ * @param req - HTTP request with body `{ aisle, startBin, endBin, binSide? }`
+ * @returns `{ total, released, blocked }`
+ * @throws 400 INVALID_INPUT for a bad range; 403 FORBIDDEN if caller is below IM
+ */
+async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
+  const auth = await requireAuth(req);
+  requireRole(auth, RANGE_FLOOR_ROLE);
+
+  const body = await req.json() as { aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown };
+  const range = parseRangeParams(body);
+  const bins = binsInRange(range);
+
+  let released = 0, blocked = 0;
+  for (const existing of ['HOLD_IN', 'HOLD_OUT', 'HOLD_BOTH', 'HOLD_PERM'] as const) {
+    const where = { aisle: range.aisle, bin: { in: bins }, holdCategory: existing };
+    const count = await prisma.location.count({ where });
+    if (count === 0) continue;
+
+    if (!hasMinRole(auth.role, HOLD_REMOVE_MIN_ROLE[existing])) {
+      blocked += count;
+      continue;
+    }
+    await prisma.location.updateMany({ where, data: { holdCategory: null } });
+    released += count;
+  }
+  const total = released + blocked;
+
+  await writeLog({
+    userId: auth.zNumber,
+    actionType: 'RANGE_REL',
+    locationAisle: range.aisle,
+    details: { startBin: range.startBin, endBin: range.endBin, binSide: range.binSide, released, blocked },
+  });
+
+  return { total, released, blocked };
+}
+
 // ── PATCH /api/locations/:id/hold ─────────────────────────────────────────────
 
 /**
@@ -418,6 +658,20 @@ app.http('getLocationsEmptyByZone', {
   handler: withHandler(getLocationsEmptyByZone),
 });
 
+app.http('getRandomHeldLocation', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'locations/random-held',
+  handler: withHandler(getRandomHeldLocation),
+});
+
+app.http('getRandomUnheldLocation', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'locations/random-unheld',
+  handler: withHandler(getRandomUnheldLocation),
+});
+
 app.http('placeHold', {
   methods: ['PATCH'],
   authLevel: 'anonymous',
@@ -430,4 +684,25 @@ app.http('removeHold', {
   authLevel: 'anonymous',
   route: 'locations/{id:int}/hold',
   handler: withHandler(removeHold),
+});
+
+app.http('getRangeLocationCount', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'locations/range-count',
+  handler: withHandler(getRangeLocationCount),
+});
+
+app.http('placeRangeHold', {
+  methods: ['PATCH'],
+  authLevel: 'anonymous',
+  route: 'locations/range-hold',
+  handler: withHandler(placeRangeHold),
+});
+
+app.http('releaseRangeHold', {
+  methods: ['DELETE'],
+  authLevel: 'anonymous',
+  route: 'locations/range-hold',
+  handler: withHandler(releaseRangeHold),
 });

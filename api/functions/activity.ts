@@ -7,8 +7,9 @@ import { parseLocationBarcode, formatLocationId } from '../lib/locationParser.js
 
 /**
  * Filtered activity-log query — the shared read path every reporting screen (IRP, SAR,
- * and any future report) queries through. All filters are optional and combine with AND;
- * an unfiltered call returns the most recent entries across the whole log.
+ * and any future report) queries through, and the source for the app-wide 12-hour
+ * activity log overlay (issue #46, via `hoursBack=12`). All filters are optional and
+ * combine with AND; an unfiltered call returns the most recent entries across the whole log.
  *
  * @param req - HTTP request with optional query params:
  *   `location` — 6 or 8-digit location barcode, filtered to aisle+bin (level is not
@@ -16,8 +17,12 @@ import { parseLocationBarcode, formatLocationId } from '../lib/locationParser.js
  *   `palletId` — numeric pallet ID
  *   `dpci` — 9-digit DPCI (dash-separated or concatenated — dept(3)+class(2)+item(4))
  *   `user` — zNumber
- * @returns Array of `{ id, timestamp, userId, actionType, palletId, location, dpci, details }`,
- *   newest first, capped at 200 rows
+ *   `hoursBack` — only include entries with `timestamp >= now - hoursBack` hours
+ * @returns Array of `{ id, timestamp, userId, actionType, palletId, locationAisle,
+ *   location, dpci, details }`, newest first, capped at 200 rows. `location` is the full
+ *   Aisle+Bin+Level id, present only when all three are stored (e.g. not for RESTAGE/
+ *   RANGE_HOLD/RANGE_REL, which log only an aisle); `locationAisle` is present whenever
+ *   any location component is stored at all, for callers that only need the aisle.
  * @throws 400 INVALID_INPUT if a provided filter is malformed
  */
 async function getActivity(req: HttpRequest): Promise<unknown> {
@@ -28,6 +33,7 @@ async function getActivity(req: HttpRequest): Promise<unknown> {
   const palletIdParam = params.get('palletId');
   const dpciParam = params.get('dpci');
   const userParam = params.get('user');
+  const hoursBackParam = params.get('hoursBack');
 
   const where: {
     locationAisle?: number;
@@ -37,6 +43,7 @@ async function getActivity(req: HttpRequest): Promise<unknown> {
     class?: number;
     item?: number;
     userId?: string;
+    timestamp?: { gte: Date };
   } = {};
 
   if (locationParam) {
@@ -62,6 +69,12 @@ async function getActivity(req: HttpRequest): Promise<unknown> {
 
   if (userParam) where.userId = userParam;
 
+  if (hoursBackParam) {
+    const hoursBack = Number(hoursBackParam);
+    if (isNaN(hoursBack) || hoursBack <= 0) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    where.timestamp = { gte: new Date(Date.now() - hoursBack * 60 * 60 * 1000) };
+  }
+
   const entries = await prisma.activityLog.findMany({
     where,
     orderBy: { timestamp: 'desc' },
@@ -74,8 +87,12 @@ async function getActivity(req: HttpRequest): Promise<unknown> {
     userId: e.userId,
     actionType: e.actionType,
     palletId: e.palletId,
-    location: e.locationAisle != null
-      ? formatLocationId(e.locationAisle, e.locationBin!, e.locationLevel!)
+    locationAisle: e.locationAisle,
+    // Only a full Aisle+Bin+Level id counts as a formattable location — some actionTypes
+    // (RESTAGE, RANGE_HOLD, RANGE_REL) store only an aisle, which formatLocationId can't
+    // safely handle (it would previously produce a garbled string here).
+    location: e.locationAisle != null && e.locationBin != null && e.locationLevel != null
+      ? formatLocationId(e.locationAisle, e.locationBin, e.locationLevel)
       : null,
     dpci: e.dept != null
       ? `${String(e.dept).padStart(3, '0')}-${String(e.class).padStart(2, '0')}-${String(e.item).padStart(4, '0')}`
