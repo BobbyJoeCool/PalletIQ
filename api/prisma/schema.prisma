@@ -18,6 +18,17 @@ model StorageCode {
   pallets   Pallet[]
 }
 
+// Each aisle is assigned one workstation (per Documentation/Flowcharts-ERDs/
+// warehouse-layout.md's "Workstation" columns) — stored per-location (like storageCode
+// and size already are) rather than on a separate Aisle table, since this schema has no
+// standalone Aisle entity. Expected to be uniform across every location sharing an aisle.
+model Workstation {
+  id   String @id @db.NVarChar(4)
+  desc String @db.NVarChar(60)
+
+  locations Location[]
+}
+
 model Department {
   id   String @id @db.NVarChar(3)
   name String @db.NVarChar(60)
@@ -96,9 +107,14 @@ model Location {
   // indicator, which destroys the location's real operational state (EMPTY vs STORED)
   // the moment a hold is placed; fixed to use this field instead. See phase-10 log.
   holdCategory String? @db.NVarChar(10)
+  // Nullable: only aisles listed in warehouse-layout.md's Workstation columns are
+  // populated by the seed migration; any aisle added later without a documented
+  // workstation stays null until assigned.
+  workstationCode String? @db.NVarChar(4)
 
-  holdType   HoldType?   @relation(fields: [holdTypeCode], references: [code])
-  storageRef StorageCode @relation(fields: [storageCode], references: [id])
+  holdType    HoldType?    @relation(fields: [holdTypeCode], references: [code])
+  storageRef  StorageCode  @relation(fields: [storageCode], references: [id])
+  workstation Workstation? @relation(fields: [workstationCode], references: [id])
 
   pallets      Pallet[]
   reservations Reservation[]
