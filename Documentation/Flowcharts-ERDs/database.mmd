@@ -55,11 +55,6 @@ erDiagram
         string desc "NVarChar(60)"
     }
 
-    Workstation {
-        string id PK "NVarChar(4)"
-        string desc "NVarChar(60)"
-    }
-
     Location {
         int aisle PK "3 digits"
         int bin PK "3 digits"
@@ -71,7 +66,6 @@ erDiagram
         string storageCode FK "NVarChar(2) → StorageCode"
         string size "NVarChar(2), LocationSize values"
         boolean contraction "default: false, set by Lead+ via Aisle Setup (out of scope) — read-only in this app"
-        string workstationCode FK "nullable, NVarChar(4) → Workstation — one per aisle, see warehouse-layout.md"
     }
 
     HoldType {
@@ -182,7 +176,6 @@ erDiagram
 
     Location }o--o| HoldType : "holdTypeCode (nullable)"
     Location }o--|| StorageCode : "storageCode"
-    Location }o--o| Workstation : "workstationCode (nullable)"
 
     Pallet }o--|| Item : "dept/class/item"
     Pallet }o--o| Location : "locationAisle/Bin/Level (nullable)"

@@ -45,13 +45,13 @@ Single zone each (Zone 1 = all bins).
 
 Pattern repeats: **L, L, M, S, L, M, HS** × 5 cycles
 
-| Cycle | Code | Aisles  | Workstation |
-|-------|------|---------|-------------|
-| 1     | CR   | 304-310 | CR01 |
-| 2     | FD   | 311-317 | FD01 |
-| 3     | BK   | 318-324 | BK01 |
-| 4     | NR   | 325-331 | NR01 |
-| 5     | NF   | 332-338 | NF01 |
+| Cycle | Code | Aisles  |
+|-------|------|---------|
+| 1     | CR   | 304-310 |
+| 2     | FD   | 311-317 |
+| 3     | BK   | 318-324 |
+| 4     | NR   | 325-331 |
+| 5     | NF   | 332-338 |
 
 | Aisle | Type | Levels | Level Sizes | Bins | Zones | Storage Code |
 |-------|------|--------|-------------|------|-------|--------------|
@@ -94,12 +94,6 @@ Pattern repeats: **L, L, M, S, L, M, HS** × 5 cycles
 ---
 
 ## Special Aisles
-
-### Workstations:
-
-301, 302: XS01
-701, 702, 801-802: RS01
-303, 803: BS01
 
 | Aisle | Description | Levels | Level Sizes | Bins | Zones | Storage Code |
 |-------|-------------|--------|-------------|------|-------|--------------|
