@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.6.2 — 2026-07-14](#162--2026-07-14)
 - [1.6.1 — 2026-07-14](#161--2026-07-14)
 - [1.6.0 — 2026-07-13](#160--2026-07-13)
 - [1.5.3 — 2026-07-13](#153--2026-07-13)
@@ -77,6 +78,90 @@ No issues currently open in this category.
 ### Distant Future
 
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
+
+---
+
+## [1.6.2] — 2026-07-14
+
+SDP follow-up round, driven by a long live session of fixes/polish dictated screen-by-screen
+(`DevNotes/Fixes/tasks.md`'s SDP section, plus items raised live that weren't already listed),
+anchored by a full rebuild of Directed Put's location-selection logic and a shared-layer fix
+for confirm/defocus that had been an app-wide latent bug. Also includes a retroactive
+verification-method-tracking addendum to PIP, requested in the same session.
+
+### 1.6.2 — Added
+
+- **Directed Put now enforces a real location-selection hierarchy** instead of an unfiltered
+  search: a pallet carries its own current Storage Code/Size/Zone (new `Pallet.storageCode`/
+  `.size`/`.zone` columns, copied by `placePallet` on every completed put), which an IM+
+  override can replace; Storage Code/Size are hard exact-match filters, Zone is a soft
+  starting preference with a Zone-1 fallback retry if the resolved zone has nothing eligible.
+  A never-stored (`PUT_PENDING`) pallet falls back to its Item's intrinsic Storage Code.
+  Replaces the old same-DPCI-in-aisle Zone lookup entirely.
+- **SDP: Worker role now gets a Size override** (Storage Code and Zone remain IM+-only) —
+  product decision resolving a previously-open `tasks.md` item.
+- **SDP + PIP: activity log entries now record how each field was verified** — scanned vs.
+  hand-typed — rendered as a trailing `(Scan: PID)`/`(Enter: BIN)`-style suffix.
+- **SDP: "Invalid Pallet" demo picker expanded** to cover Pulled, Canceled, and Pull Pending
+  (previously only "Not Found"/"No Cartons"), backed by a new `Pallet.status = 'CANCELED'`
+  case and a "has an open Label" pending-pull check reused from `pallets.ts`'s existing DPCI-
+  change guard.
+- **SDP: reservation timeout is now detected proactively**, polling the directed location
+  every 15s and popping the expiry message/reset the moment the server-side 5-minute timer
+  fires, instead of only on the worker's next scan attempt.
+- **Releasing a reservation now restores STAGED, not always EMPTY**, when the location was
+  actually staged before being directed to — applies to Unassign, Blocked Put's old location,
+  and the 5-minute timeout. Surfaced as a `(Staged)`/`(Empty)` tag on PUT and Unassign
+  activity log entries and messages.
+
+### 1.6.2 — Changed
+
+- **SDP: Zone override converted from a plain dropdown to the free-text + dropdown-helper
+  field** already used by Storage Code/Size, for visual consistency.
+- **Confirm and defocus decoupled app-wide**, at the shared `NumpadContext`/`useNumpadField`
+  layer — moving focus away from a field with an untouched/stale value no longer resubmits
+  it. Fixes a latent bug affecting every field built on the shared numpad/keyboard hook, not
+  just SDP.
+- **SDP: Confirm Location rebuilt as the shared 3-box Aisle/Bin/Level entry** (matching PIP/
+  PAR/LII/WLH), replacing the old single scan-only field.
+- **SDP: Directed Put's fill order is now deterministic** (highest bin first, then lowest
+  level) and now fills from the *same* end of the aisle as Staging, not the opposite end as
+  previously documented.
+- **SDP layout overhaul**: Aisle field enlarged and set apart from the override fields;
+  Size/Storage/Zone now fill available width dynamically; override lock buttons show 🔒/🔓
+  and turn red when locked; the "Applying Constraints" summary split into one bubble per
+  active override; Consolidating recolored to Info Blue; Unassign/Blocked Put moved beside
+  Confirm Location; the Hold quick-action removed from the screen-locked banner.
+- **A failed Directed Put no longer clears the Pallet ID field** — it stays so the worker can
+  adjust the Aisle/overrides and resubmit without re-scanning.
+- **Aisle entry truncates an over-long scanned value to 3 digits** and validates the aisle
+  actually exists before advancing.
+- **Footer demo-slot buttons are now centered** between the Keypad/Keyboard toggles and the
+  clock, app-wide.
+- **SDP's demo Put/Move buttons now fetch a pallet that actually matches the entered aisle's**
+  Storage Code and Size, instead of a random eligible pallet that frequently didn't.
+
+### 1.6.2 — Fixed
+
+- **A stale `dist/generated` Prisma Client silently masked every schema change** since
+  `pidWasScanned` was introduced last session — `api/package.json`'s `postbuild` script used
+  `cp -r`, which doesn't overwrite an existing destination directory. Every real Directed Put
+  had been failing with a swallowed Prisma error. Fixed the script to clear the destination
+  first.
+- **A reentrant double-submit on `LocationEntryFields`** (shared by SDP/PIP/PAR/LII/WLH)
+  fired two confirm requests for one worker action, the second always 404ing and playing the
+  error tone over whatever the real result should have shown. Fixed with a submission-in-
+  flight guard in `useNumpadField`.
+- **SDP's confirm-tone bug**: confirming a put played the wrong tone when the destination
+  wasn't staged (a copy/paste leftover); now plays success/warning correctly.
+- **SDP's demo reseed was staging XS locations**, which are hand-put only and should never be
+  a staging candidate.
+- **SDP's "✗ Location" demo button silently did nothing** — a stale 6-digit test value left
+  over from before Confirm Location was rebuilt as a 3-box panel, matching neither of the
+  panel's recognized value lengths.
+- **SDP's Move demo button matching gaps** — the aisle-aware demo pallet fetch wasn't
+  checking Size (only Storage Code), and was matching against aisle rows regardless of
+  whether they were actually eligible (contracted/held/occupied rows counted too).
 
 ---
 

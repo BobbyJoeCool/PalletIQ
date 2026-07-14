@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { HoldPanel } from '../components/shared/HoldPanel';
+import { DemoPicker } from '../components/shared/DemoPicker';
+import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
+import { ZoneField } from '../components/shared/ZoneField';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
@@ -79,6 +81,7 @@ function FieldDisplay({
   active = false,
   disabled = false,
   locked = false,
+  size = 'default',
 }: {
   label: string;
   value: string;
@@ -86,7 +89,13 @@ function FieldDisplay({
   active?: boolean;
   disabled?: boolean;
   locked?: boolean;
+  /** 'large' bumps height/text size — used for SDP's Aisle field, now that it doesn't
+   *  need to share space evenly with the (now dynamically-sized) override fields. */
+  size?: 'default' | 'large';
 }) {
+  const boxHeight = size === 'large' ? 'h-[88px]' : 'h-[72px]';
+  const textSize  = size === 'large' ? 'text-[40px]' : 'text-[32px]';
+  const barHeight = size === 'large' ? 'h-[46px]' : 'h-[38px]';
   return (
     <div className="flex flex-col gap-1">
       <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
@@ -96,13 +105,13 @@ function FieldDisplay({
         type="button"
         onClick={onFocus}
         disabled={disabled || locked}
-        className={`flex items-center h-[72px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 disabled:opacity-40 transition-colors ${active && !disabled && !locked ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+        className={`flex items-center ${boxHeight} px-5 rounded-[12px] bg-[#0D0D0D] border-2 disabled:opacity-40 transition-colors ${active && !disabled && !locked ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
       >
-        <span className="font-data text-[32px] font-medium text-white tracking-[0.04em]">
+        <span className={`font-data ${textSize} font-medium text-white tracking-[0.04em]`}>
           {value || <span className="text-[#444]">—</span>}
         </span>
         {active && !disabled && !locked && (
-          <span className="inline-block w-[3px] h-[38px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />
+          <span className={`inline-block w-[3px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />
         )}
       </button>
     </div>
@@ -147,6 +156,7 @@ function DemoBtn({ label, color, onClick }: { label: string; color: string; onCl
     green: 'bg-[#006600] hover:bg-[#007700] text-white',
     red:   'bg-[#660000] hover:bg-[#770000] text-white',
     blue:  'bg-[#003366] hover:bg-[#004488] text-white',
+    amber: 'bg-[#554400] hover:bg-[#665500] text-white',
   };
   return (
     <button
@@ -185,7 +195,7 @@ type ScreenState = 'entry' | 'directed';
 export function SDPPage() {
   const { token, user } = useAuth();
   const { setMessage } = useMessageBar();
-  const { deliverScan } = useNumpad();
+  const { deliverScan, isScanningRef } = useNumpad();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
   const routerLocation = useLocation();
   const prefill = (routerLocation.state as NavState | null) ?? null;
@@ -194,8 +204,9 @@ export function SDPPage() {
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [confirmBlock, setConfirmBlock] = useState(false);
-  // Quick-hold panel (WLH.md) for the currently directed location.
-  const [holdOpen, setHoldOpen] = useState(false);
+  // Demo-only "which invalid pallet" picker (shared DemoPicker component) — see
+  // pickInvalidPallet's comment.
+  const [invalidPalletPickerOpen, setInvalidPalletPickerOpen] = useState(false);
 
   // Screen-locked: while a reservation is active, Back/Home/Jump/Logout are disabled
   // shell-wide so the worker must resolve (complete or unassign) before leaving.
@@ -224,7 +235,12 @@ export function SDPPage() {
   // padOnSubmit: typing "5" and hitting OK is accepted as "005" (see LocationEntryFields).
   const aisleField    = useNumpadField('numpad', 3, true);
   const palletField   = useNumpadField();
-  const confirmField  = useNumpadField();
+  // Bumped to remount (and thereby clear + re-autofocus) the Confirm Location
+  // LocationEntryFields panel — matches PIP's resetLocationField pattern; the component
+  // has no imperative clear method of its own, only the external `value`/`''` prefill
+  // prop, which this codebase's convention (see PIPPage.tsx) prefers a key-bump over for
+  // a full reset since it also re-triggers the auto-focus effect for free.
+  const [locationEntryKey, setLocationEntryKey] = useState(0);
 
   // Narrows the Storage Code/Size override dropdown-helpers (issue #80) to what's actually
   // present once an aisle is entered — Zone override never narrows (a straight 1-4
@@ -280,11 +296,6 @@ export function SDPPage() {
     palletField.focus(handlePalletScan);
   }, [palletField]);
 
-  /** Registers the Confirm Location field's numpad handler, wired to handleLocationConfirm on confirm. */
-  const focusConfirmField = useCallback(() => {
-    confirmField.focus(handleLocationConfirm);
-  }, [confirmField]);
-
   /** Storage Code override committed via the shared field's onChange — advances to Pallet ID, matching the old numpad-driven behavior. */
   const handleStorageOverrideChange = useCallback((v: string) => {
     setStorageOverride(v);
@@ -302,34 +313,42 @@ export function SDPPage() {
     }
   }, [screenState]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (screenState === 'directed') {
-      const id = setTimeout(() => focusConfirmField(), 50);
-      return () => clearTimeout(id);
-    }
-  }, [screenState, focusConfirmField]);
+  // LocationEntryFields (the Confirm Location panel) auto-focuses itself on mount — no
+  // manual focus-on-screenState effect needed the way the plain numpad fields above
+  // require; it also naturally re-runs on every remount (see resetLocationField).
 
   // ── Polling (reservation timeout detection) ─────────────────────────────────
 
   /**
-   * Starts a 15-second polling interval to detect reservation timeout client-side.
-   * In the current demo build this is a stub — actual expiry is detected reactively
-   * when the next confirm/unassign/block call returns NOT_FOUND.
+   * Starts a 15-second polling interval that proactively detects server-side reservation
+   * expiry (the timer-triggered `clearExpiredReservations` Azure Function, which runs
+   * every minute and clears anything older than 5 minutes) — rather than only surfacing
+   * it reactively the next time the worker tries to confirm/unassign/block and gets a
+   * NOT_FOUND back. Polls `GET /api/locations/{id}` for the directed location itself
+   * (already-public, existing infrastructure — no dedicated reservation-status endpoint
+   * needed) and treats a status other than `RESERVED` as expiry, since that's exactly
+   * what the timer function resets it to on clearing a reservation. Reads the current
+   * reservation from `directedRef` each tick rather than closing over the value passed
+   * in, so it always checks whichever reservation is actually active if Blocked Put
+   * re-directs to a new one without a stop/restart in between.
    */
   function startPolling(reservationId: number) {
     stopPolling();
     pollIntervalRef.current = setInterval(async () => {
+      const d = directedRef.current;
+      if (!d || d.reservationId !== reservationId) return;
       try {
-        // A simple way to detect timeout: try fetching reservation status via confirm with a dummy location.
-        // Instead, we just ping the directed location status — if it's no longer RESERVED, the reservation expired.
-        // For simplicity, we poll with a lightweight check on the reservationId.
-        // The timer function deletes the Reservation row; we can check by attempting an action.
-        // Best approach for demo: check every 15s if the reservation still exists via a dedicated lightweight endpoint.
-        // Since we don't have one, we'll skip polling in the demo and rely on next-action detection.
+        const loc = await apiFetch<{ status: string }>(`/api/locations/${d.directedLocation}`, token!);
+        if (loc.status !== 'RESERVED') {
+          stopPolling();
+          playAlert('warning');
+          setMessage({ type: 'warning', text: `Reservation expired — location ${d.directedLocation} released` });
+          resetToEntry(true);
+        }
       } catch {
-        // If the reservation expired, the next action (confirm/unassign/block) will return 404.
+        // A transient network hiccup shouldn't reset the screen — the next successful
+        // poll (or the worker's own next action) will catch a real expiry.
       }
-      void reservationId; // suppress unused variable warning
     }, 15_000);
   }
 
@@ -345,13 +364,42 @@ export function SDPPage() {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
-  /** Submit handler for the Aisle field. Moves focus to the Pallet ID field on confirm. */
-  function handleAisleConfirm(value: string) {
+  /**
+   * Submit handler for the Aisle field. A location-barcode scan (or anything longer than
+   * 3 digits) is truncated to its leading 3 digits — the Aisle — rather than rejected,
+   * since scanning a location placard instead of hand-typing the aisle number is a normal
+   * path. Then validates the aisle actually exists (`GET /api/locations/empty-by-zone`,
+   * the same endpoint already narrowing the Storage Code/Size dropdowns for this aisle —
+   * reused here for a guaranteed-synchronous-with-this-confirm check rather than relying
+   * on that reactive fetch's own timing) before moving focus to the Pallet ID field.
+   */
+  async function handleAisleConfirm(value: string) {
     const v = value.trim();
     if (!v) return;
+    const truncated = v.slice(0, 3);
+    if (truncated !== v) aisleField.set(truncated);
+
+    const aisle = parseInt(truncated, 10);
+    if (isNaN(aisle)) return;
+
+    try {
+      await apiFetch(`/api/locations/empty-by-zone?aisle=${aisle}`, token!);
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      if (code === 'NOT_FOUND') {
+        playAlert('error');
+        aisleField.clear();
+        aisleField.focus(handleAisleConfirm);
+        setMessage({ type: 'error', text: `Aisle ${aisle} does not exist` });
+        return;
+      }
+      // Any other failure (network hiccup, etc.) doesn't block the worker — the
+      // downstream Directed Put call will surface its own error if the aisle turns out
+      // to be unusable.
+    }
+
     // Aisle confirmed — move focus to pallet field.
-    const id = setTimeout(() => focusPalletField(), 50);
-    return () => clearTimeout(id);
+    setTimeout(() => focusPalletField(), 50);
   }
 
   /**
@@ -363,6 +411,11 @@ export function SDPPage() {
     const v = value.trim();
     if (!v || loadingRef.current || screenStateRef.current !== 'entry') return;
     if (!aisleValueRef.current.trim()) return;
+    // Read synchronously, before any await below — isScanningRef.current is still true
+    // here for a scan's trailing synthetic Enter (see NumpadContext's deliverScan), reset
+    // shortly after this function's synchronous prefix returns control. Carried on the
+    // Reservation to confirmPut's activity log entry — see puts.ts's directedPut docstring.
+    const wasScanned = isScanningRef.current;
 
     setLoading(true);
     try {
@@ -384,6 +437,7 @@ export function SDPPage() {
           ...(storageVal && { storageCode: storageVal }),
           ...(zoneOverride != null && { zone: zoneOverride }),
           consolidating: consolidatingRef.current,
+          wasScanned,
         }),
       });
 
@@ -410,11 +464,20 @@ export function SDPPage() {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
-      palletField.clear();
+      // Value stays visible (not cleared) — the worker can adjust Aisle or a constraint
+      // and just press OK again to resubmit the same Pallet ID, rather than having to
+      // re-scan/re-type it. Re-focusing (not clearing) still arms a fresh start on the
+      // next actual keystroke (see useNumpadField's freshFocusRef), so typing a genuinely
+      // different PID still replaces rather than appends onto the stale value.
+      focusPalletField();
       if (code === 'PALLET_NOT_FOUND') {
-        setMessage({ type: 'error', text: 'Pallet not found' });
+        setMessage({ type: 'error', text: 'Pallet ID not found' });
       } else if (code === 'NO_CARTONS') {
-        setMessage({ type: 'error', text: `Pallet ${value} has no stored cartons — cannot put` });
+        setMessage({ type: 'error', text: 'Invalid Pallet: No Cartons' });
+      } else if (code === 'CANCELED') {
+        setMessage({ type: 'error', text: 'Invalid Pallet: Canceled' });
+      } else if (code === 'BLOCKED_BY_PENDING_PULL') {
+        setMessage({ type: 'error', text: 'Invalid Pallet: Pull Pending' });
       } else if (code === 'NO_LOCATIONS') {
         setMessage({ type: 'error', text: `No eligible locations available in aisle ${aisleValueRef.current}` });
       } else {
@@ -425,13 +488,24 @@ export function SDPPage() {
     }
   }
 
+  /** Clears the Confirm Location panel's three boxes via a full remount, which also
+   *  re-triggers its own auto-focus effect — matches PIP's resetLocationField pattern. */
+  function resetLocationField() {
+    setLocationEntryKey((k) => k + 1);
+  }
+
   /**
-   * Submit handler for the Confirm Location field. Calls POST /api/puts/{id}/confirm with
-   * the scanned location. On LOCATION_MISMATCH, re-focuses for retry. On NOT_FOUND, the
-   * reservation has expired — resets to entry with full field clear. On success, updates
-   * the history entry outcome and shows a completion message.
+   * Submit handler for the Confirm Location panel (LocationEntryFields), called once a
+   * full Aisle+Bin+Level value resolves — either scanned or hand-entered across all three
+   * boxes; `wasScanned` comes directly from the panel's own structural scan-vs-typed
+   * detection (see LocationEntryFields' docstring), not NumpadContext's isScanningRef.
+   * Calls POST /api/puts/{id}/confirm with the resolved value — the backend already only
+   * compares Aisle+Bin (see confirmPut's docstring), so the Level digits always along for
+   * the ride here are harmless. On LOCATION_MISMATCH, clears and re-focuses for retry. On
+   * NOT_FOUND, the reservation has expired — resets to entry with full field clear. On
+   * success, updates the history entry outcome and shows a completion message.
    */
-  async function handleLocationConfirm(value: string) {
+  async function handleLocationConfirm(value: string, wasScanned: boolean) {
     const v = value.trim();
     if (!v || loadingRef.current) return;
     const d = directedRef.current;
@@ -439,29 +513,43 @@ export function SDPPage() {
 
     setLoading(true);
     try {
-      const result = await apiFetch<{ location: string; wasMove: boolean; clearedLocation: string | null }>(
+      const result = await apiFetch<{ location: string; wasMove: boolean; clearedLocation: string | null; wasStaged: boolean }>(
         `/api/puts/${d.reservationId}/confirm`,
         token!,
-        { method: 'POST', body: JSON.stringify({ scannedLocation: v }) },
+        { method: 'POST', body: JSON.stringify({ scannedLocation: v, wasScanned }) },
       );
       stopPolling();
-      playAlert('info');
       setHistory(h => h.map(e =>
         e.reservationId === d.reservationId
           ? { ...e, outcome: result.wasMove ? 'MOVE' as const : 'PUT' as const, finalLocation: result.location }
           : e
       ));
-      const msg = result.wasMove && result.clearedLocation
+      const base = result.wasMove && result.clearedLocation
         ? `Move complete — ${fmtLocation(result.clearedLocation)} → ${fmtLocation(result.location)}`
         : `Put complete — ${fmtLocation(result.location)}`;
-      setMessage({ type: 'success', text: msg });
+      // Landing on an already-STAGED location is the preferred/expected outcome (plain
+      // success — 'info' is this app's established success/informational tone, see
+      // audio.ts's own docstring); falling through to an EMPTY one is worth flagging with
+      // the warning tone, though it keeps the message bar's blue Info color rather than
+      // full amber Warning — per the SDP put hierarchy's rule 4.a, this isn't a problem
+      // the worker needs to act on, just something worth a second look.
+      if (result.wasStaged) {
+        playAlert('info');
+        setMessage({ type: 'success', text: base });
+      } else {
+        playAlert('warning');
+        setMessage({ type: 'info', text: `${base} — location was not staged` });
+      }
       resetToEntry();
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
-      playAlert('error');
-      confirmField.clear();
-      confirmField.focus(handleLocationConfirm);
+      resetLocationField();
+      // One tone per outcome, not 'error' unconditionally plus a second, different tone
+      // layered on top for specific codes — the two used to play back-to-back on
+      // NOT_FOUND, with 'error' (this app's loudest tone) drowning out the 'warning'
+      // that actually matched what happened.
       if (code === 'LOCATION_MISMATCH') {
+        playAlert('error');
         setMessage({ type: 'error', text: `Wrong location — directed to ${d.directedLocation}` });
       } else if (code === 'NOT_FOUND') {
         // Reservation expired.
@@ -470,6 +558,7 @@ export function SDPPage() {
         stopPolling();
         resetToEntry(true);
       } else {
+        playAlert('error');
         setMessage({ type: 'error', text: 'Confirm failed — please try again' });
       }
     } finally {
@@ -488,13 +577,16 @@ export function SDPPage() {
     if (!d || loadingRef.current) return;
     setLoading(true);
     try {
-      await apiFetch(`/api/puts/${d.reservationId}/unassign`, token!, { method: 'POST' });
+      const result = await apiFetch<{ location: string; releasedStatus: 'STAGED' | 'EMPTY' }>(
+        `/api/puts/${d.reservationId}/unassign`, token!, { method: 'POST' },
+      );
       stopPolling();
       playAlert('info');
       setHistory(h => h.map(e =>
         e.reservationId === d.reservationId ? { ...e, outcome: 'RELEASED' as const } : e
       ));
-      setMessage({ type: 'info', text: `Reservation cleared — ${d.directedLocation} released` });
+      const releasedTag = result.releasedStatus === 'STAGED' ? 'Staged' : 'Empty';
+      setMessage({ type: 'info', text: `Reservation cleared — ${d.directedLocation} released (${releasedTag})` });
       resetToEntry();
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
@@ -536,8 +628,7 @@ export function SDPPage() {
         ...h.map(e => e.reservationId === d.reservationId ? { ...e, outcome: 'BLOCKED' as const } : e),
       ]);
       startPolling(result.newReservationId);
-      confirmField.clear();
-      confirmField.focus(handleLocationConfirm);
+      resetLocationField();
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       if (code === 'NO_LOCATIONS') {
@@ -569,7 +660,9 @@ export function SDPPage() {
     setDirected(null);
     setScreenState('entry');
     palletField.clear();
-    confirmField.clear();
+    // No explicit clear for the Confirm Location panel — it's only ever rendered while
+    // screenState === 'directed', so leaving that state unmounts it, which wipes its
+    // internal state for free (see LocationEntryFields).
     if (full) {
       postResetFocusRef.current = 'aisle';
       aisleField.clear();
@@ -586,39 +679,82 @@ export function SDPPage() {
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
-  /** Fetches a real unlocated pallet id and delivers it as a simulated Pallet ID scan. */
+  /**
+   * Fetches a real unlocated pallet id and delivers it as a simulated Pallet ID scan.
+   * Constrained to the currently-entered Aisle's Storage Code (reads aisleValueRef, not
+   * aisleField.value directly, to avoid a stale closure the same way handlePalletScan
+   * does) — without this, a random pallet's Storage Code frequently wouldn't match the
+   * aisle already typed in, correctly but unhelpfully failing the resulting demo put with
+   * NO_LOCATIONS now that Directed Put enforces Storage Code matching. A no-op filter
+   * (server-side) if the Aisle field is still empty.
+   */
   const demoPut = useCallback(async () => {
     try {
-      const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet?status=unlocated', token!);
+      const { palletId } = await apiFetch<{ palletId: number }>(
+        `/api/demo/pallet?status=unlocated&aisle=${aisleValueRef.current}`, token!,
+      );
       deliverScan(String(palletId));
     } catch (err) {
       setMessage({ type: 'error', text: `Demo put: ${err instanceof Error ? err.message : 'unavailable'}` });
     }
   }, [token, deliverScan, setMessage]);
 
-  /** Fetches a real already-stored pallet id and delivers it as a simulated Pallet ID scan, simulating a move. */
+  /** Fetches a real already-stored pallet id and delivers it as a simulated Pallet ID scan, simulating a move. Aisle-constrained — see demoPut's comment. */
   const demoMove = useCallback(async () => {
     try {
-      const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet?status=stored', token!);
+      const { palletId } = await apiFetch<{ palletId: number }>(
+        `/api/demo/pallet?status=stored&aisle=${aisleValueRef.current}`, token!,
+      );
       deliverScan(String(palletId));
     } catch (err) {
       setMessage({ type: 'error', text: `Demo move: ${err instanceof Error ? err.message : 'unavailable'}` });
     }
   }, [token, deliverScan, setMessage]);
 
-  // Must be numeric — a non-numeric value fails the API's parseInt check (INVALID_INPUT, 400)
-  // before ever reaching the not-found lookup (PALLET_NOT_FOUND, 404). Same bug/fix as MNP's
-  // demoBadPid (see CHANGELOG.md's Legacy findings).
-  /** Delivers a Pallet ID that doesn't exist, simulating a not-found scan. */
-  const demoBadPid = useCallback(() => deliverScan('999999999'), [deliverScan]);
+  /**
+   * Dispatches the shared DemoPicker's choice — consolidates what used to be one
+   * "✗ PID" button (not-found only) behind one "⚠ Invalid Pallet" footer button plus
+   * this popup, adding three previously-unreachable checkPalletEligibility paths a worker
+   * can't otherwise produce by scanning normally: "Pulled" (NO_CARTONS — a fully-pulled
+   * pallet has zero cartons left, same case as before, relabeled to match how a worker
+   * actually thinks of it), "Canceled" (a voided/canceled receiving record), and
+   * "Pull Pending" (an open, non-terminal Label already committed against the pallet).
+   * Not-found must be numeric — a non-numeric value fails the API's parseInt check
+   * (INVALID_INPUT, 400) before ever reaching the not-found lookup (PALLET_NOT_FOUND,
+   * 404). Same bug/fix as MNP's demoBadPid (see CHANGELOG.md's Legacy findings).
+   */
+  const pickInvalidPallet = useCallback(async (kind: 'notFound' | 'pulled' | 'canceled' | 'pullPending') => {
+    setInvalidPalletPickerOpen(false);
+    if (kind === 'notFound') {
+      deliverScan('999999999');
+      return;
+    }
+    const status = { pulled: 'no-cartons', canceled: 'canceled', pullPending: 'pull-pending' }[kind];
+    try {
+      const { palletId } = await apiFetch<{ palletId: number }>(`/api/demo/pallet?status=${status}`, token!);
+      deliverScan(String(palletId));
+    } catch (err) {
+      setMessage({ type: 'error', text: `Demo pallet: ${err instanceof Error ? err.message : 'unavailable'}` });
+    }
+  }, [token, deliverScan, setMessage]);
 
   /** Delivers the currently directed location, simulating a correct confirm scan. */
   const demoConfirmOk = useCallback(() => {
     if (directedRef.current) deliverScan(directedRef.current.directedLocation);
   }, []);
 
-  /** Delivers a location that won't match the directed location, simulating a mismatch. */
-  const demoConfirmBad = useCallback(() => deliverScan('999999'), [deliverScan]);
+  /**
+   * Delivers a location that won't match the directed location, simulating a mismatch.
+   * Must be exactly 8 digits — Confirm Location is the 3-box LocationEntryFields panel
+   * (since 1.17), which only ever recognizes an exact 3-digit value (one box, mid-entry)
+   * or an exact 8-digit value (a full-barcode override, resolving immediately regardless
+   * of focus) as meaningful; a 6-digit value (this button's value before the 3-box
+   * rebuild, when Confirm Location was a single plain field accepting a bare Aisle+Bin
+   * string directly) matches neither and is silently dropped by whichever box currently
+   * has focus — the same class of bug 1.14's fix to the "✗ Location" demo button on PIP
+   * already found and fixed there, just not carried over here at the time.
+   */
+  const demoConfirmBad = useCallback(() => deliverScan('99999999'), [deliverScan]);
 
   // Memoized so the JSX reference is stable across renders that don't change screen
   // state — useDemoSlot's re-sync effect keys off this reference, and an unmemoized
@@ -629,7 +765,7 @@ export function SDPPage() {
       <>
         <DemoBtn label="✓ Put"  color="green" onClick={demoPut} />
         <DemoBtn label="✓ Move" color="blue"  onClick={demoMove} />
-        <DemoBtn label="✗ PID"  color="red"   onClick={demoBadPid} />
+        <DemoBtn label="⚠ Invalid Pallet" color="amber" onClick={() => setInvalidPalletPickerOpen(true)} />
       </>
     ) : (
       <>
@@ -637,7 +773,7 @@ export function SDPPage() {
         <DemoBtn label="✗ Location" color="red"   onClick={demoConfirmBad} />
       </>
     )
-  ), [screenState, demoPut, demoMove, demoBadPid, demoConfirmOk, demoConfirmBad]);
+  ), [screenState, demoPut, demoMove, demoConfirmOk, demoConfirmBad]);
 
   useDemoSlot(demoSlot);
 
@@ -649,67 +785,72 @@ export function SDPPage() {
     <div className="absolute inset-0 flex select-none">
       {/* Left column */}
       <div className="flex-1 flex flex-col p-6 gap-4 overflow-hidden">
-        {/* Aisle + overrides */}
-        <div className="flex gap-4">
-          <div className="w-[200px]">
+        {/* Aisle + overrides. Aisle sits in its own fixed-width "island" (gap-10 below,
+            wider than the row's usual gap-4) since it no longer needs to share space
+            evenly with Size/Storage/Zone — those now stretch (flex-1 each, via width="w-full")
+            to dynamically fill whatever's left up to the Put History sidebar. */}
+        <div className="flex gap-10">
+          <div className="w-[280px] shrink-0">
             <FieldDisplay
               label="Aisle"
               value={aisleField.value}
               onFocus={focusAisleField}
               active={aisleField.isActive}
               locked={locked}
+              size="large"
             />
           </div>
-          {isIM && (
-            <>
-              <div className="flex flex-col gap-1">
-                <SizeField value={sizeOverride} onChange={setSizeOverride} options={sizeOptions} disabled={locked} />
+          {/* Size is the one override every authenticated role can use (product decision);
+              Storage Code/Zone stay IM+ only. Worker gets no lock button on Size — locking
+              is an IM+ convenience for persisting an override across multiple puts, and a
+              Worker's Size override is deliberately one-off (see resetToEntry: it always
+              clears unless sizeLocked, which only IM+ can ever set true). Worker's Size
+              choice also never appears in the "Applying Constraints" bubbles below, which
+              stay IM+-gated entirely — a Worker doesn't need it echoed back at them. */}
+          <div className="flex-1 flex gap-4 min-w-0">
+            <div className="flex-1 max-w-[220px] flex flex-col gap-1 min-w-0">
+              <SizeField value={sizeOverride} onChange={setSizeOverride} options={sizeOptions} width="w-full" disabled={locked} />
+              {isIM && (
                 <button
                   type="button"
                   onClick={() => setSizeLocked(l => !l)}
                   disabled={locked}
-                  className={`h-[52px] px-6 rounded-[10px] font-ui text-[24px] font-medium self-center transition-colors disabled:opacity-40 ${sizeLocked ? 'bg-[#003366] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
+                  aria-label={sizeLocked ? 'Unlock Size' : 'Lock Size'}
+                  className={`h-[52px] px-6 rounded-[10px] font-ui text-[24px] font-medium self-center transition-colors disabled:opacity-40 ${sizeLocked ? 'bg-[#CC0000] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
                 >
-                  {sizeLocked ? 'Locked' : 'Lock'}
+                  {sizeLocked ? '🔒' : '🔓'}
                 </button>
-              </div>
-              <div className="flex flex-col gap-1">
-                <StorageCodeField value={storageOverride} onChange={handleStorageOverrideChange} options={storageCodeOptions} label="Storage" disabled={locked} />
-                <button
-                  type="button"
-                  onClick={() => setStorageLocked(l => !l)}
-                  disabled={locked}
-                  className={`h-[52px] px-6 rounded-[10px] font-ui text-[24px] font-medium self-center transition-colors disabled:opacity-40 ${storageLocked ? 'bg-[#003366] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
-                >
-                  {storageLocked ? 'Locked' : 'Lock'}
-                </button>
-              </div>
-              <div className="w-[140px] flex flex-col gap-1">
-                {/* Zone override is a straight dropdown, never narrowed and never a
-                    free-text+popup field (issue #80 — unlike Storage Code/Size, the user
-                    explicitly wants this one to always just list 1-4). */}
-                <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider text-center">Zone</span>
-                <select
-                  aria-label="Zone"
-                  value={zoneOverride ?? ''}
-                  onChange={(e) => setZoneOverride(e.target.value ? parseInt(e.target.value, 10) : null)}
-                  disabled={locked}
-                  className="h-[64px] px-4 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] font-data text-[26px] font-medium text-white text-center focus:outline-none focus:border-[#CC0000] hover:border-[#555] disabled:opacity-40 transition-colors"
-                >
-                  <option value="">—</option>
-                  {[1, 2, 3, 4].map((z) => <option key={z} value={z}>{z}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setZoneLocked(l => !l)}
-                  disabled={locked}
-                  className={`h-[52px] px-6 rounded-[10px] font-ui text-[24px] font-medium self-center transition-colors disabled:opacity-40 ${zoneLocked ? 'bg-[#003366] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
-                >
-                  {zoneLocked ? 'Locked' : 'Lock'}
-                </button>
-              </div>
-            </>
-          )}
+              )}
+            </div>
+            {isIM && (
+              <>
+                <div className="flex-1 flex flex-col gap-1 min-w-0">
+                  <StorageCodeField value={storageOverride} onChange={handleStorageOverrideChange} options={storageCodeOptions} label="Storage" width="w-full" disabled={locked} />
+                  <button
+                    type="button"
+                    onClick={() => setStorageLocked(l => !l)}
+                    disabled={locked}
+                    aria-label={storageLocked ? 'Unlock Storage' : 'Lock Storage'}
+                    className={`h-[52px] px-6 rounded-[10px] font-ui text-[24px] font-medium self-center transition-colors disabled:opacity-40 ${storageLocked ? 'bg-[#CC0000] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
+                  >
+                    {storageLocked ? '🔒' : '🔓'}
+                  </button>
+                </div>
+                <div className="flex-1 flex flex-col gap-1 min-w-0">
+                  <ZoneField value={zoneOverride} onChange={setZoneOverride} width="w-full" disabled={locked} />
+                  <button
+                    type="button"
+                    onClick={() => setZoneLocked(l => !l)}
+                    disabled={locked}
+                    aria-label={zoneLocked ? 'Unlock Zone' : 'Lock Zone'}
+                    className={`h-[52px] px-6 rounded-[10px] font-ui text-[24px] font-medium self-center transition-colors disabled:opacity-40 ${zoneLocked ? 'bg-[#CC0000] text-white' : 'border border-[#3A3A3A] text-[#666] hover:border-[#555] hover:text-[#9A9A9A]'}`}
+                  >
+                    {zoneLocked ? '🔒' : '🔓'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Consolidating toggle (IM+ only) + Applying-overrides badge / directed-to readout.
@@ -725,23 +866,60 @@ export function SDPPage() {
                 type="button"
                 onClick={() => setConsolidating(c => !c)}
                 disabled={locked}
-                className={`h-[57px] px-6 rounded-[10px] font-ui text-[22px] font-medium transition-colors disabled:opacity-40 ${consolidating ? 'bg-[#CC0000] text-white' : 'border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555]'}`}
+                className={`h-[57px] px-6 rounded-[10px] font-ui text-[22px] font-medium transition-colors disabled:opacity-40 ${consolidating ? 'bg-[#5B9BD5] text-white' : 'border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555]'}`}
               >
                 Consolidating
               </button>
             )}
-            {/* Applying-overrides summary (issue #50) — every selected override is combined
+            {/* Applying-overrides bubbles (issue #50) — every selected override is combined
                 with AND when the system searches for a location, but nothing on screen
-                confirmed that plainly, which read as "it only applies one." */}
+                confirmed that plainly, which read as "it only applies one." One bubble per
+                constraint plus a leading "Applying Constraints" bubble, each independently
+                clickable to clear (the leading one clears all at once) — split out from a
+                single "Applying: Size M + Storage CR" summary bubble so a worker can drop
+                just one constraint without retyping the others. Sized to match Consolidating,
+                except the leading bubble: its label wraps to two smaller lines instead of one
+                large one, so it can be narrower — with all three constraint bubbles possibly
+                showing at once, keeping the leading bubble compact is what keeps the whole
+                row fitting on screen without wrapping. */}
             {isIM && screenState !== 'directed' && (sizeOverride || storageOverride || zoneOverride != null) && (
-              <span className="px-3 py-1.5 rounded-[10px] border border-[#3A3A3A] font-ui text-[13px] text-[#9A9A9A]">
-                Applying:{' '}
-                {[
-                  sizeOverride && `Size ${sizeOverride}`,
-                  storageOverride && `Storage ${storageOverride}`,
-                  zoneOverride != null && `Zone ${zoneOverride}`,
-                ].filter(Boolean).join(' + ')}
-              </span>
+              <>
+                <button
+                  type="button"
+                  onClick={() => { setSizeOverride(''); setStorageOverride(''); setZoneOverride(null); }}
+                  className="h-[57px] px-4 rounded-[10px] font-ui text-[13px] font-medium leading-tight border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] transition-colors flex flex-col items-center justify-center"
+                >
+                  <span>Applying</span>
+                  <span>Constraints</span>
+                </button>
+                {sizeOverride && (
+                  <button
+                    type="button"
+                    onClick={() => setSizeOverride('')}
+                    className="h-[57px] px-6 rounded-[10px] font-ui text-[22px] font-medium border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] transition-colors"
+                  >
+                    Size {sizeOverride}
+                  </button>
+                )}
+                {storageOverride && (
+                  <button
+                    type="button"
+                    onClick={() => setStorageOverride('')}
+                    className="h-[57px] px-6 rounded-[10px] font-ui text-[22px] font-medium border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] transition-colors"
+                  >
+                    Storage {storageOverride}
+                  </button>
+                )}
+                {zoneOverride != null && (
+                  <button
+                    type="button"
+                    onClick={() => setZoneOverride(null)}
+                    className="h-[57px] px-6 rounded-[10px] font-ui text-[22px] font-medium border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] transition-colors"
+                  >
+                    Zone {zoneOverride}
+                  </button>
+                )}
+              </>
             )}
             {screenState === 'directed' && directed && (
               <span className="flex items-center gap-3 px-4 py-1.5 rounded-[10px] bg-[#CC0000]/10 border-2 border-[#CC0000]/40">
@@ -774,13 +952,6 @@ export function SDPPage() {
             {/* Screen-locked banner */}
             <div className="flex items-center gap-3 px-4 py-2 rounded-[10px] bg-[#CC0000]/10 border border-[#CC0000]/30">
               <span className="font-ui text-[15px] font-semibold text-[#CC0000] flex-1">Screen locked — active reservation</span>
-              <button
-                type="button"
-                onClick={() => setHoldOpen(true)}
-                className="h-[32px] px-3 rounded-[8px] font-ui text-[13px] font-medium border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
-              >
-                Hold
-              </button>
             </div>
 
             <div className="flex flex-col mt-1">
@@ -804,16 +975,18 @@ export function SDPPage() {
               )}
             </div>
 
-            <FieldDisplay
-              label="Scan Location to Confirm"
-              value={confirmField.value}
-              onFocus={focusConfirmField}
-              active={confirmField.isActive}
-            />
-
-            <div className="flex gap-3 mt-2">
-              <ActionBtn label="Unassign"    variant="warning" onClick={handleUnassign} disabled={loading} />
-              <ActionBtn label="Blocked Put" variant="danger"  onClick={() => setConfirmBlock(true)} disabled={loading} />
+            {/* Unassign/Blocked Put moved beside Confirm Location (rather than below it)
+                so the panel has room to run "large" — items-end bottom-aligns the button
+                row (no label above it) with the boxes' own bottom edge (label above them). */}
+            <div className="flex items-end gap-4">
+              <div className="flex flex-col gap-1">
+                <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Confirm Location</span>
+                <LocationEntryFields key={locationEntryKey} onResolved={handleLocationConfirm} size="large" />
+              </div>
+              <div className="flex gap-3">
+                <ActionBtn label="Unassign"    variant="warning" onClick={handleUnassign} disabled={loading} />
+                <ActionBtn label="Blocked Put" variant="danger"  onClick={() => setConfirmBlock(true)} disabled={loading} />
+              </div>
             </div>
           </>
         )}
@@ -874,12 +1047,18 @@ export function SDPPage() {
         />
       )}
 
-      {holdOpen && directed && (
-        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 p-8">
-          <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-6 max-h-full overflow-y-auto">
-            <HoldPanel locationId={directed.directedLocation} onDone={() => setHoldOpen(false)} showClose />
-          </div>
-        </div>
+      {invalidPalletPickerOpen && (
+        <DemoPicker
+          title="Simulate which invalid pallet?"
+          options={[
+            { key: 'notFound',    label: 'Pallet ID Not Found' },
+            { key: 'pulled',      label: 'Pulled' },
+            { key: 'canceled',    label: 'Canceled' },
+            { key: 'pullPending', label: 'Pull Pending' },
+          ]}
+          onPick={pickInvalidPallet}
+          onCancel={() => setInvalidPalletPickerOpen(false)}
+        />
       )}
     </div>
   );

@@ -13,6 +13,8 @@ interface SizeFieldProps {
   /** `compact` matches STG's per-stack pallet-box styling; `default` matches full-screen
    *  filter bars (ELA). Styling is variant-based, not free className passthrough (issue #78). */
   size?: 'compact' | 'default';
+  /** Overrides the width Tailwind class `size` would otherwise pick — see CodePickerField. */
+  width?: string;
   label?: string;
   ariaLabel?: string;
   disabled?: boolean;
@@ -29,7 +31,7 @@ interface SizeFieldProps {
  * enough context (e.g. an aisle + Storage Code already entered), or the full list otherwise
  * — Size has no lookup table to fetch from, so the un-narrowed case is just this static list.
  */
-export function SizeField({ value, onChange, options, size = 'default', label = 'Size', ariaLabel, disabled = false }: SizeFieldProps) {
+export function SizeField({ value, onChange, options, size = 'default', width, label = 'Size', ariaLabel, disabled = false }: SizeFieldProps) {
   return (
     <CodePickerField
       value={value}
@@ -39,6 +41,7 @@ export function SizeField({ value, onChange, options, size = 'default', label = 
       maxLength={2}
       transform={(v) => v.toUpperCase()}
       size={size}
+      width={width}
       label={label}
       ariaLabel={ariaLabel ?? label}
       disabled={disabled}

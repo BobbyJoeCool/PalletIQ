@@ -287,6 +287,7 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   let locationAisle: number | null = null;
   let locationBin: number | null = null;
   let locationLevel: number | null = null;
+  let locationRow: { storageCode: string; size: string; zone: number } | null = null;
 
   if (body.locationId) {
     const parsed = parseFullLocationBarcode(body.locationId);
@@ -308,6 +309,7 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
     locationAisle = parsed.aisle;
     locationBin   = parsed.bin;
     locationLevel = parsed.level;
+    locationRow   = location;
   }
 
   const pid = await generateUniquePid();
@@ -324,6 +326,11 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
         vcp: body.vcp, ssp: body.ssp,
         status,
         locationAisle, locationBin, locationLevel,
+        // Inherited from the reinstated location, same as any other put (placePallet) —
+        // null (nothing to inherit) when reinstated without a location, i.e. PUT_PENDING.
+        storageCode: locationRow?.storageCode ?? null,
+        size:        locationRow?.size ?? null,
+        zone:        locationRow?.zone ?? null,
         receivedByZ: auth.zNumber,
         receivedAt:  now,
         putByZ: locationAisle != null ? auth.zNumber : null,

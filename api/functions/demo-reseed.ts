@@ -141,10 +141,14 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     // delete below fails with a foreign key violation (see issue #51: an abandoned reservation
     // or a routine "received"/"put" log entry from a prior session blocks every future reseed
     // until manually cleared). Scoped to just the pallets being deleted, not a full-table wipe,
-    // since this endpoint only regenerates disposable put-pending test data.
-    await tx.reservation.deleteMany({ where: { pallet: { status: 'PUT_PENDING' } } });
-    await tx.activityLog.deleteMany({ where: { pallet: { status: 'PUT_PENDING' } } });
-    await tx.pallet.deleteMany({ where: { status: 'PUT_PENDING' } });
+    // since this endpoint only regenerates disposable put-pending test data. CANCELED is
+    // included alongside PUT_PENDING — both are seeded fresh below (a small fraction of
+    // each combo's rows are seeded CANCELED instead), so both need the same
+    // wipe-then-regenerate treatment.
+    const disposablePalletStatus = { in: ['PUT_PENDING', 'CANCELED'] };
+    await tx.reservation.deleteMany({ where: { pallet: { status: disposablePalletStatus } } });
+    await tx.activityLog.deleteMany({ where: { pallet: { status: disposablePalletStatus } } });
+    await tx.pallet.deleteMany({ where: { status: disposablePalletStatus } });
 
     // Clear every prior seeded/real staging log entry before regenerating — same
     // wipe-then-regenerate pattern as pallets/labels above, so repeated reseeds don't
@@ -195,6 +199,12 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
         const receivedCartons = randomInt(6, 20);
         const receivedSSPs = receivedCartons * ssp;
 
+        // A small fraction seeded CANCELED instead of PUT_PENDING — a voided/canceled
+        // receiving record — so SDP's "Invalid Pallet: Canceled" demo option has a real
+        // pallet to find (nothing else in the app currently produces one; there's no
+        // real "cancel a receiving record" workflow yet, only this seed data).
+        const status = Math.random() < 0.05 ? 'CANCELED' : 'PUT_PENDING';
+
         putPalletRows.push({
           pid: genPid(),
           dept: item.dept,
@@ -208,7 +218,7 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
           currentSSPs: receivedSSPs,
           vcp,
           ssp,
-          status: 'PUT_PENDING',
+          status,
           locationAisle: null,
           locationBin: null,
           locationLevel: null,
@@ -292,10 +302,15 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     // Same eligibility rule real staging uses (findNextStagingLocation in
     // api/lib/stagingLogic.ts): EMPTY, non-contracted, and not on a hold that blocks
     // staging (Hold Outbound only blocks label generation, so it's still stageable).
+    // XS locations are excluded outright — XS is hand-put, always Carton Air (same
+    // exclusion the contraction-seed migration's rules apply for the same reason — see
+    // 20260718000000_seed_initial_contraction_rules), so XS is never a real staging
+    // candidate regardless of what's otherwise eligible.
     const eligibleLocations = await tx.location.findMany({
       where: {
         status: 'EMPTY',
         contraction: false,
+        size: { not: 'XS' },
         OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }],
       },
       select: { aisle: true, bin: true, level: true, storageCode: true, size: true },

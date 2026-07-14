@@ -11,6 +11,8 @@ interface StorageCodeFieldProps {
   /** `compact` matches STG's Master Control bar; `default` matches full-screen filter bars
    *  (ELA/ELZ/LII). Styling is variant-based, not free className passthrough (issue #78). */
   size?: 'compact' | 'default';
+  /** Overrides the width Tailwind class `size` would otherwise pick — see CodePickerField. */
+  width?: string;
   label?: string;
   disabled?: boolean;
 }
@@ -23,7 +25,7 @@ interface StorageCodeFieldProps {
  * what's actually present when the caller knows enough context to narrow, or the full
  * `GET /api/storage-codes` reference list otherwise.
  */
-export function StorageCodeField({ value, onChange, options, size = 'default', label = 'Storage Code', disabled = false }: StorageCodeFieldProps) {
+export function StorageCodeField({ value, onChange, options, size = 'default', width, label = 'Storage Code', disabled = false }: StorageCodeFieldProps) {
   // Always called (Rules of Hooks) — its cached result is simply unused once the caller
   // supplies a narrowed `options` list.
   const fullList = useStorageCodes();
@@ -38,6 +40,7 @@ export function StorageCodeField({ value, onChange, options, size = 'default', l
       maxLength={2}
       transform={(v) => v.toUpperCase()}
       size={size}
+      width={width}
       label={label}
       ariaLabel={label}
       disabled={disabled}

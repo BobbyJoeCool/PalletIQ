@@ -44,6 +44,10 @@ interface LocationEntryFieldsProps {
   lockedAisle?: string;
   /** Locks the Level box to this fixed value — see lockedAisle. */
   lockedLevel?: string;
+  /** 'large' bumps box height/width and text size a bit — used by SDP's Confirm Location
+   *  panel, which has room to spare now that Unassign/Blocked Put sit beside it instead
+   *  of below it. Other callers all use the default size. */
+  size?: 'default' | 'large';
 }
 
 /**
@@ -59,7 +63,7 @@ interface LocationEntryFieldsProps {
  * value is spliced into the resolved location alongside whatever was actually typed.
  */
 export function LocationEntryFields({
-  onResolved, autoFocus = true, value, highlight = false, onActiveChange, lockedAisle, lockedLevel,
+  onResolved, autoFocus = true, value, highlight = false, onActiveChange, lockedAisle, lockedLevel, size = 'default',
 }: LocationEntryFieldsProps) {
   const { hidePanel } = useNumpad();
   // maxLength auto-advances once the fixed-length manual entry is complete (3/3/2 digits);
@@ -178,38 +182,45 @@ export function LocationEntryFields({
   const boxBorder = (active: boolean) =>
     highlight ? 'border-[#CC0000]' : active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]';
 
+  const boxHeight  = size === 'large' ? 'h-[68px]' : 'h-[56px]';
+  const textSize   = size === 'large' ? 'text-[26px]' : 'text-[22px]';
+  const barHeight  = size === 'large' ? 'h-[24px]' : 'h-[20px]';
+  const aisleWidth = size === 'large' ? 'w-[135px]' : 'w-[120px]';
+  const binWidth   = size === 'large' ? 'w-[135px]' : 'w-[120px]';
+  const levelWidth = size === 'large' ? 'w-[115px]' : 'w-[100px]';
+
   return (
     <div className="flex gap-3">
-      <div className="flex flex-col gap-1 w-[120px]">
+      <div className={`flex flex-col gap-1 ${aisleWidth}`}>
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Aisle</span>
         {lockedAisle != null ? (
-          <div className="flex items-center h-[56px] px-4 rounded-[10px] bg-[#0A0A0A] border-2 border-[#222] opacity-50">
-            <span className="font-data text-[22px] font-medium text-[#9A9A9A]">{lockedAisle}</span>
+          <div className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0A0A0A] border-2 border-[#222] opacity-50`}>
+            <span className={`font-data ${textSize} font-medium text-[#9A9A9A]`}>{lockedAisle}</span>
           </div>
         ) : (
-          <button type="button" onClick={focusAisleField} className={`flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${boxBorder(aisleField.isActive)}`}>
-            <span className="font-data text-[22px] font-medium text-white">{aisleField.value || <span className="text-[#444]">—</span>}</span>
-            {aisleField.isActive && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
+          <button type="button" onClick={focusAisleField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${boxBorder(aisleField.isActive)}`}>
+            <span className={`font-data ${textSize} font-medium text-white`}>{aisleField.value || <span className="text-[#444]">—</span>}</span>
+            {aisleField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
           </button>
         )}
       </div>
-      <div className="flex flex-col gap-1 w-[120px]">
+      <div className={`flex flex-col gap-1 ${binWidth}`}>
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Bin</span>
-        <button type="button" onClick={focusBinField} className={`flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${boxBorder(binField.isActive)}`}>
-          <span className="font-data text-[22px] font-medium text-white">{binField.value || <span className="text-[#444]">—</span>}</span>
-          {binField.isActive && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
+        <button type="button" onClick={focusBinField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${boxBorder(binField.isActive)}`}>
+          <span className={`font-data ${textSize} font-medium text-white`}>{binField.value || <span className="text-[#444]">—</span>}</span>
+          {binField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
         </button>
       </div>
-      <div className="flex flex-col gap-1 w-[100px]">
+      <div className={`flex flex-col gap-1 ${levelWidth}`}>
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Level</span>
         {lockedLevel != null ? (
-          <div className="flex items-center h-[56px] px-4 rounded-[10px] bg-[#0A0A0A] border-2 border-[#222] opacity-50">
-            <span className="font-data text-[22px] font-medium text-[#9A9A9A]">{lockedLevel}</span>
+          <div className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0A0A0A] border-2 border-[#222] opacity-50`}>
+            <span className={`font-data ${textSize} font-medium text-[#9A9A9A]`}>{lockedLevel}</span>
           </div>
         ) : (
-          <button type="button" onClick={focusLevelField} className={`flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${boxBorder(levelField.isActive)}`}>
-            <span className="font-data text-[22px] font-medium text-white">{levelField.value || <span className="text-[#444]">—</span>}</span>
-            {levelField.isActive && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
+          <button type="button" onClick={focusLevelField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${boxBorder(levelField.isActive)}`}>
+            <span className={`font-data ${textSize} font-medium text-white`}>{levelField.value || <span className="text-[#444]">—</span>}</span>
+            {levelField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
           </button>
         )}
       </div>

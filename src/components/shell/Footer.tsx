@@ -9,7 +9,9 @@ import { getBatchDate, getDisplayDate, getDisplayTime } from '../../lib/julianDa
  *   1. Input panel toggles: "123 Keypad" and "ABC Keyboard" buttons that open/close
  *      the on-screen input panels; the active panel's button is highlighted red.
  *   2. Demo slot: any React nodes registered by the current screen via FooterDemoContext,
- *      displayed between the panel toggles and the clock. Empty when no screen registers content.
+ *      centered in the space between the panel toggles and the clock (a flex-1 middle
+ *      column, so it stays centered regardless of viewport width or how many demo
+ *      buttons the current screen has). Empty when no screen registers content.
  *   3. Live clock: batch date (BD YYDDD), calendar date, and 12-hour time, updated every 15 seconds.
  */
 export function Footer() {
@@ -41,7 +43,7 @@ export function Footer() {
 
   return (
     <footer className="shrink-0 flex items-center px-6 h-[54px] bg-black border-t border-[#1C1C1C]">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <button type="button" onClick={toggleNumpad} className={numpadActive ? activeBtn : inactiveBtn}>
           <span className="font-data text-[13px] font-semibold tracking-wider">123</span>
           <span>Keypad</span>
@@ -52,13 +54,11 @@ export function Footer() {
         </button>
       </div>
 
-      {demoSlot && (
-        <div className="flex items-center gap-2 ml-4">
-          {demoSlot}
-        </div>
-      )}
+      <div className="flex-1 flex items-center justify-center gap-2">
+        {demoSlot}
+      </div>
 
-      <div className="ml-auto flex items-center gap-5 font-data text-[18px] font-medium">
+      <div className="flex items-center gap-5 font-data text-[18px] font-medium shrink-0">
         <span className="text-[#CC0000]">{getBatchDate(now)}</span>
         <span className="text-[#CFCFCF]">{getDisplayDate(now)}</span>
         <span className="text-white">{getDisplayTime(now)}</span>

@@ -15,6 +15,7 @@ model StorageCode {
 
   items     Item[]
   locations Location[]
+  pallets   Pallet[]
 }
 
 model Department {
@@ -140,6 +141,17 @@ model Pallet {
   locationAisle   Int?
   locationBin     Int?
   locationLevel   Int?
+  // The pallet's own Storage Code/Size/Zone — always copied from wherever it's currently
+  // STORED (set in placePallet, every time a put/move completes), null while PUT_PENDING
+  // (never stored, nothing to inherit from). This is the source of truth Directed Put's
+  // default location search reads from when no IM+ override is given: exact-match
+  // Storage Code/Size, and Zone as the search's starting point (falling back to Zone 1 if
+  // that exact zone has no eligible location — see zoneLogic.ts). Denormalized from
+  // Location rather than joined live, since a pallet's put history (and thus its most
+  // recent location) can't be reconstructed from Location alone once it moves again.
+  storageCode     String?   @db.NVarChar(2)
+  size            String?   @db.NVarChar(2)
+  zone            Int?
   receivedByZ     String    @db.NVarChar(7)
   receivedAt      DateTime
   putByZ          String?   @db.NVarChar(7)
@@ -147,11 +159,12 @@ model Pallet {
   lastPulledByZ   String?   @db.NVarChar(7)
   lastPulledAt    DateTime?
 
-  itemRef      Item      @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
-  location     Location? @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
-  receivedBy   User      @relation("PalletReceivedBy", fields: [receivedByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
-  putBy        User?     @relation("PalletPutBy", fields: [putByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
-  lastPulledBy User?     @relation("PalletLastPulledBy", fields: [lastPulledByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  itemRef      Item         @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
+  location     Location?    @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
+  storageRef   StorageCode? @relation(fields: [storageCode], references: [id])
+  receivedBy   User         @relation("PalletReceivedBy", fields: [receivedByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  putBy        User?        @relation("PalletPutBy", fields: [putByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  lastPulledBy User?        @relation("PalletLastPulledBy", fields: [lastPulledByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
 
   labels       Label[]
   reservations Reservation[]
@@ -193,6 +206,19 @@ model Reservation {
   // Preserved from the original directedPut call so a Blocked Put re-search (blockPut)
   // honors the same STAGED-exclusion preference as the initial search.
   consolidating Boolean  @default(false)
+  // Whether the Pallet ID that started this reservation was scanned or hand-typed —
+  // carried through to confirmPut's activity log entry as the PUT's verification-method
+  // record (paired with confirmPut's own scanned-vs-typed read of the location-confirm
+  // field). Nullable for migration safety on any pre-existing row, though every reservation
+  // directedPut creates from here on always sets it explicitly.
+  pidWasScanned Boolean?
+  // True if findNextLocation matched this reservation's location via the STAGED search
+  // (the preferred/expected outcome), false if it fell through to the EMPTY search —
+  // carried through to confirmPut, since by confirm time the location's live status is
+  // already RESERVED, not useful for telling which search path originally matched it.
+  // Nullable for migration safety on any pre-existing row; every reservation directedPut
+  // creates from here on always sets it explicitly.
+  wasStaged     Boolean?
   createdAt     DateTime @default(now())
 
   location Location @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)

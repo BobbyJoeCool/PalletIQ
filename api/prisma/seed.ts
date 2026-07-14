@@ -447,6 +447,7 @@ type PalletRow = {
   receivedSSPs: number; currentSSPs: number
   vcp: number; ssp: number; status: string
   locationAisle: number; locationBin: number; locationLevel: number
+  storageCode: string; size: string; zone: number
   receivedByZ: string; receivedAt: Date
   putByZ: string; putAt: Date
   lastPulledByZ: null; lastPulledAt: null
@@ -498,6 +499,7 @@ function buildLocationsAndPallets() {
             receivedSSPs: 0, currentSSPs: 0,
             vcp, ssp, status: 'STORED',
             locationAisle: aisle, locationBin: bin, locationLevel: level,
+            storageCode, size, zone,
             receivedByZ: 'z002p21', receivedAt,
             putByZ: 'z002p22', putAt,
             lastPulledByZ: null, lastPulledAt: null,

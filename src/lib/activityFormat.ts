@@ -155,6 +155,17 @@ function fmtPCS(pallets: number, cartons: number, ssps: number): string {
   return parts.length > 0 ? parts.join(' ') : '0C';
 }
 
+/**
+ * Builds the trailing "(Scan: PID, Enter: BIN)" verification-method suffix — records how
+ * each field that produced a PULL or (SDP) PUT was entered, scanned vs. hand-typed. Missing
+ * from log entries written before this tracking existed, so callers only invoke this when
+ * the relevant `details` field is actually present, and this always returns a non-empty
+ * string given a non-empty `parts`.
+ */
+function fmtVerification(parts: { label: string; scanned: boolean }[]): string {
+  return ` (${parts.map((p) => `${p.scanned ? 'Scan' : 'Enter'}: ${p.label}`).join(', ')})`;
+}
+
 const EDIT_FIELD_LABELS: Record<string, string> = {
   dpci: 'DPCI',
   vcp: 'VCP',
@@ -194,6 +205,10 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
       const line: DetailLine = [`${label}: Pulled ${qty} from `];
       line.push(pallet ?? '?');
       if (loc) line.push(' at ', loc);
+      const verifiedVia = d.verifiedVia as string | undefined;
+      if (verifiedVia) {
+        line.push(fmtVerification([{ label: verifiedVia, scanned: d.wasScanned === true }]));
+      }
       return [line];
     }
 
@@ -201,12 +216,18 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
       const wasMove = d.wasMove === true;
       const method = d.method as string | undefined;
       const clearedLoc = locationToken((d.clearedLocation as string | null) ?? null);
+      // Only ever set on SDP's confirmPut (findNextLocation's STAGED-vs-EMPTY match) —
+      // undefined for MNP (whose own, differently-scoped destinationWasStaged isn't
+      // rendered here) and for any entry written before this tracking existed.
+      const wasStaged = d.wasStaged as boolean | undefined;
+      const stagedTag = wasStaged != null ? (wasStaged ? ' (Staged)' : ' (Empty)') : null;
       const line: DetailLine = [pallet ?? '?'];
       if (wasMove && clearedLoc) {
         line.push(' moved from ', clearedLoc, ' to ', loc ?? '?');
       } else {
         line.push(' put in ', loc ?? '?');
       }
+      if (stagedTag) line.push(stagedTag);
       if (method === 'SDP') {
         const override = d.override as Record<string, string | number> | undefined;
         if (override && Object.keys(override).length > 0) {
@@ -220,11 +241,23 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
       if (method === 'MNP' && d.destinationWasOccupied === true) {
         line.push(' — Location was occupied');
       }
+      if (method === 'SDP') {
+        const verification = d.verification as { pid?: { scanned: boolean }; bin?: { scanned: boolean } } | undefined;
+        if (verification) {
+          const parts: { label: string; scanned: boolean }[] = [];
+          if (verification.pid) parts.push({ label: 'PID', scanned: verification.pid.scanned === true });
+          if (verification.bin) parts.push({ label: 'BIN', scanned: verification.bin.scanned === true });
+          if (parts.length > 0) line.push(fmtVerification(parts));
+        }
+      }
       return [line];
     }
 
-    case 'UNASSIGN':
-      return [loc ? ['Released reservation at ', loc] : ['Released a reservation']];
+    case 'UNASSIGN': {
+      const releasedStatus = d.releasedStatus as 'STAGED' | 'EMPTY' | undefined;
+      const releasedTag = releasedStatus ? ` (${releasedStatus === 'STAGED' ? 'Staged' : 'Empty'})` : '';
+      return [loc ? ['Released reservation at ', loc, releasedTag] : ['Released a reservation']];
+    }
 
     case 'BLOCK_PUT':
       return [loc ? ['Marked ', loc, ' as blocked and redirected to a new location'] : ['Marked a location as blocked']];

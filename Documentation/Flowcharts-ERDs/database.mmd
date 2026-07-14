@@ -90,6 +90,9 @@ erDiagram
         int locationAisle FK "nullable → Location"
         int locationBin FK "nullable → Location"
         int locationLevel FK "nullable → Location"
+        string storageCode FK "nullable, NVarChar(2) → StorageCode — inherited from wherever currently STORED, null if PUT_PENDING"
+        string size "nullable, NVarChar(2) — inherited from wherever currently STORED, null if PUT_PENDING"
+        int zone "nullable — inherited from wherever currently STORED, null if PUT_PENDING"
         string receivedByZ FK "NVarChar(7) → User"
         datetime receivedAt
         string putByZ FK "nullable, NVarChar(7) → User"
@@ -144,6 +147,8 @@ erDiagram
         string targetStorage "nullable, NVarChar(2)"
         int targetZone "nullable"
         boolean consolidating "default: false, preserved for Blocked Put re-search"
+        boolean pidWasScanned "nullable — Scan vs Enter verification-method tracking, see ActivityLog.details.verification"
+        boolean wasStaged "nullable — whether the location was already STAGED when directed, see confirmPut"
         datetime createdAt "auto-set on creation"
     }
 
@@ -174,6 +179,7 @@ erDiagram
 
     Pallet }o--|| Item : "dept/class/item"
     Pallet }o--o| Location : "locationAisle/Bin/Level (nullable)"
+    Pallet }o--o| StorageCode : "storageCode (nullable)"
     Pallet }o--|| User : "receivedByZ"
     Pallet }o--o| User : "putByZ (nullable)"
     Pallet }o--o| User : "lastPulledByZ (nullable)"

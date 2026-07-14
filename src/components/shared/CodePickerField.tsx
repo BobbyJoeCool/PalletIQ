@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNumpadField } from '../../lib/useNumpadField';
+import { useNumpad } from '../../context/NumpadContext';
 
 export interface CodeOption { code: string; desc: string }
 
@@ -18,6 +19,10 @@ interface CodePickerFieldProps {
   /** Applied to typed input before it's committed, e.g. uppercasing a Storage Code. */
   transform?: (raw: string) => string;
   size?: 'compact' | 'default';
+  /** Overrides the width Tailwind class that `size` would otherwise pick (e.g.
+   *  `'w-[147px]'`) — for a caller that needs a narrower/wider box without also changing
+   *  the height/text-size `size` otherwise ties together. */
+  width?: string;
   label?: string;
   ariaLabel?: string;
   /** Disables both the entry field and the dropdown-helper button — e.g. SDP locks its
@@ -36,9 +41,10 @@ interface CodePickerFieldProps {
  * or full) and entry-field specifics (maxLength, uppercasing, styling).
  */
 export function CodePickerField({
-  value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', label, ariaLabel, disabled = false,
+  value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false,
 }: CodePickerFieldProps) {
   const field = useNumpadField(panel, maxLength);
+  const { hidePanel } = useNumpad();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -58,7 +64,16 @@ export function CodePickerField({
   function focusField() {
     if (disabled) return;
     setOpen(false);
-    field.focus((v) => onChange(transform ? transform(v.trim()) : v.trim()));
+    // explicit (a real OK/Enter, or a scan's trailing synthetic one) also closes the
+    // panel — the worker/scan said they're done with this field, no need to wait for
+    // them to tap elsewhere. A maxLength auto-submit (explicit=false) leaves the panel
+    // open, matching the field's prior behavior (issue #80's original "commits via the
+    // synthetic-Enter-on-refocus path" note) for a value that's merely full-length, not
+    // necessarily confirmed.
+    field.focus((v, explicit) => {
+      onChange(transform ? transform(v.trim()) : v.trim());
+      if (explicit) hidePanel();
+    });
   }
 
   function selectOption(code: string) {
@@ -68,10 +83,10 @@ export function CodePickerField({
 
   const boxHeight = size === 'compact' ? 'h-[52px]' : 'h-[64px]';
   const textSize = size === 'compact' ? 'text-[20px]' : 'text-[26px]';
-  const width = size === 'compact' ? 'w-[160px]' : 'w-[220px]';
+  const boxWidth = width ?? (size === 'compact' ? 'w-[160px]' : 'w-[220px]');
 
   return (
-    <div ref={wrapperRef} className={`relative flex flex-col gap-1 ${width}`}>
+    <div ref={wrapperRef} className={`relative flex flex-col gap-1 ${boxWidth}`}>
       {label && <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider text-center">{label}</span>}
       <div className="flex items-stretch gap-1">
         <button

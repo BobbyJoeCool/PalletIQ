@@ -1,12 +1,12 @@
 {
   "name": "palletiq-api",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "PalletIQ — Azure Functions API",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.json",
-    "postbuild": "cp -r generated dist/generated",
+    "postbuild": "rm -rf dist/generated && cp -r generated dist/generated",
     "watch": "tsc -p tsconfig.json --watch",
     "start": "func start",
     "db:local:up": "docker compose up -d",

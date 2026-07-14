@@ -41,20 +41,84 @@ async function sampleLabel(req: HttpRequest, _ctx: InvocationContext): Promise<u
  * Query param `status` controls which pallets are eligible:
  *   - "unlocated" — returns a pallet with no current location (locationAisle is null)
  *   - "stored" (default) — returns a pallet that is currently stored in a location
+ *   - "no-cartons" — returns a pallet with currentCartons <= 0 (SDP's "Pulled" invalid-
+ *     pallet demo option — a fully-pulled pallet is exactly this case), so SDP's demo
+ *     button can exercise checkPalletEligibility's NO_CARTONS path, which a worker can't
+ *     otherwise reach by scanning normally
+ *   - "canceled" — returns a pallet with `status = 'CANCELED'` (a voided/canceled
+ *     receiving record), for checkPalletEligibility's CANCELED path
+ *   - "pull-pending" — returns a pallet with an open (non-terminal) Label against it —
+ *     same "still open" definition as editPallet's DPCI-change guard (`status notIn
+ *     PULLED/DIVERTED/CANCELED/PURGED` — AVAILABLE already counts, doesn't need to have
+ *     reached PRINTED) — for checkPalletEligibility's BLOCKED_BY_PENDING_PULL path
  *
- * @param req - HTTP request with query param `status` ("unlocated" | "stored", default "stored")
+ * Optional `aisle` query param additionally constrains "unlocated"/"stored" picks to
+ * pallets that could actually be directed to that aisle — without this, a demo Put/Move
+ * for a random pallet frequently doesn't match, correctly (but unhelpfully, for a demo
+ * button) failing with NO_LOCATIONS once Directed Put's Storage Code/Size matching is
+ * enforced (see resolveEffectiveCriteria):
+ *   - "unlocated" pallets have no Storage Code/Size of their own yet (PUT_PENDING) — only
+ *     Storage Code is ever enforced for them (via their Item's intrinsic one, the same
+ *     fallback Directed Put itself uses), so only that's checked here; Size is never a
+ *     constraint for a first-time put regardless of aisle.
+ *   - "stored" pallets already have both inherited, and the real search exact-matches
+ *     both — so this checks the pallet's own (Storage Code, Size) pair against every
+ *     distinct pair actually present in the aisle, not just Storage Code alone (a size
+ *     mismatch, e.g. an XS pallet from aisle 301 sent to standard-size aisle 305, fails
+ *     Directed Put exactly the same way a Storage Code mismatch does).
+ * The aisle's matchable (Storage Code, Size) pairs are drawn only from currently-eligible
+ * locations — status EMPTY/STAGED, not contracted, not held in a way that blocks a put
+ * (the exact same criteria findNextLocation itself applies) — not just any row that
+ * happens to carry that Storage Code/Size somewhere in the aisle; a pair that only exists
+ * on STORED/RESERVED/contracted/held rows has no real eligible location right now, so
+ * matching a demo pallet to it would still dead-end on NO_LOCATIONS. Ignored for
+ * "no-cartons" (that path is purely about exercising the error, not finding a matching
+ * location).
+ *
+ * @param req - HTTP request with query params `status` ("unlocated" | "stored" | "no-cartons" |
+ *   "canceled" | "pull-pending", default "stored") and optional `aisle` (number)
  * @returns `{ palletId: number }`
- * @throws 404 NOT_FOUND if no pallets match the requested status
+ * @throws 404 NOT_FOUND if no pallets match the requested status (and aisle's Storage Code/Size, if given)
  */
 async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
   await requireAuth(req);
 
-  const statusParam = new URL(req.url).searchParams.get('status') ?? 'stored';
+  const params = new URL(req.url).searchParams;
+  const statusParam = params.get('status') ?? 'stored';
+  const aisleParam = params.get('aisle');
+  const aisle = aisleParam ? parseInt(aisleParam, 10) : null;
+
+  let aislePairs: { storageCode: string; size: string }[] | null = null;
+  if (aisle != null && !isNaN(aisle)) {
+    // Mirrors findNextLocation's own eligibility criteria exactly (status EMPTY/STAGED,
+    // not contracted, not held in a way that blocks a put) — a (Storage Code, Size) pair
+    // that technically exists in the aisle but only on STORED/RESERVED/contracted/held
+    // rows has zero actually-eligible locations right now, so matching on it would still
+    // send a demo pallet into a NO_LOCATIONS dead end.
+    aislePairs = await prisma.location.findMany({
+      where: {
+        aisle,
+        status: { in: ['EMPTY', 'STAGED'] },
+        contraction: false,
+        OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }],
+      },
+      select: { storageCode: true, size: true },
+      distinct: ['storageCode', 'size'],
+    });
+  }
+  const aisleStorageCodes = aislePairs ? [...new Set(aislePairs.map((p) => p.storageCode))] : null;
 
   const where =
     statusParam === 'unlocated'
-      ? { locationAisle: null }
-      : { locationAisle: { not: null } };
+      ? { locationAisle: null, ...(aisleStorageCodes && { itemRef: { storageCode: { in: aisleStorageCodes } } }) }
+    : statusParam === 'no-cartons' ? { currentCartons: { lte: 0 } }
+    : statusParam === 'canceled' ? { status: 'CANCELED' }
+    : statusParam === 'pull-pending'
+      ? { labels: { some: { status: { notIn: ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'] } } } }
+    : {
+        locationAisle: { not: null },
+        ...(aislePairs && { OR: aislePairs.map((p) => ({ storageCode: p.storageCode, size: p.size })) }),
+      };
 
   const count = await prisma.pallet.count({ where });
   if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });

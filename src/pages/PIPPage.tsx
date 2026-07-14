@@ -299,7 +299,7 @@ function LevelCorrectionDialog({
 export function PIPPage() {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
-  const { deliverScan } = useNumpad();
+  const { deliverScan, isScanningRef } = useNumpad();
 
   const [screenState, setScreenState] = useState<ScreenState>('ready');
   const [pullFunction, setPullFunction] = useState<string>(PULL_FUNCTIONS[0].code);
@@ -477,12 +477,16 @@ export function PIPPage() {
     if (!v || loadingRef.current) return;
     const ld = labelDataRef.current;
     if (!ld) return;
+    // Read synchronously, before the await below — isScanningRef.current is still true
+    // here for a scan's trailing synthetic Enter (see NumpadContext's deliverScan), but
+    // is reset to false shortly after this function's synchronous prefix returns control.
+    const wasScanned = isScanningRef.current;
     setLoading(true);
     try {
       const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
         '/api/pulls/verify',
         token!,
-        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, palletId: v }) },
+        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, palletId: v, wasScanned }) },
       );
       onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
     } catch (err) {
@@ -512,12 +516,14 @@ export function PIPPage() {
     if (!v || loadingRef.current) return;
     const ld = labelDataRef.current;
     if (!ld) return;
+    // See handlePidVerify's comment — must be read before the await below.
+    const wasScanned = isScanningRef.current;
     setLoading(true);
     try {
       const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
         '/api/pulls/verify',
         token!,
-        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, upc: v }) },
+        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, upc: v, wasScanned }) },
       );
       onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
     } catch (err) {

@@ -47,9 +47,17 @@ import { parseFullLocationBarcode } from '../lib/locationParser.js';
  * from the pallet, and writes a PULL activity log entry with before/after quantities.
  * The pallet's full-pallet count (pallets field) is always set to 0 after any carton pull.
  *
+ * `wasScanned` also doubles as the activity log's verification-method record (see
+ * writeLog below): whichever of palletId/upc/location was actually submitted becomes
+ * `verifiedVia` ('PID' | 'UPC' | 'LID'), paired with this same `wasScanned` flag. For PID/
+ * UPC the frontend derives it from NumpadContext's isScanningRef read synchronously at
+ * the top of the field's submit handler (still true at that point for a scan's trailing
+ * synthetic Enter — see NumpadContext's deliverScan); for Location it's the structural
+ * scanned-vs-hand-entered signal already described above.
+ *
  * @param req - HTTP request with body:
- *   `{ labelId: string; pullFunction: string; palletId?: number | string }` or
- *   `{ labelId: string; pullFunction: string; upc?: string }` or
+ *   `{ labelId: string; pullFunction: string; palletId?: number | string; wasScanned?: boolean }` or
+ *   `{ labelId: string; pullFunction: string; upc?: string; wasScanned?: boolean }` or
  *   `{ labelId: string; pullFunction: string; location?: string; wasScanned?: boolean; confirmLevelMismatch?: boolean }`
  * @returns `{ location: string | null; updatedQuantity: { pallets, cartons, ssps } }`
  * @throws 400 INVALID_INPUT for missing fields or PALLET_MISMATCH / ALTERNATE_MISMATCH on wrong IDs;
@@ -188,6 +196,10 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
   }
 
   // ── Execute pull ────────────────────────────────────────────────────────────
+  // Exactly one of palletId/upc/location was required above (INVALID_INPUT otherwise),
+  // so this unambiguously identifies which field actually verified the pull.
+  const verifiedVia = body.palletId != null ? 'PID' : body.upc != null ? 'UPC' : 'LID';
+
   // Deduct the label's quantities from the pallet; floor at 0.
   // Any carton pull always zeroes the pallet count (breaks full-pallet status).
   const newCartons = Math.max(0, pallet.currentCartons - label.quantity);
@@ -232,6 +244,8 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
       pullFunction: body.pullFunction,
       pulled: { pallets: pulledPallets, cartons: label.quantity, ssps: label.sspQuantity },
       remaining: { pallets: newPallets, cartons: newCartons, ssps: newSSPs },
+      verifiedVia,
+      wasScanned: body.wasScanned === true,
       ...(confirmedLevel != null && { confirmedLevel }),
     },
   });

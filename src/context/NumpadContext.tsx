@@ -61,21 +61,28 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
    * with input here," which should always also drop the stale active-field highlight.
    *
    * Before installing the new field (or clearing to none), if a *different* field was
-   * previously active, its handler is sent a synthetic 'Enter' — moving focus to another
+   * previously active, its handler is sent a synthetic 'Blur' — moving focus to another
    * field, or dismissing the panel entirely (tap-outside with no new field focused), both
-   * commit whatever the field you're leaving currently holds, the same as pressing OK on it
-   * (bug report V1.0.5, "Tab-out/blur on filled field should trigger OK action"; extended to
-   * cover plain dismissal too, not just switching fields, in issue #5's fix). This must run
+   * give the field you're leaving a chance to commit whatever it currently holds, the same
+   * as pressing OK on it (bug report V1.0.5, "Tab-out/blur on filled field should trigger
+   * OK action"; extended to cover plain dismissal too, not just switching fields, in issue
+   * #5's fix) — *if* the worker actually typed something into it this focus session.
+   * Deliberately a distinct key from a real 'Enter'/'OK' (issue #90 — confirm and defocus
+   * are decoupled): useNumpadField's handler only treats 'Blur' as a confirm when its
+   * freshFocusRef is already false (something was typed since the field was last
+   * focused); a field that was refocused but left untouched — e.g. a stale value kept on
+   * purpose after a failed submission so the worker can fix a different field and retry
+   * without retyping it — does nothing on 'Blur' and keeps its value as-is. This must run
    * before keyHandlerRef/activeFieldIdRef are overwritten: the old field's own submit callback
    * typically calls hidePanel() (a reentrant setKeyHandler(null, null) call), and running the
-   * synthetic Enter first means that reentrant clear happens before — not after — the new
+   * synthetic Blur first means that reentrant clear happens before — not after — the new
    * field's registration, so the new field ends up active rather than clobbered back to none.
    * firingSyntheticRef guards against that reentrant call re-triggering this same block —
    * unlike the old field-switch-only version, dismissal is no longer distinguishable from the
    * reentrant call by fieldId alone (both have fieldId === null), so the ref is now load-bearing
    * for every path, not just an edge case.
    *
-   * @param handler - Function that receives individual key strings ('0'–'9', '⌫', 'Enter', 'OK', etc.)
+   * @param handler - Function that receives individual key strings ('0'–'9', '⌫', 'Enter', 'OK', 'Blur', etc.)
    * @param fieldId - Stable ID for the field (from useId); used to track which field is active
    */
   const setKeyHandler = useCallback((handler: ((key: string) => void) | null, fieldId: string | null = null) => {
@@ -83,7 +90,7 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
     const prevFieldId = activeFieldIdRef.current;
     if (!firingSyntheticRef.current && prevFieldId != null && prevFieldId !== fieldId && prevHandler) {
       firingSyntheticRef.current = true;
-      prevHandler('Enter');
+      prevHandler('Blur');
       firingSyntheticRef.current = false;
     }
 
@@ -112,6 +119,14 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
    * This matches how a physical barcode scanner emits keys in rapid succession.
    * Used both by the hardware scanner detection in AppShell and by demo buttons.
    *
+   * isScanningRef stays true through the trailing `handler('Enter')` call (only reset
+   * after it returns), not just through the character-injection loop — a field's own
+   * submit callback runs synchronously inside that call, so this lets any submit handler
+   * read `isScanningRef.current` at the moment it fires to know whether the value it's
+   * committing was scanned or typed (used for the activity log's verification-method
+   * tracking). Doesn't change the maxLength auto-submit-suppression behavior during
+   * injection — that check already only runs inside the loop, before this reset moved.
+   *
    * @param value - The complete string to inject (e.g. a label ID, pallet ID, or location barcode)
    */
   const deliverScan = useCallback((value: string) => {
@@ -120,8 +135,8 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
     isScanningRef.current = true;
     handler('CLEAR');
     for (const ch of value) handler(ch);
-    isScanningRef.current = false;
     handler('Enter');
+    isScanningRef.current = false;
   }, []);
 
   return (

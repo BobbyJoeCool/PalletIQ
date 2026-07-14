@@ -4,7 +4,7 @@ title: SDP — System Directed Put Flow
 flowchart TD
     START([Worker opens SDP\nsrc/pages/SDPPage.tsx]) --> S1
 
-    S1[State: entry\naisleField auto-focuses\nIM+ overrides available]
+    S1[State: entry\naisleField auto-focuses\nSize override: all roles\nStorage Code/Zone override: IM+ only]
 
     S1 --> AISLE[Worker enters Aisle number\nhandleAisleConfirm\nfocus moves to palletField]
 
@@ -14,15 +14,19 @@ flowchart TD
     VALIDATE -->|No aisle| NOOP[Field disabled\nno action]
     VALIDATE -->|Aisle present| API_DIR
 
-    API_DIR[POST /api/puts/directed\napi/functions/puts.ts — directedPut\ncheckPalletEligibility\nresolveStartingZone\nfindNextLocation\nCreate Reservation row]
+    API_DIR[POST /api/puts/directed\napi/functions/puts.ts — directedPut\ncheckPalletEligibility\nresolveEffectiveCriteria\nStorage Code/Size exact-match, Zone soft-pref\nfindNextLocation — zone asc, bin desc, level asc\nwith Zone-1 fallback retry\nCreate Reservation row incl. wasStaged]
 
     API_DIR --> DIR_OK{Result?}
-    DIR_OK -->|PALLET_NOT_FOUND| ERR_P1[Error: Pallet not found\npalletField cleared]
-    DIR_OK -->|NO_CARTONS| ERR_P2[Error: No stored cartons\npalletField cleared]
-    DIR_OK -->|NO_LOCATIONS| ERR_P3[Error: No eligible locations\nin requested aisle\npalletField cleared]
+    DIR_OK -->|PALLET_NOT_FOUND| ERR_P1[Error: Pallet not found\npalletField kept — re-focused for retry]
+    DIR_OK -->|CANCELED| ERR_P4[Error: Pallet canceled\npalletField kept — re-focused for retry]
+    DIR_OK -->|BLOCKED_BY_PENDING_PULL| ERR_P5[Error: Open Label pending\npalletField kept — re-focused for retry]
+    DIR_OK -->|NO_CARTONS| ERR_P2[Error: No stored cartons\npalletField kept — re-focused for retry]
+    DIR_OK -->|NO_LOCATIONS| ERR_P3[Error: No eligible locations\nin requested aisle\npalletField kept — re-focused for retry]
     DIR_OK -->|OK| DIR_RESULT[Returns reservationId\ndirectedLocation\npallet details\nalreadyStored flag]
 
     ERR_P1 --> S1
+    ERR_P4 --> S1
+    ERR_P5 --> S1
     ERR_P2 --> S1
     ERR_P3 --> S1
 
@@ -34,35 +38,37 @@ flowchart TD
     INFO_MSG --> S2
     WARN_MSG --> S2
 
-    S2[State: directed\nScreen LOCKED — active reservation\ndirectedLocation shown in red\nconfirmField auto-focuses\n5-min timer starts server-side]
+    S2[State: directed\nScreen LOCKED — active reservation\ndirectedLocation shown in red\nConfirm Location — full 3-box Aisle/Bin/Level panel\nauto-focuses first box\n5-min server-side timer pushes expiry to screen\nvia polling, not on next scan attempt]
 
     S2 --> ACTION{Worker action?}
 
-    ACTION -->|Scan confirm location\nhandleLocationConfirm| CONF[POST /api/puts/:id/confirm\napi/functions/puts.ts — confirmPut\nvalidate scanned === directed\nplacePallet atomic transaction\ndelete Reservation\nwriteLog PUT or MOVE_PUT]
+    ACTION -->|Confirm Location\n3-box entry or scan\nhandleLocationConfirm| CONF[POST /api/puts/:id/confirm\napi/functions/puts.ts — confirmPut\nvalidate scanned === directed\nplacePallet atomic transaction\ncopies storageCode/size/zone onto pallet\ndelete Reservation\nwriteLog PUT or MOVE_PUT incl. wasStaged + verification]
 
     CONF --> CONF_OK{Result?}
-    CONF_OK -->|LOCATION_MISMATCH| ERR_C1[Error: Wrong location\nconfirmField cleared + re-focused]
+    CONF_OK -->|LOCATION_MISMATCH| ERR_C1[Error: Wrong location\nfields cleared + re-focused]
     CONF_OK -->|NOT_FOUND\nreservation expired| EXPIRE_C[Warning: Reservation expired\nfull reset to entry]
-    CONF_OK -->|OK| PUT_SUCCESS[Success: Put / Move complete\nstopPolling\nhistory outcome → PUT or MOVE]
+    CONF_OK -->|OK, wasStaged true| PUT_SUCCESS_STAGED[Success: Put / Move complete — Staged\ninfo tone\nstopPolling\nhistory outcome → PUT or MOVE]
+    CONF_OK -->|OK, wasStaged false| PUT_SUCCESS_EMPTY[Success: Put / Move complete — Empty\nwarning tone, still Info-blue message\nstopPolling\nhistory outcome → PUT or MOVE]
 
     ERR_C1 --> S2
 
-    ACTION -->|Unassign button\nhandleUnassign| UNASSIGN[POST /api/puts/:id/unassign\napi/functions/puts.ts — unassignPut\nclear location to EMPTY\ndelete Reservation atomic]
+    ACTION -->|Unassign button\nhandleUnassign| UNASSIGN[POST /api/puts/:id/unassign\napi/functions/puts.ts — unassignPut\nrestore location to STAGED if wasStaged===true, else EMPTY\ndelete Reservation atomic]
 
     UNASSIGN --> UN_OK{Result?}
     UN_OK -->|NOT_FOUND| EXPIRE_U[Warning: Reservation expired\nfull reset]
-    UN_OK -->|OK| UN_SUCCESS[Info: Reservation cleared\nhistory outcome → RELEASED\nreset to entry — locked overrides kept]
+    UN_OK -->|OK| UN_SUCCESS[Info: Reservation cleared — Staged/Empty shown\nhistory outcome → RELEASED\nreset to entry — locked overrides kept]
 
-    ACTION -->|Blocked Put button\nhandleBlock| BLOCK[POST /api/puts/:id/block\napi/functions/puts.ts — blockPut\nHold Both on current location\nfindNextLocation\nnew Reservation\nwriteLog RESERVE]
+    ACTION -->|Blocked Put button\nhandleBlock| BLOCK[POST /api/puts/:id/block\napi/functions/puts.ts — blockPut\nHold Both on current location\nrestore to STAGED if wasStaged===true, else EMPTY\nre-derive resolveEffectiveCriteria\nfindNextLocation\nnew Reservation carries wasStaged forward\nwriteLog RESERVE]
 
     BLOCK --> BLK_OK{Result?}
     BLK_OK -->|NO_LOCATIONS| ERR_BLK[Error: No further locations\nhold placed\nfull reset to entry]
     BLK_OK -->|NOT_FOUND| EXPIRE_B[Warning: Reservation expired\nfull reset]
-    BLK_OK -->|OK| BLK_SUCCESS[New reservationId + directedLocation\nupdate directed state\nold entry → BLOCKED\nnew entry → ASSIGNED\nconfirmField re-focused]
+    BLK_OK -->|OK| BLK_SUCCESS[New reservationId + directedLocation\nupdate directed state\nold entry → BLOCKED\nnew entry → ASSIGNED\nconfirm panel re-focused]
 
     BLK_SUCCESS --> S2
 
-    PUT_SUCCESS --> RESET_N[Partial reset\nclear pallet + confirm\nnon-locked overrides cleared\nfocus → pallet field]
+    PUT_SUCCESS_STAGED --> RESET_N[Partial reset\nclear pallet + confirm\nnon-locked overrides cleared\nfocus → pallet field]
+    PUT_SUCCESS_EMPTY --> RESET_N
     RESET_N --> S1
 
     UN_SUCCESS --> S1
@@ -73,9 +79,12 @@ flowchart TD
     S1_FULL --> S1
 
     style START fill:#1a1a1a,stroke:#555,color:#fff
-    style PUT_SUCCESS fill:#003300,stroke:#006600,color:#fff
+    style PUT_SUCCESS_STAGED fill:#003300,stroke:#006600,color:#fff
+    style PUT_SUCCESS_EMPTY fill:#003300,stroke:#006600,color:#fff
     style UN_SUCCESS fill:#003333,stroke:#006666,color:#aaffff
     style ERR_P1 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_P4 fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_P5 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_P2 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_P3 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_C1 fill:#330000,stroke:#660000,color:#ff8080

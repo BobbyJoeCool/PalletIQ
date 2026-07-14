@@ -9,43 +9,56 @@ export function sideOf(bin: number): 'odd' | 'even' {
   return bin % 2 === 0 ? 'even' : 'odd';
 }
 
+export interface EffectiveCriteria {
+  size?: string;
+  storageCode?: string;
+  zone: number;
+}
+
 /**
- * Determines the starting zone for a directed put.
- *
- * Rule: if the pallet's DPCI is already stored in the target aisle,
- * start in that zone. Otherwise fall through Zone 1 → 2 → 3 → 4.
- *
- * When a zone override is supplied, that overrides this logic entirely.
+ * Resolves the effective Size/Storage Code/Zone to search with for a Directed Put — the
+ * SDP put hierarchy: an explicit override always wins; otherwise Size falls back to the
+ * pallet's own inherited value (undefined — no filter — if it has none, i.e.
+ * PUT_PENDING; Item has no equivalent classification to fall further back to). Storage
+ * Code has a third tier: the pallet's own inherited value, then the Item's own intrinsic
+ * Storage Code (always set) — so a pallet that's never been stored still gets a real
+ * Storage Code filter on its first put, rather than none at all. Zone falls back like
+ * Size but always resolves to a concrete number, defaulting to 1. Shared by directedPut
+ * (the initial search) and blockPut (a Blocked Put's re-search, which must reapply the
+ * exact same effective criteria).
  */
-export async function resolveStartingZone(
-  aisle: number,
-  dept: number,
-  cls: number,
-  item: number,
-  zoneOverride?: number,
-): Promise<number> {
-  if (zoneOverride != null) return zoneOverride;
+export function resolveEffectiveCriteria(
+  overrides: { size?: string | null; storageCode?: string | null; zone?: number | null },
+  pallet: { size: string | null; storageCode: string | null; zone: number | null; itemStorageCode: string },
+): EffectiveCriteria {
+  return {
+    size:        overrides.size        ?? pallet.size        ?? undefined,
+    storageCode: overrides.storageCode ?? pallet.storageCode ?? pallet.itemStorageCode,
+    zone:        overrides.zone        ?? pallet.zone         ?? 1,
+  };
+}
 
-  // Look for any location in this aisle that already holds a pallet with this DPCI.
-  const existing = await prisma.pallet.findFirst({
-    where: {
-      dept,
-      class: cls,
-      item,
-      locationAisle: aisle,
-      locationBin: { not: null },
-    },
-    include: {
-      location: { select: { zone: true } },
-    },
-  });
-
-  return existing?.location?.zone ?? 1;
+export interface FoundLocation {
+  aisle: number;
+  bin: number;
+  level: number;
+  zone: number;
+  /** True if this location was already STAGED (the preferred/expected outcome) when
+   *  matched, false if the search fell through to the EMPTY search — see confirmPut,
+   *  which surfaces this as Blue Info + a "wasn't staged" note instead of plain Green
+   *  Success (the SDP put hierarchy's rule 4.a). */
+  wasStaged: boolean;
 }
 
 /**
  * Finds the next available location in an aisle, starting at the given zone,
- * optionally filtered by size and/or storageCode.
+ * optionally filtered by size and/or storageCode (both exact-match — the caller resolves
+ * these ahead of time from an IM+ override or the pallet's own inherited Storage
+ * Code/Size, see directedPut). Deterministic within a zone: highest bin first, then
+ * lowest level first within that bin, before stepping down to the next-lower bin — same
+ * direction Staging fills from (both work from the back of the aisle forward now).
+ * Scanning the same aisle/constraints repeatedly with nothing else changing always
+ * finds the same location.
  *
  * When not consolidating, STAGED locations are preferred over EMPTY ones (issue #79) —
  * a GPMer's staged space is exactly what SDP should be directing pallets into first, so
@@ -63,14 +76,20 @@ export async function resolveStartingZone(
  * table) and are excluded; Hold Outbound only blocks label generation, so a location
  * under Hold Outbound remains a valid put candidate.
  *
- * Returns null if no eligible location exists.
+ * If nothing eligible exists at or above `startZone`, the whole search retries from
+ * Zone 1 before giving up — `startZone` is only ever a *preference* (the pallet's own
+ * inherited zone, or an IM+ override), not a hard constraint; a zone that happens to be
+ * full shouldn't hide an eligible location sitting in an earlier one. No-op when
+ * `startZone` is already 1.
+ *
+ * Returns null if no eligible location exists anywhere in the aisle.
  */
 export async function findNextLocation(
   aisle: number,
   startZone: number,
   opts: { size?: string; storageCode?: string; excludeStaged?: boolean },
-): Promise<{ aisle: number; bin: number; level: number; zone: number } | null> {
-  async function search(status: 'EMPTY' | 'STAGED') {
+): Promise<FoundLocation | null> {
+  async function search(status: 'EMPTY' | 'STAGED', fromZone: number) {
     return prisma.location.findFirst({
       where: {
         aisle,
@@ -85,17 +104,27 @@ export async function findNextLocation(
         contraction: false,
         ...(opts.size        && { size:        opts.size }),
         ...(opts.storageCode && { storageCode: opts.storageCode }),
-        zone: { gte: startZone },
+        zone: { gte: fromZone },
       },
-      orderBy: [{ zone: 'asc' }, { bin: 'asc' }, { level: 'asc' }],
+      // Deterministic fill order, back-to-front: highest bin first, then lowest level
+      // first within a bin, moving up a level at a time before stepping down to the next
+      // (lower) bin — same direction Staging already fills from (issue found live: the
+      // two workflows now intentionally share one end of the aisle rather than working
+      // from opposite ends).
+      orderBy: [{ zone: 'asc' }, { bin: 'desc' }, { level: 'asc' }],
     });
   }
 
-  const location = opts.excludeStaged
-    ? await search('EMPTY')
-    : (await search('STAGED')) ?? (await search('EMPTY'));
+  async function searchFrom(fromZone: number) {
+    const staged = opts.excludeStaged ? null : await search('STAGED', fromZone);
+    if (staged) return { ...staged, wasStaged: true as const };
+    const empty = await search('EMPTY', fromZone);
+    return empty ? { ...empty, wasStaged: false as const } : null;
+  }
 
-  return location
-    ? { aisle: location.aisle, bin: location.bin, level: location.level, zone: location.zone }
+  const found = (await searchFrom(startZone)) ?? (startZone > 1 ? await searchFrom(1) : null);
+
+  return found
+    ? { aisle: found.aisle, bin: found.bin, level: found.level, zone: found.zone, wasStaged: found.wasStaged }
     : null;
 }
