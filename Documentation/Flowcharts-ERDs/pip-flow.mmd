@@ -36,7 +36,7 @@ flowchart TD
 
     VER_PATH -->|Pallet ID\nPID field| PID_VERIFY[POST /api/pulls/verify\nwith palletId\napi/functions/pulls.ts — verifyPull]
     VER_PATH -->|UPC\nUPC field — issue #82| UPC_VERIFY[POST /api/pulls/verify\nwith upc\napi/functions/pulls.ts — verifyPull]
-    VER_PATH -->|Location\nLocation field — issue #82| LOC_VERIFY[POST /api/pulls/verify\nwith location\napi/functions/pulls.ts — verifyPull]
+    VER_PATH -->|Location\nLocationEntryFields 3-box| LOC_VERIFY[POST /api/pulls/verify\nwith location + wasScanned\napi/functions/pulls.ts — verifyPull]
 
     PID_VERIFY --> PID_OK{Result?}
     PID_OK -->|PALLET_MISMATCH| ERR_PID[Error: Incorrect Pallet ID\npidField cleared + re-focused]
@@ -48,9 +48,16 @@ flowchart TD
     UPC_OK -->|Yes| SUCCESS
 
     LOC_VERIFY --> LOC_BIN{aisle+bin match?}
-    LOC_BIN -->|No — ALTERNATE_MISMATCH| ERR_LOC[Error: Invalid Location\nlocationField cleared + re-focused]
-    LOC_BIN -->|Yes| LOC_FN{pullFunction?}
-    LOC_FN -->|CA/CF\nlevel ignored| SUCCESS
+    LOC_BIN -->|No — ALTERNATE_MISMATCH, any\nfunction/entry method| ERR_LOC[Error: Invalid Location\nLocationEntryFields cleared + re-focused]
+    LOC_BIN -->|Yes| LOC_METHOD{wasScanned?}
+    LOC_METHOD -->|No — hand-entered\nany pullFunction| LOC_LEVEL_MANUAL{level also\nmatches?}
+    LOC_LEVEL_MANUAL -->|Yes| SUCCESS
+    LOC_LEVEL_MANUAL -->|No — full match required,\nno recovery popup| ERR_LOC
+    LOC_METHOD -->|Yes — scanned| LOC_FN{pullFunction?}
+    LOC_FN -->|CF\nlevel ignored| SUCCESS
+    LOC_FN -->|CA| LOC_LEVEL_CA{level also\nmatches?}
+    LOC_LEVEL_CA -->|Yes| SUCCESS
+    LOC_LEVEL_CA -->|No — full match required,\nno recovery popup| ERR_LOC
     LOC_FN -->|FP| LOC_LEVEL{level also\nmatches?}
     LOC_LEVEL -->|Yes| SUCCESS
     LOC_LEVEL -->|No — issues #48/#49\nLEVEL_MISMATCH 400| CORRECT[LevelCorrectionDialog — issue #72:\nWhat level was this pallet\nactually pulled from?\nworker types the level]

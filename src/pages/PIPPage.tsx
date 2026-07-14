@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DemoPicker } from '../components/shared/DemoPicker';
+import { Dropdown } from '../components/shared/Dropdown';
 import { HoldPanel } from '../components/shared/HoldPanel';
+import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
@@ -59,6 +62,11 @@ const QTY_COLS: { key: keyof Qty; label: string }[] = [
  * Pull (quantity requested by the label), and — once verification has computed it —
  * Remaining below a divider. Any Remaining cell at 0 is shown in red, matching the old
  * highlight behavior, to alert the worker a unit type is fully depleted.
+ *
+ * The Carton column is emphasized (~33% larger, info blue) over Pallet/SSP — cartons are
+ * what a worker is counting out by hand on most pulls, so it's the number most worth
+ * making easy to read at a glance; a depleted-Carton cell still falls back to the same
+ * red-on-zero warning as every other column.
  */
 function QtyTable({ current, pull, remaining, remainingZero }: { current: Qty; pull: Qty; remaining: Qty | null; remainingZero?: boolean }) {
   return (
@@ -71,26 +79,42 @@ function QtyTable({ current, pull, remaining, remainingZero }: { current: Qty; p
 
         <span className="font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Current</span>
         {QTY_COLS.map(({ key }) => (
-          <span key={key} className="font-data text-[20px] font-semibold text-white text-center">{current[key]}</span>
+          <span
+            key={key}
+            className={`font-data font-semibold text-center ${key === 'cartons' ? 'text-[27px] text-[#5B9BD5]' : 'text-[20px] text-white'}`}
+          >
+            {current[key]}
+          </span>
         ))}
 
         <span className="font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Pull</span>
         {QTY_COLS.map(({ key }) => (
-          <span key={key} className="font-data text-[20px] font-semibold text-white text-center">{pull[key]}</span>
+          <span
+            key={key}
+            className={`font-data font-semibold text-center ${key === 'cartons' ? 'text-[27px] text-[#5B9BD5]' : 'text-[20px] text-white'}`}
+          >
+            {pull[key]}
+          </span>
         ))}
 
         {remaining && (
           <>
             <div className="col-span-4 border-t border-[#333] my-0.5" />
             <span className="font-ui text-[15px] font-semibold text-[#9A9A9A] uppercase tracking-wider">Remaining</span>
-            {QTY_COLS.map(({ key }) => (
-              <span
-                key={key}
-                className={`font-data text-[22px] font-bold text-center ${remainingZero && remaining[key] === 0 ? 'text-[#CC0000]' : 'text-white'}`}
-              >
-                {remaining[key]}
-              </span>
-            ))}
+            {QTY_COLS.map(({ key }) => {
+              const depleted = remainingZero && remaining[key] === 0;
+              const emphasized = key === 'cartons';
+              return (
+                <span
+                  key={key}
+                  className={`font-data font-bold text-center ${emphasized ? 'text-[29px]' : 'text-[22px]'} ${
+                    depleted ? 'text-[#CC0000]' : emphasized ? 'text-[#5B9BD5]' : 'text-white'
+                  }`}
+                >
+                  {remaining[key]}
+                </span>
+              );
+            })}
           </>
         )}
       </div>
@@ -161,13 +185,15 @@ function FieldDisplay({
 
 // ── PIP Screen ───────────────────────────────────────────────────────────────
 
-type ScreenState = 'selectFunction' | 'ready' | 'verifying';
+type ScreenState = 'ready' | 'verifying';
 
 /**
  * Pallet ID Pull (PIP) screen.
- * Three-state flow: selectFunction → ready → verifying.
+ * Two-state flow: ready → verifying. Pull Function is a persistent dropdown at the top of
+ * the screen (defaults to the first option) rather than a separate initial step — Label/
+ * PID/UPC/Location are always reachable, and changing the function is just a dropdown
+ * selection away rather than a full-screen mode switch.
  *
- * selectFunction: Worker picks a pull function (CA/CF/FP). Advances to ready.
  * ready: Label field is active. Scanning a label validates it via GET /api/labels/:id and
  *   checks that its pullFunction matches the selected one. On match, transitions to verifying.
  * verifying: Shows label/pallet/remaining quantities. Worker scans any one of:
@@ -275,8 +301,8 @@ export function PIPPage() {
   const { setMessage } = useMessageBar();
   const { deliverScan } = useNumpad();
 
-  const [screenState, setScreenState] = useState<ScreenState>('selectFunction');
-  const [pullFunction, setPullFunction] = useState<string | null>(null);
+  const [screenState, setScreenState] = useState<ScreenState>('ready');
+  const [pullFunction, setPullFunction] = useState<string>(PULL_FUNCTIONS[0].code);
   const [labelData, setLabelData] = useState<LabelScanResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -286,6 +312,9 @@ export function PIPPage() {
   // Pending FP level-mismatch confirmation (issue #49) — set by handleLocationVerify on
   // LEVEL_MISMATCH, resolved by confirmLevelMismatch/cancelLevelMismatch.
   const [levelMismatch, setLevelMismatch] = useState<{ scannedLevel: number; actualLevel: number; locationValue: string } | null>(null);
+  // Demo-only "which invalid label" picker (shared DemoPicker component) — see
+  // pickInvalidLabel's comment.
+  const [invalidLabelPickerOpen, setInvalidLabelPickerOpen] = useState(false);
 
   const labelField    = useNumpadField();
   const pidField      = useNumpadField();
@@ -293,7 +322,17 @@ export function PIPPage() {
   // independently scannable/enterable (one-active-field-at-a-time, same as everywhere
   // else), and confirming either alone immediately attempts a verify with just that value.
   const upcField      = useNumpadField();
-  const locationField = useNumpadField();
+  // Location is the shared 3-box Aisle/Bin/Level component (also used by PAR/WLH/LII)
+  // rather than a useNumpadField() — it manages its own three internal fields, so state
+  // that used to live on a single field object is tracked separately here. `locationActive`
+  // mirrors the other fields' `.isActive` for the demo-footer gating below; `locationEntryKey`
+  // forces a full remount (clearing all three boxes) on error/retry/reset, and
+  // `locationAutoFocusRef` is read by that fresh instance's `autoFocus` prop — mutating it
+  // just before bumping the key is what lets a remount optionally auto-focus Aisle again,
+  // matching how PID/UPC explicitly refocus themselves after an error.
+  const [locationActive, setLocationActive] = useState(false);
+  const [locationEntryKey, setLocationEntryKey] = useState(0);
+  const locationAutoFocusRef = useRef(false);
 
   // Guards the 'verifying'-entry auto-focus effect below against stealing focus back to
   // PID if the worker (or a fast automated scan) has already manually focused a different
@@ -315,11 +354,27 @@ export function PIPPage() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
-  /** Sets the chosen pull function and transitions from selectFunction → ready state. */
-  function handleSelectFunction(fn: string) {
+  /**
+   * Handles a Pull Function change from the dropdown. A no-op if the same value is
+   * re-selected (tapping the dropdown open and picking the current function shouldn't
+   * disrupt an in-progress verification). Otherwise resets back to ready — warning about
+   * and discarding any unverified label first, matching the old full-screen selector's
+   * "changing function abandons the current label" behavior — clears the Label field, and
+   * refocuses it for the next scan under the new function.
+   */
+  function handlePullFunctionChange(fn: string) {
+    if (fn === pullFunctionRef.current) return;
+    if (screenStateRef.current === 'verifying') {
+      setMessage({ type: 'warning', text: 'Label not verified' });
+      setLabelData(null);
+      pidField.clear();
+      upcField.clear();
+      resetLocationField(false);
+    }
     setPullFunction(fn);
     setScreenState('ready');
-    setTimeout(() => focusLabelField(), 60);
+    labelField.clear();
+    setTimeout(() => focusLabelField(), 50);
   }
 
   /** Registers the Label field's numpad handler, wired to handleLabelScan on confirm. */
@@ -339,11 +394,11 @@ export function PIPPage() {
     upcField.focus(handleUpcVerify);
   }, [upcField]);
 
-  /** Registers the Location field's numpad handler, wired to handleLocationVerify on confirm. */
-  const focusLocationField = useCallback(() => {
-    suppressAutoPidFocusRef.current = true;
-    locationField.focus(handleLocationVerify);
-  }, [locationField]);
+  /** Clears Location's three boxes via a full remount; pass autoFocus to also refocus Aisle immediately (matching PID/UPC's clear-and-refocus-on-error behavior). */
+  const resetLocationField = useCallback((autoFocus: boolean) => {
+    locationAutoFocusRef.current = autoFocus;
+    setLocationEntryKey((k) => k + 1);
+  }, []);
 
   /**
    * Submit handler for the label field. Calls GET /api/labels/:id.
@@ -373,14 +428,17 @@ export function PIPPage() {
       // actually reported; the fields still get cleared to make way for the new label's data.
       pidField.clear();
       upcField.clear();
-      locationField.clear();
+      resetLocationField(false);
     }
     setLoading(true);
     try {
       const data = await apiFetch<LabelScanResult>(`/api/labels/${encodeURIComponent(v)}`, token!);
       if (data.label.pullFunction !== pullFunctionRef.current) {
         playAlert('error');
-        labelField.clear();
+        // Value stays visible (not cleared) so the worker can see what they scanned;
+        // re-focusing (not clearing) still arms a fresh start for the next input, so a
+        // manual retry replaces rather than appends onto the stale value.
+        focusLabelField();
         setMessage({ type: 'error', text: `Wrong function — label requires ${data.label.pullFunction}` });
         return;
       }
@@ -395,7 +453,10 @@ export function PIPPage() {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
-      labelField.clear();
+      // Value stays visible (not cleared) so the worker can see what they scanned; see
+      // the Wrong Function branch above for why focusLabelField() (not .clear()) is what
+      // arms a fresh start for the next input.
+      focusLabelField();
       if (code === 'NOT_FOUND') {
         setMessage({ type: 'error', text: 'Label not found' });
       } else {
@@ -477,15 +538,19 @@ export function PIPPage() {
   }
 
   /**
-   * Submit handler for the Location field. Calls POST /api/pulls/verify with location.
-   * On mismatch (ALTERNATE_MISMATCH), clears and re-focuses the Location field for retry.
-   * On an FP-only level mismatch (LEVEL_MISMATCH — aisle+bin matched but level didn't),
-   * opens a confirm prompt instead of failing outright (issue #49): a Full Pallet pull
-   * happens from floor level, so the worker may only be able to reach/scan a barcode at a
-   * level other than where the pallet is actually stored.
-   * On success, calls onPullSuccess.
+   * Submit handler for Location, called by LocationEntryFields once a full 8-digit
+   * Aisle+Bin+Level value resolves. Hand-entry always locks Aisle to the pallet's real
+   * value (per locationLockedAisle below — re-typing it isn't required for any function);
+   * Carton Floor additionally locks Level, so only its Bin is actually fallible in
+   * practice, while CA/FP still require Bin and Level to be genuinely typed and verified.
+   * Calls POST /api/pulls/verify with location and wasScanned — the match rule depends on
+   * both the pull function and entry method (see verifyPull's docstring): scanned CA needs
+   * a full match, scanned CF only Aisle+Bin, scanned FP a full match with a level-mismatch
+   * recovery popup, hand-entered CA/FP a full match with no popup. On mismatch
+   * (ALTERNATE_MISMATCH), clears and re-focuses Location for retry. On success, calls
+   * onPullSuccess.
    */
-  async function handleLocationVerify(value: string) {
+  async function handleLocationVerify(value: string, wasScanned: boolean) {
     const v = value.trim();
     if (!v || loadingRef.current) return;
     const ld = labelDataRef.current;
@@ -495,7 +560,7 @@ export function PIPPage() {
       const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
         '/api/pulls/verify',
         token!,
-        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, location: v }) },
+        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, location: v, wasScanned }) },
       );
       onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
     } catch (err) {
@@ -508,8 +573,7 @@ export function PIPPage() {
         }
       }
       playAlert('error');
-      locationField.clear();
-      locationField.focus(handleLocationVerify);
+      resetLocationField(true);
       if (code === 'ALTERNATE_MISMATCH') {
         setMessage({ type: 'error', text: 'Invalid Location' });
       } else if (code === 'WRONG_PULL_FUNCTION') {
@@ -527,7 +591,8 @@ export function PIPPage() {
    * correction rather than just confirming/rejecting the mismatch). Replaces the
    * originally-scanned level with that correction (aisle+bin unchanged) and resubmits
    * with confirmLevelMismatch: true; the corrected level is accepted as-is, no further
-   * validation against real data.
+   * validation against real data. Only reachable via a scanned Full Pallet mismatch (see
+   * handleLocationVerify), so wasScanned is always true on the resubmit.
    */
   async function confirmLevelMismatch(correctedLevel: number) {
     const pending = levelMismatch;
@@ -540,13 +605,12 @@ export function PIPPage() {
       const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
         '/api/pulls/verify',
         token!,
-        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, location: correctedLocation, confirmLevelMismatch: true }) },
+        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, location: correctedLocation, confirmLevelMismatch: true, wasScanned: true }) },
       );
       onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
     } catch {
       playAlert('error');
-      locationField.clear();
-      locationField.focus(handleLocationVerify);
+      resetLocationField(true);
       setMessage({ type: 'error', text: 'Verification failed — please try again' });
     } finally {
       setLoading(false);
@@ -557,8 +621,7 @@ export function PIPPage() {
   function cancelLevelMismatch() {
     setLevelMismatch(null);
     playAlert('error');
-    locationField.clear();
-    locationField.focus(handleLocationVerify);
+    resetLocationField(true);
     setMessage({ type: 'error', text: 'Invalid Location' });
   }
 
@@ -588,7 +651,7 @@ export function PIPPage() {
     labelField.clear();
     pidField.clear();
     upcField.clear();
-    locationField.clear();
+    resetLocationField(false);
     focusLabelField();
   }
 
@@ -618,8 +681,7 @@ export function PIPPage() {
   /** Fetches a real label id (matching the selected pull function) and delivers it as a simulated scan. */
   const demoScanLabel = useCallback(async () => {
     try {
-      const fnParam = pullFunction ? `?fn=${pullFunction}` : '';
-      const { labelId } = await apiFetch<{ labelId: string }>(`/api/demo/label${fnParam}`, token!);
+      const { labelId } = await apiFetch<{ labelId: string }>(`/api/demo/label?fn=${pullFunction}`, token!);
       deliverScan(labelId);
     } catch (err) {
       setMessage({ type: 'error', text: `Demo label: ${err instanceof Error ? err.message : 'unavailable'}` });
@@ -631,12 +693,22 @@ export function PIPPage() {
     deliverScan('INVALID-LABEL-000');
   }, [deliverScan]);
 
-  /** Fetches a real, valid label for a pull function other than the one selected, and delivers it as a simulated scan — demonstrates the "Wrong function" error path (handleLabelScan's FN_CHECK). */
-  const demoWrongFnLabel = useCallback(async () => {
-    const otherFn = PULL_FUNCTIONS.find(f => f.code !== pullFunction)?.code;
-    if (!otherFn) return;
+  /**
+   * Dispatches the shared DemoPicker's choice — consolidates what used to be four
+   * separate demo callbacks (Wrong Function / Pulled / Canceled / Purged) behind one
+   * "Invalid Label" footer button plus this popup, to keep the footer's single row from
+   * getting crowded. Wrong Function fetches a real label for a different pull function
+   * (demonstrates handleLabelScan's FN_CHECK path); the other three fetch a label already
+   * in that terminal status (demonstrates the "Invalid status: {status}" path, which a
+   * worker can't otherwise reach by scanning normally).
+   */
+  const pickInvalidLabel = useCallback(async (kind: 'wrongFn' | 'pulled' | 'canceled' | 'purged') => {
+    setInvalidLabelPickerOpen(false);
     try {
-      const { labelId } = await apiFetch<{ labelId: string }>(`/api/demo/label?fn=${otherFn}`, token!);
+      const query = kind === 'wrongFn'
+        ? `fn=${PULL_FUNCTIONS.find(f => f.code !== pullFunction)?.code ?? ''}`
+        : `status=${{ pulled: 'PULLED', canceled: 'CANCELED', purged: 'PURGED' }[kind]}`;
+      const { labelId } = await apiFetch<{ labelId: string }>(`/api/demo/label?${query}`, token!);
       deliverScan(labelId);
     } catch (err) {
       setMessage({ type: 'error', text: `Demo label: ${err instanceof Error ? err.message : 'unavailable'}` });
@@ -690,7 +762,7 @@ export function PIPPage() {
 
   /** Delivers a location that won't match the current label, simulating a mismatch. */
   const demoBadLocation = useCallback(() => {
-    deliverScan('000000000');
+    deliverScan('00000000'); // 8 digits — must be exactly 8 to hit LocationEntryFields' full-barcode-scan path
   }, [deliverScan]);
 
   // Memoized so the JSX reference is stable across renders that don't change which
@@ -698,12 +770,11 @@ export function PIPPage() {
   // unmemoized JSX literal would recreate it (and re-fire the effect) on every render,
   // looping forever via the FooterDemoContext state update it triggers.
   const demoSlot = useMemo(() => (
-    screenState === 'selectFunction' ? null :
     labelField.isActive ? (
       <>
         <DemoBtn label="✓ Scan Label" color="green" onClick={demoScanLabel} />
         <DemoBtn label="✗ Scan Label" color="red"   onClick={demoBadLabel} />
-        <DemoBtn label="⚠ Wrong Function" color="amber" onClick={demoWrongFnLabel} />
+        <DemoBtn label="⚠ Invalid Label" color="amber" onClick={() => setInvalidLabelPickerOpen(true)} />
       </>
     ) : pidField.isActive ? (
       <>
@@ -715,15 +786,16 @@ export function PIPPage() {
         <DemoBtn label="✓ UPC" color="green" onClick={demoScanUpc} />
         <DemoBtn label="✗ UPC" color="red"   onClick={demoBadUpc} />
       </>
-    ) : locationField.isActive ? (
+    ) : locationActive ? (
       <>
         <DemoBtn label="✓ Location" color="green" onClick={demoScanLocation} />
         <DemoBtn label="✗ Location" color="red"   onClick={demoBadLocation} />
       </>
     ) : null
   ), [
-    screenState, labelField.isActive, pidField.isActive, upcField.isActive, locationField.isActive,
-    demoScanLabel, demoBadLabel, demoWrongFnLabel, demoScanPid, demoBadPid, demoScanUpc, demoBadUpc, demoScanLocation, demoBadLocation,
+    labelField.isActive, pidField.isActive, upcField.isActive, locationActive,
+    demoScanLabel, demoBadLabel,
+    demoScanPid, demoBadPid, demoScanUpc, demoBadUpc, demoScanLocation, demoBadLocation,
   ]);
 
   useDemoSlot(demoSlot);
@@ -742,6 +814,16 @@ export function PIPPage() {
     ? remaining.pallets === 0 || remaining.cartons === 0 || remaining.ssps === 0
     : false;
 
+  // Hand-entered Location locks Aisle across every pull function — re-typing it doesn't
+  // add verification value, the worker already knows their aisle by other means — pulled
+  // from the label already loaded rather than typed. Carton Floor additionally locks
+  // Level too, since only its Bin actually needs verifying (product decision); CA/FP
+  // still require Bin and Level to be genuinely typed and checked. All boxes stay visible
+  // for layout consistency; a full location is always reconstructed underneath regardless
+  // of which boxes are locked.
+  const locationLockedAisle = labelData?.location.id ? labelData.location.id.slice(0, 3) : undefined;
+  const locationLockedLevel = pullFunction === 'CF' && labelData?.location.id ? labelData.location.id.slice(6, 8) : undefined;
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -749,78 +831,43 @@ export function PIPPage() {
       {/* Left column — workflow content */}
       <div className="flex-1 flex flex-col p-5 gap-3 overflow-y-auto">
 
-        {screenState === 'selectFunction' ? (
-          /* Function selector */
-          <div className="flex flex-col gap-4">
-            <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-              Pull Function
-            </span>
-            <div className="flex flex-col gap-3">
-              {PULL_FUNCTIONS.map(fn => (
-                <button
-                  key={fn.code}
-                  type="button"
-                  onClick={() => handleSelectFunction(fn.code)}
-                  className="flex items-center gap-5 h-[72px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A] hover:border-[#CC0000] transition-colors"
-                >
-                  <span className="font-data text-[32px] font-medium text-white w-[48px]">{fn.code}</span>
-                  <span className="font-ui text-[18px] text-[#9A9A9A]">{fn.desc}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
+        {/* Pull Function — persistent dropdown, always reachable; changing it mid-
+            verification discards the unverified label (handlePullFunctionChange). */}
+        <div className="flex items-center gap-3">
+          <Dropdown
+            label="Pull Function"
+            value={pullFunction}
+            options={PULL_FUNCTIONS.map(fn => ({ value: fn.code, label: `${fn.code} — ${fn.desc}` }))}
+            onChange={handlePullFunctionChange}
+          />
+          {labelData?.location.id && (
+            <button
+              type="button"
+              onClick={() => setHoldOpen(true)}
+              className="ml-auto h-[38px] px-4 rounded-[8px] font-ui text-[14px] font-medium border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
+            >
+              Hold
+            </button>
+          )}
+        </div>
+
+        {/* Label input */}
+        <FieldDisplay
+          label="Scan Label"
+          value={labelField.value}
+          onFocus={focusLabelField}
+          active={labelField.isActive}
+        />
+
+        {/* State 2 — scan data + verification */}
+        {screenState === 'verifying' && labelData && (
           <>
-            {/* Selected function indicator — tap to change */}
-            <div className="flex items-center gap-3">
-              <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-                Pull Function
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  if (screenStateRef.current === 'verifying') {
-                    setMessage({ type: 'warning', text: 'Label not verified' });
-                    setLabelData(null);
-                    pidField.clear();
-                    upcField.clear();
-                    locationField.clear();
-                  }
-                  labelField.clear();
-                  setScreenState('selectFunction');
-                }}
-                className="font-data text-[18px] font-semibold text-white px-3 py-1 rounded-[6px] bg-[#1A1A1A] border border-[#3A3A3A] hover:border-[#CC0000] transition-colors"
-              >
-                {pullFunction}
-              </button>
-              {labelData?.location.id && (
-                <button
-                  type="button"
-                  onClick={() => setHoldOpen(true)}
-                  className="ml-auto h-[38px] px-4 rounded-[8px] font-ui text-[14px] font-medium border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
-                >
-                  Hold
-                </button>
-              )}
-            </div>
-
-            {/* Label input */}
-            <FieldDisplay
-              label="Scan Label"
-              value={labelField.value}
-              onFocus={focusLabelField}
-              active={labelField.isActive}
-            />
-
-            {/* State 2 — scan data + verification */}
-            {screenState === 'verifying' && labelData && (
-              <>
                 <div className="flex flex-col mt-1">
                   <DataRow label="Location">
                     {labelData.location.id
                       ? (
                         <span className="inline-flex px-3 py-1 rounded-[10px] bg-[#CC0000]/10 border-2 border-[#CC0000]/40">
-                          <LiveId type="location" id={labelData.location.id} className="!text-[48px] !font-bold !text-[#FF1A1A]" />
+                          <LiveId type="location" id={labelData.location.id} className="!text-[46px] !font-bold !text-[#FF1A1A]" />
                         </span>
                       )
                       : <span className="text-[#9A9A9A]">—</span>}
@@ -845,31 +892,31 @@ export function PIPPage() {
                   {/* Issue #82 — UPC and Location, side by side, replacing the old combined
                       Alternate ID field. Each is independently scannable/enterable; confirming
                       either alone immediately attempts a verify with just that value. */}
-                  <div className="flex gap-2">
+                  <div className="flex items-end gap-4">
                     <div className="flex-1">
                       <FieldDisplay
                         label="UPC"
                         value={upcField.value}
                         onFocus={focusUpcField}
                         active={upcField.isActive}
-                        compact
                       />
                     </div>
-                    <div className="flex-1">
-                      <FieldDisplay
-                        label="Location"
-                        value={locationField.value}
-                        onFocus={focusLocationField}
-                        active={locationField.isActive}
-                        compact
+                    <div className="w-px self-stretch bg-[#2A2A2A]" />
+                    <div className="flex flex-col gap-1">
+                      <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Location</span>
+                      <LocationEntryFields
+                        key={locationEntryKey}
+                        autoFocus={locationAutoFocusRef.current}
+                        onResolved={handleLocationVerify}
+                        onActiveChange={setLocationActive}
+                        lockedAisle={locationLockedAisle}
+                        lockedLevel={locationLockedLevel}
                       />
                     </div>
                   </div>
                 </div>
               </>
             )}
-          </>
-        )}
 
         {loading && (
           <div className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Working…</div>
@@ -921,6 +968,20 @@ export function PIPPage() {
           actualLevel={levelMismatch.actualLevel}
           onConfirm={confirmLevelMismatch}
           onCancel={cancelLevelMismatch}
+        />
+      )}
+
+      {invalidLabelPickerOpen && (
+        <DemoPicker
+          title="Simulate which invalid label?"
+          options={[
+            { key: 'wrongFn', label: 'Wrong Function' },
+            { key: 'pulled', label: 'Pulled Label' },
+            { key: 'canceled', label: 'Canceled Label' },
+            { key: 'purged', label: 'Purged Label' },
+          ]}
+          onPick={pickInvalidLabel}
+          onCancel={() => setInvalidLabelPickerOpen(false)}
         />
       )}
     </div>

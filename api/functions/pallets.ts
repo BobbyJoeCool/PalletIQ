@@ -224,6 +224,9 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
       userId: auth.zNumber,
       actionType: 'EDIT_PAL',
       palletId: pid,
+      locationAisle: pallet.locationAisle ?? undefined,
+      locationBin:   pallet.locationBin ?? undefined,
+      locationLevel: pallet.locationLevel ?? undefined,
       details: { old: oldVals, new: newVals, reasonCode },
     });
   }

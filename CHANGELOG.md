@@ -6,6 +6,11 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.6.1 — 2026-07-14](#161--2026-07-14)
+- [1.6.0 — 2026-07-13](#160--2026-07-13)
+- [1.5.3 — 2026-07-13](#153--2026-07-13)
+- [1.5.2 — 2026-07-13](#152--2026-07-13)
+- [1.5.1 — 2026-07-13](#151--2026-07-13)
 - [1.5.0 — 2026-07-12](#150--2026-07-12)
 - [1.4.5 — 2026-07-11](#145--2026-07-11)
 - [1.4.4 — 2026-07-11](#144--2026-07-11)
@@ -72,6 +77,203 @@ No issues currently open in this category.
 ### Distant Future
 
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
+
+---
+
+## [1.6.1] — 2026-07-14
+
+PIP follow-up from the v1.5.0 smoke test (`DevNotes/Fixes/tasks.md`'s PIP section) — the
+Location field rebuild, demo helpers, and match-rule decision — plus visual polish
+requested live while watching the rebuild over HMR, and two bugs found and fixed along
+the way.
+
+### 1.6.1 — Added
+
+- **PIP: demo helper buttons for Pulled, Canceled, and Purged labels**, so
+  `handleLabelScan`'s "Invalid status: {status}" path — previously unreachable by a worker
+  scanning normally — can actually be exercised. `GET /api/demo/label` gained an optional
+  `?status=` filter (defaults to `PRINTED`, its prior hardcoded behavior) to support this.
+- **New shared `DemoPicker` component** (`src/components/shared/DemoPicker.tsx`) —
+  consolidates a cluster of related "simulate this scenario" demo buttons behind one
+  footer button plus a popup listing the choices, for screens where several narrow demo
+  buttons would otherwise crowd the Footer's single fixed-height row. Generic over the
+  option-key type, so each caller keeps full type safety on its own scenario union.
+
+### 1.6.1 — Changed
+
+- **PIP: Location field rebuilt as the shared 3-box Aisle/Bin/Level entry**
+  (`LocationEntryFields`, already used by PAR/WLH/LII) in place of the old single
+  barcode-string field. `LocationEntryFields` itself gained a `wasScanned` flag on
+  `onResolved` (a full 8-digit value landing in one box is structurally only reachable via
+  a hardware scan injection, never manual typing — see its docstring) and an
+  `onActiveChange` callback (mirrors `useNumpadField()`'s `.isActive` for callers, like
+  PIP's demo-footer gating, that need to track aggregate focus state).
+- **PIP: Location match rule now depends on entry method, not just pull function** — a
+  product decision made after testing found the rule interacting differently than
+  `outline.md` specified. Scanned Carton Air and any hand-entered location (any function)
+  now require a full Aisle+Bin+Level match; scanned Carton Floor still only needs
+  Aisle+Bin; scanned Full Pallet keeps its existing level-mismatch recovery popup. Hand-
+  entered mismatches never get that popup — the worker already typed what they believe is
+  correct. `POST /api/pulls/verify`'s `location` path takes a new `wasScanned` field
+  accordingly.
+- **PIP: UPC field widened, Location moved alongside it** with a vertical divider between
+  them, instead of a half-width UPC squeezed next to Location.
+- **PIP: Carton counts emphasized** in the Current/Pull/Remaining table — ~33% larger
+  (20px→27px, 22px→29px) and colored info blue (`#5B9BD5`, matching the Activity Log's
+  severity-color convention), since Cartons are what a worker is typically counting out
+  by hand. A depleted (zero) Carton cell still falls back to the same red warning as every
+  other column.
+- **PIP: four amber "invalid label" demo buttons** (Wrong Function / Pulled / Canceled /
+  Purged) **consolidated into one "⚠ Invalid Label" button** that opens a `DemoPicker`
+  popup, cutting the footer's label-active row from 6 buttons down to 3.
+- **Every fixed-width numeric field now accepts a short entry on submit, left-zero-padded**
+  — typing "5" and pressing OK on a 3-digit Aisle box is accepted as "005," instead of
+  requiring every leading zero to be typed out. Applies app-wide: `LocationEntryFields`
+  (Aisle/Bin/Level — used by PIP/PAR/WLH/LII), `DpciField` (Dept/Class/Item, on blur), and
+  the Aisle/Bin/Dept/Class/Item fields on ELZ, SDP, STG, IID, ISI, and WLH's range-hold
+  panel. Variable-length fields (Pallet ID, MNP's Destination) are unaffected.
+- **Scrollbars hidden app-wide** — the kiosk device has no mouse, so a visible scrollbar
+  track/thumb was just clutter; touch/programmatic scrolling is unaffected.
+
+### 1.6.1 — Fixed
+
+- **Pre-existing "Maximum update depth exceeded" render loop on PIP**, present on `main`
+  before this session (confirmed via `git stash` against the current committed code, not
+  something this batch of changes introduced) — found while smoke-testing the Location
+  rebuild above. Root cause: `useNumpadField()` (`src/lib/useNumpadField.ts`) returned a
+  new object literal on every render; `PIPPage.tsx`'s `focusUpcField` depended on that
+  whole object (`[upcField]`) rather than its stable `.focus` method, making
+  `focusUpcField` — and everything memoized off it, including the demo-footer's `useMemo`
+  and, transitively, `FooterDemoContext`'s state — recompute every render, which fed back
+  into a state update on every render, uncapped. Fixed at the source: `useNumpadField` now
+  returns a `useMemo`-wrapped object, stable unless `value`/`isActive` actually change —
+  benefits every screen using the hook, not just PIP.
+- **PIP's "✗ Location" demo button stopped producing an error.** `demoBadLocation`
+  delivered a 9-digit test string (`'000000000'`); the old single-field Location input
+  didn't care about exact length before sending it to the backend (which rejected any
+  non-6/8-digit value regardless), so this coincidentally still worked. The new 3-box
+  `LocationEntryFields` requires an *exact* 8-digit value to recognize a scanned
+  full-barcode override — a 9-digit value matches none of Aisle/Bin/Level's expected
+  lengths, so it silently no-op'd instead of ever reaching the API. Fixed to 8 digits.
+
+---
+
+## [1.6.0] — 2026-07-13
+
+Login screen follow-up from the v1.5.0 smoke test (`DevNotes/Fixes/tasks.md`'s Login
+Screen section).
+
+### 1.6.0 — Fixed
+
+- **Wake Database's ~15s timeout.** Root-caused to the `mssql` driver's default
+  `connectTimeout` (15000ms) rather than app code — documented back in the phase-11
+  production login incident. Raised to 60s via the Azure-pointing connection string
+  (`api/local.settings.azure.json`'s `DATABASE_URL`) so a single tap covers a cold Azure
+  SQL serverless resume. The deployed Azure Function App's own Application Settings (not
+  tracked in this repo) need the same `connectTimeout=60000` added to their
+  `DATABASE_URL` for this fix to take effect in production — that's outside what this
+  repo/Claude Code can change directly.
+- **zNumber entry had no length cap** — the numpad would accept unlimited keypresses
+  past any real zNumber's length. Capped at 7 characters total (`z` + 6), matching
+  `User.zNumber`'s `NVarChar(7)` column and `outline.md`'s own example (`z002p25`). The
+  fix-list item said "7 digits (8 with leading z)," which doesn't match the schema or any
+  real seeded zNumber — treated as an arithmetic slip in the task description rather than
+  followed literally.
+
+### 1.6.0 — Added
+
+- **Wake Database progress countdown.** While waking, the status line now counts down
+  from 60s instead of a static "this can take up to a minute" message with no indication
+  of progress.
+
+### 1.6.0 — Verified, No Change Needed
+
+- **Seed Database's confirmation message** already includes staged-location and
+  staged-aisle counts (`ReseedResult.locationsStaged`/`aislesStaged`, surfaced in the
+  post-reseed summary) — the fix-list item was already satisfied.
+
+---
+
+## [1.5.3] — 2026-07-13
+
+### 1.5.3 — Fixed
+
+- **Initial `Location.contraction` seed migration's Level 10 rule.**
+  `20260718000000_seed_initial_contraction_rules` contracts Level 1 (ground), all HS-size,
+  Level 10, and odd-bin Level 8 S-size locations per warehouse-ops's initial rule set. Its
+  Level 10 rule was missing the same XS exclusion the Level 1 rule already carries — XS is
+  hand-put and always Carton Air regardless of level, but as originally written the Level
+  10 rule would still have contracted XS locations in aisles 301/302 (whose L10-13 range
+  is XS) and 801/802/803 (10 levels, entirely XS). Fixed before the migration was applied
+  anywhere. Applied to the local dev database; not yet run against the shared Azure dev
+  environment.
+
+---
+
+## [1.5.2] — 2026-07-13
+
+### 1.5.2 — Removed
+
+- **Portrait-rotation orientation workaround.** `ScaleToFit.tsx` no longer rotates the app
+  90° when the viewport is taller than it is wide. This was a software stand-in added in
+  `[1.0.6]` for a specific phone test environment where iOS Safari couldn't be locked to
+  landscape; that environment no longer needs it. The app now only ever scales its fixed
+  1366×1024 canvas to fit the viewport — deployed devices are expected to already be
+  landscape.
+
+---
+
+## [1.5.1] — 2026-07-13
+
+Activity Log Overlay follow-up from the v1.5.0 smoke test (`DevNotes/Fixes/tasks.md`'s
+App-Wide section): timestamps, tap-navigation, severity color-coding, and per-function
+detail-line copy.
+
+### 1.5.1 — Added
+
+- **Activity Log: severity color-coding.** Each entry's detail line is now colored by
+  outcome — green for a routine success, yellow for something worth a second look (a
+  non-consolidation pallet move, an MNP put into an already-occupied location, a blocked
+  put, a hold placed/cleared, a pure unstage with nothing restaged), blue for an
+  informational action (a pallet edit, a reservation released), red reserved for
+  server-initiated errors.
+- **Activity Log: tap navigation.** Pallet ID, Location ID, and DPCI references inside
+  overlay entries are now tappable, matching `<LiveId>` behavior everywhere else in the
+  app — and, like every other `<LiveId>` use, inert while the shell's navigation lock is
+  active.
+- **Activity Log: seconds in timestamps**, up from hour:minute only.
+
+### 1.5.1 — Changed
+
+- **Activity Log: reworked detail-line copy per function.**
+  - **PIP** now states the pull function (e.g. "CA Pull") and the Pallet/Carton/SSP
+    quantity pulled: `CA Pull: Pulled 4C from {PID} at {LID}`. Capturing the pull
+    function and quantity required a small addition to `POST /api/pulls/verify`'s
+    activity log payload — pre-1.5.1 PULL entries render without it.
+  - **SDP/MNP** now reads `{PID} put in {LID}` or `{PID} moved from {LID} to {LID}`; SDP
+    appends any IM+ override used (`— Override {Size: M, Storage: CR}`), MNP appends
+    `— Location was occupied` when the destination was already stored. Capturing SDP's
+    override and consolidating-move flag required a small addition to
+    `POST /api/puts/{id}/confirm`'s activity log payload.
+  - **PII** now shows a `Modified Pallet in {LID}` header line followed by only the
+    fields that actually changed (`{PID} Cartons: 9, SSP: 4 changed to Cartons: 12, SSP:
+    2. Reason W04`). Required adding the pallet's location to `PATCH /api/pallets/{id}`'s
+    activity log payload (previously unset).
+  - **STG** now shows `Staged {n} {StorageCode}-{Size} in Aisle {aisle}` for a stage
+    action, and one line per freight type for Unstage/Restage
+    (`Cleared {n}, staged {n} of {StorageCode}-{Size} in Aisle {aisle}`). Stage actions
+    previously had no combined entry at all — the overlay showed one raw row per
+    location. A new `STAGE_SUM` action type now carries the one-row-per-action summary;
+    the underlying per-location `STAGE` rows are unchanged (reporting.ts's "Staged
+    Longest" column still depends on them) but are no longer shown in the overlay.
+
+### 1.5.1 — Known Limitation
+
+- A single Restage/Unstage action that mixes freight types (one type restaged, another
+  purely unstaged in the same Apply) is colored by the action's overall outcome, not
+  per line — if any type in the action was actually restaged, the whole entry renders
+  green even though one of its lines describes a pure unstage. Splitting severity per
+  line would need a larger rendering change; flagged here rather than fixed silently.
 
 ---
 

@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { useNumpad } from '../context/NumpadContext';
 
 /**
@@ -12,8 +12,15 @@ import { useNumpad } from '../context/NumpadContext';
  *   fixed length (e.g. a 2-digit Level), not variable-length ones (Pallet ID, free-form Aisle).
  *   Ignored while a scan is being injected (see NumpadContext's isScanningRef), so a longer
  *   scanner override value isn't cut short mid-injection by a shorter field's own maxLength.
+ * @param padOnSubmit - When true (and maxLength is set), an explicit OK/Enter submit with
+ *   fewer digits than maxLength is left-zero-padded to maxLength before being passed to
+ *   onSubmit — e.g. typing "80" and pressing OK on a 3-digit Bin box submits "080". Only
+ *   applies to an explicit confirm (auto-submit at maxLength is already full-length by
+ *   definition); use for fixed-width numeric codes (Aisle/Bin/Level) where a worker
+ *   shouldn't have to type leading zeros, not for fields where a short value has its own
+ *   distinct meaning.
  */
-export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLength?: number) {
+export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLength?: number, padOnSubmit?: boolean) {
   const { setKeyHandler, showNumpad, showKeyboard, activeFieldId, isScanningRef } = useNumpad();
   const fieldId = useId();
   const isActive = activeFieldId === fieldId;
@@ -40,7 +47,15 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLengt
       setValue('');
     } else if (key === 'Enter' || key === 'OK') {
       freshFocusRef.current = false;
-      submitRef.current?.(valueRef.current);
+      const v = valueRef.current;
+      const padded = padOnSubmit && maxLength != null && v.length > 0 && v.length < maxLength
+        ? v.padStart(maxLength, '0')
+        : v;
+      if (padded !== v) {
+        valueRef.current = padded;
+        setValue(padded);
+      }
+      submitRef.current?.(padded);
     } else if (key.length === 1) {
       const base = freshFocusRef.current ? '' : valueRef.current;
       freshFocusRef.current = false;
@@ -51,7 +66,7 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLengt
         submitRef.current?.(next);
       }
     }
-  }, [maxLength, isScanningRef]);
+  }, [maxLength, padOnSubmit, isScanningRef]);
 
   /** Registers this field as the active numpad/keyboard target and opens the matching panel. */
   const focus = useCallback(
@@ -79,5 +94,15 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLengt
     setValue(v);
   }, []);
 
-  return { value, focus, clear, set, isActive };
+  // Memoized so consumers that depend on the whole returned object (e.g. a useCallback
+  // with `[fieldObject]` in its deps, rather than `[fieldObject.focus]`) get a stable
+  // reference across renders where nothing actually changed — without this, every render
+  // produces a new object literal, making any such callback (and anything memoized off
+  // it, like a demo-button JSX slot) recompute every render, which can cascade into a
+  // render loop if that recomputed value flows back into shared state (see PIP's
+  // pre-existing "Maximum update depth exceeded" bug, root-caused to exactly this).
+  return useMemo(
+    () => ({ value, focus, clear, set, isActive }),
+    [value, focus, clear, set, isActive],
+  );
 }

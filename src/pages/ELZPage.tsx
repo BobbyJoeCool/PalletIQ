@@ -52,7 +52,8 @@ export function ELZPage() {
   const routerLocation = useLocation();
   const prefill = (routerLocation.state as NavState | null) ?? null;
 
-  const aisleField = useNumpadField('numpad', 3);
+  // padOnSubmit: typing "5" and hitting OK is accepted as "005" (see LocationEntryFields).
+  const aisleField = useNumpadField('numpad', 3, true);
   const [aisle, setAisle] = useState<number | null>(prefill?.aisle ?? null);
   const [storageCode, setStorageCode] = useState(prefill?.storageCode ?? '');
   const [result, setResult] = useState<EmptyByZoneResult | null>(null);

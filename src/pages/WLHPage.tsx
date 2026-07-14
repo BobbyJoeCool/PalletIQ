@@ -87,9 +87,11 @@ function RangeHoldPanel() {
   const { hidePanel } = useNumpad();
   const role = (user?.role ?? 'WORKER') as Role;
 
-  const aisleField = useNumpadField('numpad', 3);
-  const startBinField = useNumpadField('numpad', 3);
-  const endBinField = useNumpadField('numpad', 3);
+  // padOnSubmit: typing "5" and hitting OK is accepted as "005", matching every other
+  // fixed-width Aisle/Bin field in the app (LocationEntryFields, ELZ, SDP, STG).
+  const aisleField = useNumpadField('numpad', 3, true);
+  const startBinField = useNumpadField('numpad', 3, true);
+  const endBinField = useNumpadField('numpad', 3, true);
 
   const [binSide, setBinSide] = useState<BinSide>('ALL');
   const [action, setAction] = useState<RangeAction>('PLACE');

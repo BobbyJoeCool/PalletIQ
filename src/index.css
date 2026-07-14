@@ -44,6 +44,17 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Kiosk touchscreen, no mouse — scroll still works (touch/swipe or programmatic), the
+   visible scrollbar chrome is just visual clutter with nothing to grab it with. Applies
+   globally rather than per-screen since every screen's scrollable content column
+   (overflow-y-auto) would otherwise show one. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
 html, body, #root {
   height: 100%;
   overflow: hidden;

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ZnumPad } from '../components/ZnumPad';
 import { MessageBar } from '../components/shell/MessageBar';
@@ -16,14 +16,29 @@ import { useMessageBar } from '../context/MessageBarContext';
  * Uses its own MessageBarProvider (provided by LoginPage) so error messages don't bleed into
  * the shell's message bar.
  */
+/** Matches the connectTimeout bump on the Azure SQL connection string (see local.settings.azure.json) — a cold serverless resume can take close to this long. */
+const WAKE_TIMEOUT_SECONDS = 60;
+
 function LoginContent() {
   const navigate = useNavigate();
   const { setMessage, clearMessage } = useMessageBar();
   const [znumber, setZnumber] = useState('z');
   const [loading, setLoading] = useState(false);
   const [wakeStatus, setWakeStatus] = useState<'idle' | 'waking' | 'ready' | 'error'>('idle');
+  const [wakeSecondsLeft, setWakeSecondsLeft] = useState(WAKE_TIMEOUT_SECONDS);
   const [reseedStatus, setReseedStatus] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
   const [reseedSummary, setReseedSummary] = useState('');
+
+  // Ticks wakeSecondsLeft down to 0 for the life of a 'waking' attempt, so the worker sees
+  // active progress on a wait that can now run close to a minute instead of a flat spinner.
+  useEffect(() => {
+    if (wakeStatus !== 'waking') return;
+    setWakeSecondsLeft(WAKE_TIMEOUT_SECONDS);
+    const interval = setInterval(() => {
+      setWakeSecondsLeft((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [wakeStatus]);
 
   /** Submits the entered zNumber via identify(); on success advances to the PIN screen. */
   const handleSubmit = async () => {
@@ -72,17 +87,21 @@ function LoginContent() {
 
   /**
    * Dev-tools control: wipes every PUT_PENDING pallet and not-yet-pulled label
-   * (AVAILABLE/PRINTED) and regenerates a fresh, randomized set of both — see
-   * api/functions/demo-reseed.ts for exactly what's touched. Destructive against the
-   * live database by design; this is a testing utility, not app functionality, which is
-   * why it's styled apart from the rest of the screen.
+   * (AVAILABLE/PRINTED) and regenerates a fresh, randomized set of both, and unstages/
+   * restages a randomized subset of every aisle with backdated "staged since" timestamps
+   * — see api/functions/demo-reseed.ts for exactly what's touched. Destructive against
+   * the live database by design; this is a testing utility, not app functionality, which
+   * is why it's styled apart from the rest of the screen.
    */
   const handleReseed = async () => {
     if (reseedStatus === 'working') return;
     setReseedStatus('working');
     try {
       const result = await reseedTestData();
-      setReseedSummary(`${result.putPalletsCreated} put pallets, ${result.labelsCreated} labels`);
+      setReseedSummary(
+        `${result.putPalletsCreated} put pallets, ${result.labelsCreated} labels, ` +
+        `${result.locationsStaged} locations staged across ${result.aislesStaged} aisles`
+      );
       setReseedStatus('done');
     } catch {
       setReseedStatus('error');
@@ -132,7 +151,9 @@ function LoginContent() {
           </button>
         </div>
         {wakeStatus === 'waking' && (
-          <p className="font-ui text-[14px] text-[#555555]">This can take up to a minute on a cold start</p>
+          <p className="font-ui text-[14px] text-[#555555]">
+            Waking up… this can take up to a minute on a cold start ({wakeSecondsLeft}s)
+          </p>
         )}
         {wakeStatus === 'ready' && (
           <p className="font-ui text-[14px] text-[#3FA34D]">Database ready</p>

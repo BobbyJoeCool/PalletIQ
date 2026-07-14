@@ -2,6 +2,10 @@
 // Layout: P/N/X letter row → 7-8-9 → 4-5-6 → 1-2-3 → ⌫-0-OK
 // OK activates once value has characters beyond the hardcoded 'z' prefix.
 
+// User.zNumber is NVarChar(7) — 7 characters total including the leading 'z' (e.g.
+// "z002p25"), so further keys are ignored once the value reaches this length.
+const MAX_LENGTH = 7;
+
 const LETTER_KEYS = ['P', 'N', 'X'] as const;
 const DIGIT_ROWS = [
   ['7', '8', '9'],
@@ -21,6 +25,8 @@ interface Props {
  * Layout: P/N/X letter row → 7-8-9 → 4-5-6 → 1-2-3 → ⌫-0-OK.
  * The value always starts with a hardcoded 'z' prefix; backspace cannot remove it.
  * Letters P, N, X append lowercase suffix characters (e.g., 'p', 'n', 'x').
+ * Further keys are ignored once the value reaches MAX_LENGTH (7 — matches User.zNumber's
+ * NVarChar(7) column, e.g. "z002p25").
  * OK activates once at least one character beyond 'z' is entered, and fires onSubmit.
  *
  * @param value - Current zNumber string (always starts with 'z'; controlled by parent)
@@ -31,13 +37,14 @@ interface Props {
 export function ZnumPad({ value, onChange, onSubmit, disabled = false }: Props) {
   const hasInput = value.length > 1;
 
-  /** Applies a single keypad press: backspace (never past the 'z' prefix), or appends a lowercased character. */
+  /** Applies a single keypad press: backspace (never past the 'z' prefix), or appends a lowercased character (ignored once MAX_LENGTH is reached). */
   const handleKey = (key: string) => {
     if (disabled) return;
     if (key === '⌫') {
       if (value.length > 1) onChange(value.slice(0, -1));
       return;
     }
+    if (value.length >= MAX_LENGTH) return;
     onChange(value + key.toLowerCase());
   };
 

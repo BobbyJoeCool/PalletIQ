@@ -107,12 +107,15 @@ export interface ReseedResult {
   putPalletsCreated: number;
   labelsCreated: number;
   labelsByStorageCodeAndFunction: Record<string, number>;
+  locationsStaged: number;
+  aislesStaged: number;
 }
 
 /**
  * Hits the unauthenticated test-data reseed endpoint, called from the login screen's
  * dev-tools strip. Wipes all PUT_PENDING pallets and not-yet-pulled labels (AVAILABLE/
- * PRINTED) and regenerates a fresh, randomized set of both. Destructive — see
+ * PRINTED) and regenerates a fresh, randomized set of both, and unstages/restages a
+ * randomized subset of every aisle with backdated staging timestamps. Destructive — see
  * `api/functions/demo-reseed.ts` for exactly what's deleted and recreated.
  *
  * @throws Error with message "REQUEST_FAILED" if the request itself fails

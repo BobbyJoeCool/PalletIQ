@@ -48,9 +48,11 @@ export function IIDPage() {
   // handleItemConfirm would see them frozen at mount time (the same stale-closure hazard
   // fixed in LocationEntryFields.tsx earlier this session), since this chain's handlers
   // are only ever registered once, at mount / on each preceding field's confirm.
-  const deptField = useNumpadField('numpad', 3);
-  const classField = useNumpadField('numpad', 2);
-  const itemField = useNumpadField('numpad', 4);
+  // padOnSubmit: typing "5" and hitting OK on Dept is accepted as "005" (same treatment
+  // as every other fixed-width numeric code in the app — see LocationEntryFields).
+  const deptField = useNumpadField('numpad', 3, true);
+  const classField = useNumpadField('numpad', 2, true);
+  const itemField = useNumpadField('numpad', 4, true);
   const upcField = useNumpadField('numpad');
   const [item, setItem] = useState<ItemData | null>(null);
   const [loading, setLoading] = useState(false);

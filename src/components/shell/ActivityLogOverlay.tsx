@@ -1,13 +1,36 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../lib/api';
-import { detailFor, isVisibleActivity, tagFor, type ActivityEntry } from '../../lib/activityFormat';
+import { LiveId } from '../ui/LiveId';
+import {
+  detailFor,
+  isVisibleActivity,
+  severityColorClass,
+  severityFor,
+  tagFor,
+  type ActivityEntry,
+  type DetailLine,
+  type DetailToken,
+} from '../../lib/activityFormat';
 
 const WINDOW_HOURS = 12;
 
-/** Formats an entry's timestamp as e.g. "10:42 AM", matching the design's example rows. */
+/** Formats an entry's timestamp as e.g. "10:42:07 AM", matching the design's example rows. */
 function fmtTime(timestamp: string): string {
-  return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+}
+
+/** Renders one detail line's tokens, turning ID tokens into tappable <LiveId> chips. */
+function DetailLineView({ line, colorClass }: { line: DetailLine; colorClass: string }) {
+  return (
+    <span className={`font-ui text-[15px] ${colorClass}`}>
+      {line.map((token: DetailToken, i) =>
+        typeof token === 'string'
+          ? <span key={i}>{token}</span>
+          : <LiveId key={i} id={token.id} type={token.type} className="text-[15px]" />,
+      )}
+    </span>
+  );
 }
 
 interface ActivityLogOverlayProps {
@@ -75,15 +98,20 @@ export function ActivityLogOverlay({ onClose }: ActivityLogOverlayProps) {
           {!error && entries !== null && entries.length === 0 && (
             <p className="font-ui text-[16px] text-[#555]">No activity in the last {WINDOW_HOURS} hours.</p>
           )}
-          {!error && entries !== null && entries.map((entry) => (
-            <div key={entry.id} className="flex flex-col gap-0.5 pb-3 border-b border-[#1A1A1A] last:border-0">
-              <div className="flex items-baseline gap-2">
-                <span className="font-data text-[15px] font-bold text-[#FF4444]">{tagFor(entry)}</span>
-                <span className="font-ui text-[13px] text-[#666]">· {fmtTime(entry.timestamp)}</span>
+          {!error && entries !== null && entries.map((entry) => {
+            const colorClass = severityColorClass(severityFor(entry));
+            return (
+              <div key={entry.id} className="flex flex-col gap-0.5 pb-3 border-b border-[#1A1A1A] last:border-0">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-data text-[15px] font-bold text-[#FF4444]">{tagFor(entry)}</span>
+                  <span className="font-ui text-[13px] text-[#666]">· {fmtTime(entry.timestamp)}</span>
+                </div>
+                {detailFor(entry).map((line, i) => (
+                  <DetailLineView key={i} line={line} colorClass={colorClass} />
+                ))}
               </div>
-              <span className="font-ui text-[15px] text-[#CFCFCF]">{detailFor(entry)}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

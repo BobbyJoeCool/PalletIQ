@@ -235,6 +235,14 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
 
   await prisma.reservation.delete({ where: { id: reservationId } });
 
+  // Only IM+ overrides set target fields on the Reservation (see directedPut) — a
+  // plain directed put leaves them null, so their presence here means an override
+  // was actually used to constrain the location search.
+  const override: Record<string, string | number> = {};
+  if (reservation.targetSize)    override.size = reservation.targetSize;
+  if (reservation.targetStorage) override.storageCode = reservation.targetStorage;
+  if (reservation.targetZone != null) override.zone = reservation.targetZone;
+
   await writeLog({
     userId: auth.zNumber,
     actionType: 'PUT',
@@ -242,7 +250,14 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
     locationAisle: reservation.locationAisle,
     locationBin:   reservation.locationBin,
     locationLevel: reservation.locationLevel,
-    details: { reservationId, wasMove, clearedLocation, method: 'SDP' },
+    details: {
+      reservationId,
+      wasMove,
+      clearedLocation,
+      method: 'SDP',
+      consolidating: reservation.consolidating,
+      ...(Object.keys(override).length > 0 && { override }),
+    },
   });
 
   return {

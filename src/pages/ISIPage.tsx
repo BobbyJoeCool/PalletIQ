@@ -28,9 +28,11 @@ export function ISIPage() {
   // Dept → Class → Item, then resolves once all three are filled. deptValueRef/
   // classValueRef hold the accumulated values live across the chain (see IIDPage.tsx's
   // identical pattern for why refs are needed instead of reading field.value directly).
-  const deptField = useNumpadField('numpad', 3);
-  const classField = useNumpadField('numpad', 2);
-  const itemField = useNumpadField('numpad', 4);
+  // padOnSubmit: typing "5" and hitting OK on Dept is accepted as "005" (same treatment
+  // as every other fixed-width numeric code in the app — see LocationEntryFields).
+  const deptField = useNumpadField('numpad', 3, true);
+  const classField = useNumpadField('numpad', 2, true);
+  const itemField = useNumpadField('numpad', 4, true);
   const deptValueRef = useRef('');
   const classValueRef = useRef('');
 

@@ -78,6 +78,18 @@ async function stageLocations(req: HttpRequest): Promise<unknown> {
 
   const shortfall = body.locationIds.length - staged.length;
 
+  // One combined summary entry for the overlay, separate from the per-location STAGE
+  // entries above (those stay untouched — reporting.ts's "Staged Longest" column needs
+  // them). Distinct actionType so it can't collide with that per-location STAGE query.
+  if (staged.length > 0) {
+    await writeLog({
+      userId: auth.zNumber,
+      actionType: 'STAGE_SUM',
+      locationAisle: body.aisle,
+      details: { storageCode: body.storageCode, size: body.size, count: staged.length },
+    });
+  }
+
   const next = await findNextStagingLocation(body.aisle, {
     storageCode: body.storageCode,
     size: body.size,

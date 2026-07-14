@@ -4,7 +4,7 @@ import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
-import { parseLocationBarcode, parseFullLocationBarcode } from '../lib/locationParser.js';
+import { parseFullLocationBarcode } from '../lib/locationParser.js';
 
 /**
  * Confirms a label pull via one of three independent verification paths: Pallet ID, UPC,
@@ -17,20 +17,31 @@ import { parseLocationBarcode, parseFullLocationBarcode } from '../lib/locationP
  *
  * UPC path: looks up the item by UPC and compares its DPCI to the pallet's DPCI.
  *
- * Location path: parses the submitted value as a location barcode and compares to the
- * pallet's current location. For CA/CF, a 6- or 8-digit barcode is accepted and only
- * aisle+bin are compared (level is intentionally ignored, per outline.md's bin-level
- * confirmation rule). For FP, a full 8-digit barcode is required; aisle+bin must always
- * match exactly, but level is allowed to differ — a Full Pallet pull happens from floor
- * level, so the worker may only be able to reach and scan a low-level barcode even when
- * the pallet itself is stored high in the racking. If aisle+bin match but level doesn't,
- * this throws LEVEL_MISMATCH (not ALTERNATE_MISMATCH) instead of completing the pull —
- * the frontend prompts the worker to type the level it actually was (issue #72 — not
- * just confirm/reject the mismatch), replaces the scanned level with that correction,
- * and resubmits with `confirmLevelMismatch: true` to complete the pull. The corrected
- * level is accepted as the worker's attestation with no further validation, and is
- * recorded in the activity log's `details.confirmedLevel` for a paper trail. Aisle+bin
- * not matching at all is still an outright ALTERNATE_MISMATCH, same as before (issue #49).
+ * Location path: parses the submitted value as a full Aisle+Bin+Level barcode (the
+ * frontend's LocationEntryFields always resolves one, whether scanned or hand-typed) and
+ * compares it to the pallet's current location. The match rule depends on both the pull
+ * function and `wasScanned`:
+ *   - Hand-entered (`wasScanned: false`) CA or FP: full Aisle+Bin+Level match required.
+ *     A mismatch is an outright ALTERNATE_MISMATCH — the worker already typed what they
+ *     believe is correct, so there's nothing to recover from.
+ *   - Hand-entered CF: also a full match, but only Bin is actually fallible in practice —
+ *     PIP's LocationEntryFields locks the Aisle and Level boxes to the pallet's real
+ *     current values for this combination (product decision: only Bin needs verifying),
+ *     so the Aisle/Level portions of the submitted value are always correct by
+ *     construction and only Bin can actually cause a mismatch.
+ *   - Scanned CA: full Aisle+Bin+Level match required, same as hand-entered.
+ *   - Scanned CF: only Aisle+Bin compared; level is ignored.
+ *   - Scanned FP: full match required, but a level-only mismatch (aisle+bin already
+ *     matched) throws LEVEL_MISMATCH instead of failing outright — a Full Pallet pull
+ *     happens from floor level, so the worker may only be able to reach and scan a
+ *     low-level barcode even when the pallet itself is stored high in the racking. The
+ *     frontend prompts the worker to type the level it actually was (issue #72 — not
+ *     just confirm/reject the mismatch), and resubmits with `confirmLevelMismatch: true`
+ *     to complete the pull. The corrected level is accepted as the worker's attestation
+ *     with no further validation, and is recorded in the activity log's
+ *     `details.confirmedLevel` for a paper trail.
+ * An aisle+bin mismatch is always an outright ALTERNATE_MISMATCH, regardless of pull
+ * function or entry method (issue #49).
  *
  * On success: marks the label PULLED, deducts the label's carton and SSP quantities
  * from the pallet, and writes a PULL activity log entry with before/after quantities.
@@ -39,11 +50,11 @@ import { parseLocationBarcode, parseFullLocationBarcode } from '../lib/locationP
  * @param req - HTTP request with body:
  *   `{ labelId: string; pullFunction: string; palletId?: number | string }` or
  *   `{ labelId: string; pullFunction: string; upc?: string }` or
- *   `{ labelId: string; pullFunction: string; location?: string; confirmLevelMismatch?: boolean }`
+ *   `{ labelId: string; pullFunction: string; location?: string; wasScanned?: boolean; confirmLevelMismatch?: boolean }`
  * @returns `{ location: string | null; updatedQuantity: { pallets, cartons, ssps } }`
  * @throws 400 INVALID_INPUT for missing fields or PALLET_MISMATCH / ALTERNATE_MISMATCH on wrong IDs;
- *   400 LEVEL_MISMATCH (FP only) if aisle+bin match but level doesn't, and the request didn't
- *   set confirmLevelMismatch — response body includes `{ scannedLevel, actualLevel }`;
+ *   400 LEVEL_MISMATCH (scanned FP only) if aisle+bin match but level doesn't, and the request
+ *   didn't set confirmLevelMismatch — response body includes `{ scannedLevel, actualLevel }`;
  *   404 NOT_FOUND if label does not exist or is not in PRINTED status;
  *   409 WRONG_PULL_FUNCTION if the label's pull function does not match the submitted function
  */
@@ -56,6 +67,7 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
     palletId?: number | string;
     upc?: string;
     location?: string;
+    wasScanned?: boolean;
     confirmLevelMismatch?: boolean;
   };
 
@@ -130,37 +142,45 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
   if (body.location != null) {
     const loc = body.location.trim();
 
-    // FP requires the full 8-digit barcode with aisle+bin matching exactly; level is
-    // checked separately below rather than folded into locationMatch, since a level
-    // mismatch on FP prompts for confirmation instead of an outright reject. CA/CF stay
-    // aisle+bin-only (level intentionally ignored), per outline.md's bin-level rule.
     let locationMatch = false;
     let levelMismatch: { scannedLevel: number; actualLevel: number } | null = null;
+
     if (pallet.locationAisle != null) {
-      if (body.pullFunction === 'FP') {
-        const parsed = parseFullLocationBarcode(loc);
-        const binMatch =
-          parsed !== null &&
-          parsed.aisle === pallet.locationAisle &&
-          parsed.bin === pallet.locationBin;
-        if (binMatch && parsed!.level !== pallet.location?.level && pallet.location?.level != null) {
-          levelMismatch = { scannedLevel: parsed!.level, actualLevel: pallet.location.level };
+      const parsed = parseFullLocationBarcode(loc);
+      const aisleBinMatch =
+        parsed !== null &&
+        parsed.aisle === pallet.locationAisle &&
+        parsed.bin === pallet.locationBin;
+
+      if (aisleBinMatch) {
+        const levelMatches = pallet.location?.level != null && parsed!.level === pallet.location.level;
+
+        if (body.wasScanned === true && body.pullFunction === 'CF') {
+          // Scanned Carton Floor: aisle+bin is sufficient, level not checked.
+          locationMatch = true;
+        } else if (body.wasScanned === true && body.pullFunction === 'FP') {
+          // Scanned Full Pallet: a level-only mismatch prompts for a worker-attested
+          // correction instead of an outright reject (see docstring).
+          if (levelMatches) {
+            locationMatch = true;
+          } else if (body.confirmLevelMismatch === true) {
+            locationMatch = true;
+            confirmedLevel = parsed!.level;
+          } else if (pallet.location?.level != null) {
+            levelMismatch = { scannedLevel: parsed!.level, actualLevel: pallet.location.level };
+          }
+        } else {
+          // Scanned CA, or any hand-entered location (CA/FP typed by the worker; CF's
+          // Aisle+Level are pre-filled correct and locked in the UI, so this trivially
+          // reduces to a Bin check for CF — see PIP's LocationEntryFields lockedAisle/
+          // lockedLevel props): full match required, no recovery popup.
+          locationMatch = levelMatches;
         }
-        locationMatch = binMatch && (levelMismatch === null || body.confirmLevelMismatch === true);
-        if (locationMatch && body.confirmLevelMismatch === true && parsed) {
-          confirmedLevel = parsed.level;
-        }
-      } else {
-        const parsed = parseLocationBarcode(loc);
-        locationMatch =
-          parsed !== null &&
-          parsed.aisle === pallet.locationAisle &&
-          parsed.bin === pallet.locationBin;
       }
     }
 
     if (!locationMatch) {
-      if (levelMismatch && !body.confirmLevelMismatch) {
+      if (levelMismatch) {
         throw Object.assign(new Error('LEVEL_MISMATCH'), { status: 400, data: levelMismatch });
       }
       throw Object.assign(new Error('ALTERNATE_MISMATCH'), { status: 400 });
@@ -173,6 +193,9 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
   const newCartons = Math.max(0, pallet.currentCartons - label.quantity);
   const newSSPs    = Math.max(0, pallet.currentSSPs    - label.sspQuantity);
   const newPallets = 0;
+
+  // FP pulls consume the whole pallet's full-pallet count; CA/CF pulls never touch it.
+  const pulledPallets = body.pullFunction === 'FP' ? pallet.currentPallets : 0;
 
   const loc = pallet.location;
 
@@ -206,7 +229,8 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
     item: pallet.item,
     details: {
       labelId: label.lid,
-      pulled: { cartons: label.quantity, ssps: label.sspQuantity },
+      pullFunction: body.pullFunction,
+      pulled: { pallets: pulledPallets, cartons: label.quantity, ssps: label.sspQuantity },
       remaining: { pallets: newPallets, cartons: newCartons, ssps: newSSPs },
       ...(confirmedLevel != null && { confirmedLevel }),
     },

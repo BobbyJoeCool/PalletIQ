@@ -5,20 +5,27 @@ import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
 
 /**
- * Returns a random PRINTED label ID for the PIP screen's demo "Scan Label" button.
+ * Returns a random label ID for the PIP screen's demo "Scan Label" buttons.
  * Optional `?fn=` query param filters to labels with a specific pull function code (CA/CF/FP).
+ * Optional `?status=` query param filters to a specific label status (defaults to PRINTED,
+ * the normal scannable state) — used by PIP's "Invalid status" demo buttons to fetch a
+ * PULLED, CANCELED, or PURGED label so that error path can actually be exercised, since a
+ * worker can't produce one of those by scanning normally.
  * Uses a random skip approach (count → random offset → findFirst) so every call may
  * return a different label without requiring an ORDER BY RANDOM on large tables.
  *
- * @param req - HTTP request with optional query param `fn` (pull function code filter)
+ * @param req - HTTP request with optional query params `fn` (pull function filter) and
+ *   `status` (label status filter, default PRINTED)
  * @returns `{ labelId: string }`
- * @throws 404 NOT_FOUND if no PRINTED labels exist (or none matching the fn filter)
+ * @throws 404 NOT_FOUND if no labels exist matching the status (and fn, if given)
  */
 async function sampleLabel(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
   await requireAuth(req);
 
-  const fn = new URL(req.url).searchParams.get('fn') ?? undefined;
-  const where = { status: 'PRINTED', ...(fn ? { pullFunction: fn } : {}) };
+  const params = new URL(req.url).searchParams;
+  const fn = params.get('fn') ?? undefined;
+  const status = params.get('status') ?? 'PRINTED';
+  const where = { status, ...(fn ? { pullFunction: fn } : {}) };
 
   const count = await prisma.label.count({ where });
   if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });

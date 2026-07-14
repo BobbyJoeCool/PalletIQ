@@ -993,8 +993,9 @@ function MasterControl({ onRefresh }: { onRefresh: () => void }) {
   const { hidePanel } = useNumpad();
   // Fixed 3-character field — auto-commits like every other screen's Aisle field (ELZ/SDP/
   // LocationEntryFields), which Feature 2's live info panel relies on for its "no explicit
-  // submit step" behavior, same reasoning as the Storage Code field below.
-  const aisleField = useNumpadField('numpad', 3);
+  // submit step" behavior, same reasoning as the Storage Code field below. padOnSubmit:
+  // typing "5" and hitting OK is accepted as "005", same as those other screens.
+  const aisleField = useNumpadField('numpad', 3, true);
 
   useEffect(() => { aisleField.set(master.aisle); }, [master.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -221,7 +221,8 @@ export function SDPPage() {
   loadingRef.current     = loading;
   directedRef.current    = directed;
 
-  const aisleField    = useNumpadField('numpad', 3);
+  // padOnSubmit: typing "5" and hitting OK is accepted as "005" (see LocationEntryFields).
+  const aisleField    = useNumpadField('numpad', 3, true);
   const palletField   = useNumpadField();
   const confirmField  = useNumpadField();
 

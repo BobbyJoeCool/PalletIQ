@@ -1,5 +1,4 @@
 import { HOLD_LABELS, type HoldCategory } from '../components/shared/HoldPanel';
-import { fmtLocation } from './fmt';
 
 export interface ActivityEntry {
   id: number;
@@ -19,10 +18,13 @@ export interface ActivityEntry {
  * (issue #46) — RESERVE and MNP_SCAN are pre-steps immediately followed by the actionType
  * that actually completes the transaction (PUT, UNASSIGN, or BLOCK_PUT), and RES_TMOUT is
  * a server-initiated auto-expiry (the worker didn't do anything; attributing a timeout to
- * their own activity feed would be misleading). Everything else in the ActivityLog table
- * represents a real, completed action the worker took.
+ * their own activity feed would be misleading). STAGE is also hidden here even though it's
+ * a real worker action — it's the per-location bookkeeping row reporting.ts's "Staged
+ * Longest" column depends on (see staging.ts's comment on stageLocations/restageAisle);
+ * STAGE_SUM and RESTAGE are the combined, one-row-per-action entries meant for display.
+ * Everything else in the ActivityLog table represents a real, completed action worth showing.
  */
-const HIDDEN_ACTION_TYPES = new Set(['RESERVE', 'MNP_SCAN', 'RES_TMOUT']);
+const HIDDEN_ACTION_TYPES = new Set(['RESERVE', 'MNP_SCAN', 'RES_TMOUT', 'STAGE']);
 
 /** True if this entry should appear in the app-wide activity log (issue #46). */
 export function isVisibleActivity(entry: ActivityEntry): boolean {
@@ -35,7 +37,7 @@ const ACTIVITY_TAGS: Record<string, string> = {
   PUT: 'PUT',
   UNASSIGN: 'PUT',
   BLOCK_PUT: 'PUT',
-  STAGE: 'STG',
+  STAGE_SUM: 'STG',
   RESTAGE: 'STG',
   HOLD_PLACE: 'WLH',
   HOLD_CLEAR: 'WLH',
@@ -48,6 +50,84 @@ const ACTIVITY_TAGS: Record<string, string> = {
 /** Falls back to the raw actionType (truncated to fit the same visual slot) if not in ACTIVITY_TAGS. */
 export function tagFor(entry: ActivityEntry): string {
   return ACTIVITY_TAGS[entry.actionType] ?? entry.actionType.slice(0, 4);
+}
+
+export type Severity = 'info' | 'success' | 'warning' | 'error';
+
+/** Tailwind arbitrary-value text color class for each severity, tuned for the overlay's dark background. */
+const SEVERITY_COLORS: Record<Severity, string> = {
+  info: 'text-[#5B9BD5]',
+  success: 'text-[#5CB85C]',
+  warning: 'text-[#E0B84C]',
+  error: 'text-[#FF4444]',
+};
+
+export function severityColorClass(severity: Severity): string {
+  return SEVERITY_COLORS[severity];
+}
+
+/**
+ * Classifies an entry's outcome for the detail line's color-coding. Most actionTypes map
+ * 1:1 to a severity, but PUT and RESTAGE need to inspect `details` — a PUT can be a routine
+ * store, a non-consolidation move (worth flagging), or an MNP put into an already-occupied
+ * location (also worth flagging); a RESTAGE can be an ordinary restage or a pure unstage
+ * (nothing re-staged, only cleared).
+ */
+export function severityFor(entry: ActivityEntry): Severity {
+  const d = entry.details ?? {};
+
+  switch (entry.actionType) {
+    case 'PULL':
+    case 'STAGE_SUM':
+    case 'REINSTATE':
+      return 'success';
+
+    case 'PUT': {
+      if (d.method === 'MNP' && d.destinationWasOccupied === true) return 'warning';
+      if (d.wasMove === true && d.consolidating !== true) return 'warning';
+      return 'success';
+    }
+
+    case 'RESTAGE': {
+      const results = Array.isArray(d.results)
+        ? d.results as { cleared: number; staged: number }[]
+        : [];
+      const totalStaged = results.reduce((sum, r) => sum + (r.staged ?? 0), 0);
+      const totalCleared = results.reduce((sum, r) => sum + (r.cleared ?? 0), 0);
+      return totalStaged === 0 && totalCleared > 0 ? 'warning' : 'success';
+    }
+
+    case 'BLOCK_PUT':
+    case 'HOLD_PLACE':
+    case 'HOLD_CLEAR':
+    case 'RANGE_HOLD':
+    case 'RANGE_REL':
+      return 'warning';
+
+    case 'EDIT_PAL':
+    case 'UNASSIGN':
+      return 'info';
+
+    case 'RES_TMOUT':
+      return 'error';
+
+    default:
+      return 'info';
+  }
+}
+
+/** A tappable ID reference within a detail line — rendered as a <LiveId> by the overlay. */
+export type DetailIdToken = { id: string; type: 'pallet' | 'location' | 'dpci' | 'upc' };
+export type DetailToken = string | DetailIdToken;
+/** One rendered line of an entry's detail text; an entry can produce more than one. */
+export type DetailLine = DetailToken[];
+
+function palletToken(palletId: number | null): DetailIdToken | null {
+  return palletId != null ? { id: String(palletId), type: 'pallet' } : null;
+}
+
+function locationToken(location: string | null): DetailIdToken | null {
+  return location ? { id: location, type: 'location' } : null;
 }
 
 /** Formats a single hold-related detail line, shared by HOLD_PLACE/HOLD_CLEAR. */
@@ -64,40 +144,114 @@ function rangeDesc(aisle: number | null, d: Record<string, unknown>): string {
   return `Aisle ${aisle ?? '?'}, Bin ${startBin}-${endBin}${side}`;
 }
 
+const PULL_FUNCTION_LABELS: Record<string, string> = { CA: 'CA Pull', CF: 'CF Pull', FP: 'FP Pull' };
+
+/** Builds the compact "2P 5C 3S" quantity readout, omitting zero components. */
+function fmtPCS(pallets: number, cartons: number, ssps: number): string {
+  const parts: string[] = [];
+  if (pallets > 0) parts.push(`${pallets}P`);
+  if (cartons > 0) parts.push(`${cartons}C`);
+  if (ssps > 0) parts.push(`${ssps}S`);
+  return parts.length > 0 ? parts.join(' ') : '0C';
+}
+
+const EDIT_FIELD_LABELS: Record<string, string> = {
+  dpci: 'DPCI',
+  vcp: 'VCP',
+  ssp: 'SSP/CTN',
+  currentPallets: 'Pallets',
+  currentCartons: 'Cartons',
+  currentSSPs: 'SSP',
+};
+const EDIT_FIELD_ORDER = ['dpci', 'vcp', 'ssp', 'currentPallets', 'currentCartons', 'currentSSPs'];
+
+function fmtEditValue(field: string, value: unknown): string {
+  if (field === 'dpci' && value && typeof value === 'object') {
+    const v = value as { dept: number; class: number; item: number };
+    return `${String(v.dept).padStart(3, '0')}-${String(v.class).padStart(2, '0')}-${String(v.item).padStart(4, '0')}`;
+  }
+  return String(value);
+}
+
 /**
- * Builds the free-form second-line detail text for one activity entry, per issue #46's
- * generic two-line format (tag+time on top, description below). Every actionType the app
- * writes today (minus the hidden bookkeeping ones — see HIDDEN_ACTION_TYPES) has a bespoke
- * description here; an unrecognized future actionType falls back to a plain readout of its
- * raw fields rather than a blank line.
+ * Builds the detail text for one activity entry as one or more lines, each a mix of plain
+ * text and tappable ID tokens (rendered as <LiveId> by the overlay — issue #46's tap-nav
+ * requirement). Every actionType the app writes today (minus the hidden bookkeeping ones —
+ * see HIDDEN_ACTION_TYPES) has a bespoke description here; an unrecognized future actionType
+ * falls back to a plain readout of its raw fields rather than a blank line.
  */
-export function detailFor(entry: ActivityEntry): string {
+export function detailFor(entry: ActivityEntry): DetailLine[] {
   const d = entry.details ?? {};
-  const loc = entry.location ? fmtLocation(entry.location) : null;
+  const pallet = palletToken(entry.palletId);
+  const loc = locationToken(entry.location);
 
   switch (entry.actionType) {
-    case 'PULL':
-      return loc ? `Pulled pallet from ${loc}` : 'Pulled pallet';
-    case 'PUT':
-      return loc ? `${d.wasMove ? 'Moved' : 'Put'} pallet to ${loc}` : 'Put pallet';
+    case 'PULL': {
+      const pullFunction = d.pullFunction as string | undefined;
+      const label = (pullFunction && PULL_FUNCTION_LABELS[pullFunction]) || 'Pull';
+      const pulled = (d.pulled ?? {}) as { pallets?: number; cartons?: number; ssps?: number };
+      const qty = fmtPCS(pulled.pallets ?? 0, pulled.cartons ?? 0, pulled.ssps ?? 0);
+      const line: DetailLine = [`${label}: Pulled ${qty} from `];
+      line.push(pallet ?? '?');
+      if (loc) line.push(' at ', loc);
+      return [line];
+    }
+
+    case 'PUT': {
+      const wasMove = d.wasMove === true;
+      const method = d.method as string | undefined;
+      const clearedLoc = locationToken((d.clearedLocation as string | null) ?? null);
+      const line: DetailLine = [pallet ?? '?'];
+      if (wasMove && clearedLoc) {
+        line.push(' moved from ', clearedLoc, ' to ', loc ?? '?');
+      } else {
+        line.push(' put in ', loc ?? '?');
+      }
+      if (method === 'SDP') {
+        const override = d.override as Record<string, string | number> | undefined;
+        if (override && Object.keys(override).length > 0) {
+          const parts: string[] = [];
+          if (override.size) parts.push(`Size: ${override.size}`);
+          if (override.storageCode) parts.push(`Storage: ${override.storageCode}`);
+          if (override.zone != null) parts.push(`Zone: ${override.zone}`);
+          line.push(` — Override {${parts.join(', ')}}`);
+        }
+      }
+      if (method === 'MNP' && d.destinationWasOccupied === true) {
+        line.push(' — Location was occupied');
+      }
+      return [line];
+    }
+
     case 'UNASSIGN':
-      return loc ? `Released reservation at ${loc}` : 'Released a reservation';
+      return [loc ? ['Released reservation at ', loc] : ['Released a reservation']];
+
     case 'BLOCK_PUT':
-      return loc ? `Marked ${loc} as blocked and redirected to a new location` : 'Marked a location as blocked';
-    case 'STAGE': {
-      const storageCode = d.storageCode as string | undefined;
-      const size = d.size as string | undefined;
-      return loc ? `Staged ${size ?? ''} ${storageCode ?? ''} at ${loc}`.replace(/\s+/g, ' ').trim() : 'Staged a location';
+      return [loc ? ['Marked ', loc, ' as blocked and redirected to a new location'] : ['Marked a location as blocked']];
+
+    case 'STAGE_SUM': {
+      const storageCode = (d.storageCode as string | undefined) ?? '';
+      const size = (d.size as string | undefined) ?? '';
+      const count = (d.count as number | undefined) ?? 0;
+      return [[`Staged ${count} ${storageCode}-${size} in Aisle ${entry.locationAisle ?? '?'}`]];
     }
+
     case 'RESTAGE': {
-      const results = Array.isArray(d.results) ? d.results as { storageCode: string; size: string; staged: number }[] : [];
-      const summary = results.filter((r) => r.staged > 0).map((r) => `${r.staged} ${r.storageCode}-${r.size}`).join(', ');
-      return `Restaged ${summary || '0 locations'} in Aisle ${entry.locationAisle ?? '?'}`;
+      const results = Array.isArray(d.results)
+        ? d.results as { storageCode: string; size: string; cleared: number; staged: number }[]
+        : [];
+      if (results.length === 0) return [[`Restaged 0 locations in Aisle ${entry.locationAisle ?? '?'}`]];
+      return results.map((r) => [
+        `Cleared ${r.cleared}, staged ${r.staged} of ${r.storageCode}-${r.size} in Aisle ${entry.locationAisle ?? '?'}`,
+      ]);
     }
+
     case 'HOLD_PLACE':
-      return loc ? `Placed ${holdCategoryName(d.holdType)} on ${loc}` : 'Placed a hold';
+      return [loc ? [`Placed ${holdCategoryName(d.holdType)} on `, loc] : ['Placed a hold']];
+
     case 'HOLD_CLEAR':
-      return loc ? `Removed ${holdCategoryName(d.clearedHoldType)} from ${loc}` : 'Removed a hold';
+      return [loc ? [`Removed ${holdCategoryName(d.clearedHoldType)} from `, loc] : ['Removed a hold']];
+
     case 'RANGE_HOLD': {
       const placed = (d.placed as number | undefined) ?? 0;
       const upgraded = (d.upgraded as number | undefined) ?? 0;
@@ -105,19 +259,36 @@ export function detailFor(entry: ActivityEntry): string {
       const parts = [`Placed ${holdCategoryName(d.holdType)} on ${placed} locations`];
       if (upgraded > 0) parts.push(`upgraded ${upgraded} to Hold Both`);
       if (blocked > 0) parts.push(`${blocked} blocked`);
-      return `${parts.join(', ')} — ${rangeDesc(entry.locationAisle, d)}`;
+      return [[`${parts.join(', ')} — ${rangeDesc(entry.locationAisle, d)}`]];
     }
+
     case 'RANGE_REL': {
       const released = (d.released as number | undefined) ?? 0;
-      return `Released holds on ${released} locations — ${rangeDesc(entry.locationAisle, d)}`;
+      return [[`Released holds on ${released} locations — ${rangeDesc(entry.locationAisle, d)}`]];
     }
+
     case 'EDIT_PAL': {
-      const changed = d.new && typeof d.new === 'object' ? Object.keys(d.new as object) : [];
-      return `Changed ${changed.length > 0 ? changed.join(', ') : 'pallet details'} on pallet ${entry.palletId ?? '?'}`;
+      const oldVals = (d.old ?? {}) as Record<string, unknown>;
+      const newVals = (d.new ?? {}) as Record<string, unknown>;
+      const reasonCode = (d.reasonCode as string | undefined) ?? '';
+      const changed = EDIT_FIELD_ORDER.filter((f) => f in oldVals);
+
+      const headerLine: DetailLine = loc ? ['Modified Pallet in ', loc] : ['Modified Pallet'];
+
+      const oldStr = changed.map((f) => `${EDIT_FIELD_LABELS[f]}: ${fmtEditValue(f, oldVals[f])}`).join(', ');
+      const newStr = changed.map((f) => `${EDIT_FIELD_LABELS[f]}: ${fmtEditValue(f, newVals[f])}`).join(', ');
+      const diffLine: DetailLine = [
+        pallet ?? '?',
+        ` ${oldStr} changed to ${newStr}. Reason ${reasonCode}`,
+      ];
+
+      return [headerLine, diffLine];
     }
+
     case 'REINSTATE':
-      return `Reinstated pallet ${entry.palletId ?? '?'}`;
+      return [['Reinstated pallet ', pallet ?? '?']];
+
     default:
-      return loc ? `${entry.actionType} at ${loc}` : entry.actionType;
+      return [loc ? [`${entry.actionType} at `, loc] : [entry.actionType]];
   }
 }
