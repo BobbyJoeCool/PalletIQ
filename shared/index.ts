@@ -38,7 +38,8 @@ export type PalletStatus =
   | 'STORED'
   | 'PULL_PENDING'
   | 'PULLED'
-  | 'CANCELED';
+  | 'CANCELED'
+  | 'CONSOLIDATED';
 
 export type LabelStatus =
   | 'AVAILABLE'

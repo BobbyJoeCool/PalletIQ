@@ -10,7 +10,7 @@ erDiagram
     %% LocationStatus: EMPTY, STORED, PULL_PENDING, RESERVED, STAGED                                           → NVarChar(15)
     %% HoldCategory:   HOLD_IN, HOLD_OUT, HOLD_BOTH, HOLD_PERM (Location.holdCategory, independent of status)   → NVarChar(10)
     %% LocationSize:   XS, HS, S, M, L                                                                         → NVarChar(2)
-    %% PalletStatus:   PUT_PENDING, STORED, PULL_PENDING, PULLED, CANCELED (open — expand as needed)           → NVarChar(15)
+    %% PalletStatus:   PUT_PENDING, STORED, PULL_PENDING, PULLED, CANCELED, CONSOLIDATED (open — expand as needed) → NVarChar(15)
     %% LabelStatus:    AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                  → NVarChar(15)
     %% PullFunction:   CA (Carton Air), CF (Carton Floor), FP (Full Pallet), BK (Bulk/level-0, not in demo)   → NVarChar(2)
     %% Role:           ADMIN, MANAGER, LEAD, IM, WORKER                                                        → NVarChar(10)

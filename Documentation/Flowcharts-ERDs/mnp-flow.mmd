@@ -23,46 +23,85 @@ flowchart TD
 
     MOVE_MSG --> S2
 
-    S2[State: pallet_scanned\nPallet details shown\ndestinationField auto-focuses\npendingEntryKey set in history as SCANNED]
+    S2[State: pallet_scanned\nPallet details shown\nLocationEntryFields levelOptional auto-focuses\npendingEntryKey set in history as SCANNED]
 
-    S2 --> LOC_SCAN{Scan destination location\nhandleDestinationEnter}
+    S2 --> LOC_RESOLVE{Destination resolved\nAisle+Bin typed 6-digit, or\nfull barcode scan 8-digit\nhandleDestinationResolved}
 
-    LOC_SCAN --> API_LOC[GET /api/locations/:id\napi/functions/locations.ts — getLocation\nvalidate aisle+bin exists\nno level required yet]
+    LOC_RESOLVE --> API_LOC[GET /api/locations/:id\napi/functions/locations.ts — getLocation\nvalidate aisle+bin exists]
 
     API_LOC --> LOC_OK{Found?}
-    LOC_OK -->|Not found| ERR_L[Error: Location not found\ndestinationField cleared + re-focused]
+    LOC_OK -->|Not found| ERR_L[Error: Location not found\nLocationEntryFields remounted + re-focused]
     LOC_OK -->|OK| S3
 
     ERR_L --> S2
 
-    S2 --> CLR[Worker taps Clear button\nresetToReady\nback to ready]
+    S2 --> CLR[Worker taps Clear button\ncancelScan then resetToReady\nwriteLog MNP_CANCEL, history entry → CANCELED\nback to ready]
     CLR --> S1
 
-    S3[State: level_modal\nLevelModal overlay shown\ndestinationField value stored in pendingLocation\nEmpty/Occupied demo buttons pre-fill the level input\nreal scanned destinations leave it blank]
+    S2 -.-> UNMOUNT
+    S3 -.-> UNMOUNT
+    UNMOUNT[MNPPage unmounts mid-scan\nin-app navigation away, or\nidle-timeout logout redirect\nunmount-cleanup effect fires cancelScan\nwriteLog MNP_CANCEL — best-effort, not awaited\nlocal history discarded with the component]
 
-    S3 --> LEVEL_SEL[Worker enters level number\nLevelModal confirm button\nhandleLevelSelect called]
+    S3[State: level_modal\nLevelModal overlay shown\npendingLocation stored — 6 or 8 digits\n8-digit scan pre-fills level from digits 7-8\n6-digit manual entry leaves it blank]
 
-    LEVEL_SEL --> API_CONF[POST /api/puts/manual/confirm\napi/functions/puts.ts — manualConfirm\nparse location barcode\ncheck if destination occupied non-blocking\nplacePallet atomic transaction\nwriteLog PUT\nreturn wasMove + occupiedFlag]
+    S3 --> LEVEL_SEL[Worker enters/confirms level number\nLevelModal confirm button\nhandleLevelSelect → submitConfirm]
 
-    API_CONF --> CONF_OK{Result?}
-    CONF_OK -->|NOT_FOUND| ERR_C[Error: Location not found\nreturn to pallet_scanned\ndestinationField cleared]
-    CONF_OK -->|General error| ERR_G[Error: Confirm failed\nreturn to pallet_scanned]
-    CONF_OK -->|OK — destination was empty| PUT_SUCCESS[Success message\nhistory: SCANNED → PUT\nlocation + level shown]
-    CONF_OK -->|OK — destination was occupied| OCC_WARN[Warning: was occupied\nhistory: SCANNED → PUT\nshows WAS OCCUPIED badge]
+    LEVEL_SEL --> API_CONF[POST /api/puts/manual/confirm\napi/functions/puts.ts — manualConfirm]
 
-    ERR_C --> S2
+    API_CONF --> GATE_CONTRACTION{Destination\ncontraction flag?}
+
+    GATE_CONTRACTION -->|No| GATE_OCCUPIED
+    GATE_CONTRACTION -->|Yes, Worker role| ERR_CONTRACTED[403 CONTRACTED\nhard block, no override\nback to pallet_scanned]
+    GATE_CONTRACTION -->|Yes, IM+, not yet acknowledged| POPUP_CONTRACTION[Popup: This location is on\ncontraction, do you want to\ncomplete the put?]
+
+    POPUP_CONTRACTION -->|No| CANCEL_TO_DEST
+    POPUP_CONTRACTION -->|Yes — resubmit acknowledgeContraction:true| API_CONF
+
+    ERR_CONTRACTED --> S2
+
+    GATE_OCCUPIED{Destination\nSTORED or STAGED,\nno resolution yet?}
+
+    GATE_OCCUPIED -->|No — EMPTY, or resolution already set| PLACE[placePallet atomic transaction\nwriteLog PUT]
+    GATE_OCCUPIED -->|Yes| DPCI_CHECK{STORED occupant's\nDPCI matches\nincoming pallet?}
+
+    DPCI_CHECK -->|Yes| POPUP_COMBINE[Popup: Same item already stored —\nCombine Pallets or Cancel\nCombine is IM+ only]
+    DPCI_CHECK -->|No — mismatch, or STAGED| POPUP_OCCUPIED[Popup: Location already occupied —\nProceed Anyway /\nPlace Hold Both Empty Location & Cancel /\nCancel]
+
+    POPUP_COMBINE -->|Cancel| CANCEL_TO_DEST
+    POPUP_COMBINE -->|Combine — resubmit resolution:consolidate| API_CONF
+
+    POPUP_OCCUPIED -->|Cancel| CANCEL_TO_DEST
+    POPUP_OCCUPIED -->|Proceed — resubmit resolution:proceed| API_CONF
+    POPUP_OCCUPIED -->|Place Hold Both & Cancel| API_HOLD[PATCH /api/locations/:id/hold\nholdType HOLD_BOTH, reasonCode W04]
+    API_HOLD --> CANCEL_TO_DEST
+
+    CANCEL_TO_DEST[cancelToDestinationEntry\nback to pallet_scanned\npallet still scanned\ndestination boxes cleared]
+    CANCEL_TO_DEST --> S2
+
+    API_CONF -->|400/404/other error| ERR_G[Error: Location not found /\nConfirm failed\nback to pallet_scanned]
     ERR_G --> S2
 
-    PUT_SUCCESS --> RESET[resetToReady\nclear all per-put state\nreturn to ready]
+    PLACE --> CONF_OK{Result?}
+    CONF_OK -->|resolution:consolidate — merged into occupant,\nincoming pallet zeroed + CONSOLIDATED| CONSOLIDATE_SUCCESS[Success message\nhistory: SCANNED → CONSOLIDATED\nwriteLog CONSOLID]
+    CONF_OK -->|destination was empty| PUT_SUCCESS[Success message\nhistory: SCANNED → PUT\nlocation + level shown]
+    CONF_OK -->|resolution:proceed, was occupied/staged| OCC_WARN[Warning: was occupied/staged\nhistory: SCANNED → PUT/MOVE\nshows WAS OCCUPIED/STAGED badge]
+
+    CONSOLIDATE_SUCCESS --> RESET[resetToReady\nclear all per-put state\nreturn to ready]
+    PUT_SUCCESS --> RESET
     OCC_WARN --> RESET
 
     RESET --> S1
 
     style START fill:#1a1a1a,stroke:#555,color:#fff
     style PUT_SUCCESS fill:#003300,stroke:#006600,color:#fff
+    style CONSOLIDATE_SUCCESS fill:#003300,stroke:#006600,color:#fff
     style OCC_WARN fill:#332200,stroke:#664400,color:#ffcc88
+    style POPUP_CONTRACTION fill:#332200,stroke:#664400,color:#ffcc88
+    style POPUP_OCCUPIED fill:#332200,stroke:#664400,color:#ffcc88
+    style POPUP_COMBINE fill:#332200,stroke:#664400,color:#ffcc88
     style ERR_P1 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_P2 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_L fill:#330000,stroke:#660000,color:#ff8080
-    style ERR_C fill:#330000,stroke:#660000,color:#ff8080
     style ERR_G fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_CONTRACTED fill:#330000,stroke:#660000,color:#ff8080
+    style UNMOUNT fill:#222222,stroke:#555,color:#aaa

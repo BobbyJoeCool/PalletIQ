@@ -45,6 +45,8 @@ const ACTIVITY_TAGS: Record<string, string> = {
   RANGE_REL: 'WLH',
   EDIT_PAL: 'PII',
   REINSTATE: 'PAR',
+  CONSOLID: 'PUT',
+  MNP_CANCEL: 'PUT',
 };
 
 /** Falls back to the raw actionType (truncated to fit the same visual slot) if not in ACTIVITY_TAGS. */
@@ -106,10 +108,14 @@ export function severityFor(entry: ActivityEntry): Severity {
 
     case 'EDIT_PAL':
     case 'UNASSIGN':
+    case 'CONSOLID':
       return 'info';
 
     case 'RES_TMOUT':
       return 'error';
+
+    case 'MNP_CANCEL':
+      return 'warning';
 
     default:
       return 'info';
@@ -215,13 +221,16 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
     case 'PUT': {
       const wasMove = d.wasMove === true;
       const method = d.method as string | undefined;
+      // "SDP: "/"MNP: " prefix at the start of the detail line, matching PULL's
+      // "CA Pull: ..." label-prefix convention rather than a header-tag suffix.
+      const methodLabel = method === 'SDP' ? 'SDP: ' : method === 'MNP' ? 'MNP: ' : '';
       const clearedLoc = locationToken((d.clearedLocation as string | null) ?? null);
       // Only ever set on SDP's confirmPut (findNextLocation's STAGED-vs-EMPTY match) —
       // undefined for MNP (whose own, differently-scoped destinationWasStaged isn't
       // rendered here) and for any entry written before this tracking existed.
       const wasStaged = d.wasStaged as boolean | undefined;
       const stagedTag = wasStaged != null ? (wasStaged ? ' (Staged)' : ' (Empty)') : null;
-      const line: DetailLine = [pallet ?? '?'];
+      const line: DetailLine = [methodLabel, pallet ?? '?'];
       if (wasMove && clearedLoc) {
         line.push(' moved from ', clearedLoc, ' to ', loc ?? '?');
       } else {
@@ -240,6 +249,13 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
       }
       if (method === 'MNP' && d.destinationWasOccupied === true) {
         line.push(' — Location was occupied');
+      }
+      // wasContracted is only ever written by MNP's manualConfirm (Directed Put's own
+      // search already filters contracted locations out entirely, so this never appears
+      // on an SDP entry) — both this and the occupied tag above can appear together,
+      // covering the "occupied AND on contraction" case.
+      if (d.wasContracted === true) {
+        line.push(' — Contraction');
       }
       if (method === 'SDP') {
         const verification = d.verification as { pid?: { scanned: boolean }; bin?: { scanned: boolean } } | undefined;
@@ -320,6 +336,31 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
 
     case 'REINSTATE':
       return [['Reinstated pallet ', pallet ?? '?']];
+
+    case 'CONSOLID': {
+      const targetToken = palletToken((d.targetPalletId as number | undefined) ?? null);
+      const qty = fmtPCS(
+        (d.pallets as number | undefined) ?? 0,
+        (d.cartons as number | undefined) ?? 0,
+        (d.ssps as number | undefined) ?? 0,
+      );
+      const line: DetailLine = [pallet ?? '?', ` combined ${qty} into `, targetToken ?? '?'];
+      if (loc) line.push(' at ', loc);
+      if (d.wasContracted === true) line.push(' — Contraction');
+      return [line];
+    }
+
+    case 'MNP_CANCEL': {
+      const stage = d.stage as string | undefined;
+      const destinationLocation = d.destinationLocation as string | undefined;
+      const line: DetailLine = ['MNP: Canceled scan of ', pallet ?? '?'];
+      line.push(
+        stage === 'level_modal' && destinationLocation
+          ? ` — destination ${destinationLocation} entered, level not confirmed`
+          : ' — no destination entered',
+      );
+      return [line];
+    }
 
     default:
       return [loc ? [`${entry.actionType} at `, loc] : [entry.actionType]];

@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.6.3 — 2026-07-15](#163--2026-07-15)
 - [1.6.2 — 2026-07-14](#162--2026-07-14)
 - [1.6.1 — 2026-07-14](#161--2026-07-14)
 - [1.6.0 — 2026-07-13](#160--2026-07-13)
@@ -78,6 +79,65 @@ No issues currently open in this category.
 ### Distant Future
 
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
+
+---
+
+## [1.6.3] — 2026-07-15
+
+MNP follow-up round: a contraction gate, a blocking occupied/staged-location popup
+(replacing a post-hoc warning), a new pallet consolidation operation for same-DPCI
+destinations, and the shared 3-box Aisle/Bin/Level destination entry (resolving
+`DevNotes/Fixes/MNP/01-destination-entry-3-box-redesign.md`) — plus two same-session
+follow-up rounds (a scan-handling bug found right after shipping, and activity-log
+polish), all folded into this one version rather than given their own bumps.
+
+### 1.6.3 — Added
+
+- **MNP now blocks puts to a Contraction-flagged location.** A Worker is hard-blocked
+  outright; an IM+ sees a confirmation popup ("This location is on contraction, do you
+  want to complete the put?") and may proceed after accepting it.
+- **MNP's occupied/staged-destination check is now a blocking popup, not a post-hoc
+  warning.** Landing on a `STORED` or `STAGED` destination now stops the put with a
+  Proceed Anyway / Place Hold Both (Empty Location) & Cancel / Cancel choice, instead of
+  completing silently with a warning message shown afterward.
+- **Pallet consolidation.** When the destination's occupant has the same DPCI as the
+  incoming pallet, the popup instead offers to combine them (Inventory Manager and above
+  only) — merges the incoming pallet's quantity onto the occupant's, then zeroes and clears
+  the incoming pallet and marks it with a new `Consolidated` status.
+- **New `W04` ("Empty Location") hold reason code**, matching `enums.mmd`'s documented
+  Department+Code scheme, used when a worker flags an occupied destination as physically
+  empty via the new popup.
+- **Two new MNP demo buttons**: "⛔ Contraction" (scans a real Contraction-flagged
+  location, to exercise the contraction gate) and "⇄ Consolidate" (scans a location whose
+  stored occupant shares the currently-scanned pallet's DPCI, to exercise the combine
+  popup — disabled until a pallet is scanned).
+- **MNP now logs an abandoned scan** — if a worker scans a pallet and then hits Clear,
+  navigates away from MNP, or gets idle-timeout-logged-out before completing the put, a
+  new `MNP_CANCEL` activity-log entry records it (visible in the activity log, not
+  hidden). MNP's local put history also updates the entry to read Canceled instead of
+  leaving it looking stuck "in progress" for the rest of the session (Clear only —
+  navigating away or timing out discards the local history along with the screen).
+- **Completed MNP puts now record whether the destination was on Contraction**, alongside
+  the existing "was occupied" indicator — both show together when a destination was both
+  occupied and on contraction.
+
+### 1.6.3 — Changed
+
+- **MNP's destination entry is now the shared 3-box Aisle/Bin/Level field** (matching PIP/
+  SDP/PAR/LII/WLH), replacing the old single free-text field. Aisle and Bin alone are
+  enough to advance — Level is still confirmed separately via the existing Level
+  Confirmation modal, now pre-filled when a full barcode scan already supplied it.
+- **PUT activity-log entries now show which screen they came from** — the detail line
+  starts with "SDP: " or "MNP: ", matching the existing "CA Pull: ..." label-prefix style
+  already used for pull entries.
+
+### 1.6.3 — Fixed
+
+- **MNP's destination-entry scan was silently dropped for any 6-digit location barcode**
+  (including the "✓ Empty"/"~ Occupied" demo buttons, and a real 6-digit physical location
+  barcode scanned with a hardware scanner) — the shared 3-box entry only recognized a
+  3-digit per-box chunk or an 8-digit full override, not the 6-digit Aisle+Bin-only format
+  most physical location barcodes actually use.
 
 ---
 

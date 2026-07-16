@@ -19,4 +19,10 @@ export const HOLD_REASON_CODES: HoldReasonCode[] = [
   { code: 'S01', desc: 'Safety concern' },
   { code: 'S02', desc: 'Recall' },
   { code: 'O01', desc: 'Other — see notes' },
+  // W04 matches enums.mmd's documented Department+Code table (W = Warehousing, 04 = Empty
+  // Location) exactly — used by MNP's occupied-location popup when a worker flags a
+  // destination as physically empty despite its recorded STORED/STAGED status. Added as a
+  // minimal, targeted fix rather than the larger app-wide Department+Code reconciliation
+  // (see DevNotes/Fixes/ReasonCodes/01-department-code-reconciliation.md).
+  { code: 'W04', desc: 'Empty location' },
 ];

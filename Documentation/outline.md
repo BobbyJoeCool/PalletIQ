@@ -214,9 +214,16 @@ Used for correcting location data or recording a put-away that doesn't go throug
 
 1. The worker scans the pallet ID. **This scan is logged to the activity log** — this is the one place outside the standard transactional events where a scan itself is recorded, separate from the eventual put completion, since Manual Put is the override path and more error-prone than Directed Put.
 2. The same eligibility checks apply (stored cartons, already-stored informational alert).
-3. The worker manually enters the destination location.
-4. If the entered location is not Empty, the system raises an audio alert and a non-blocking warning message rather than proceeding silently.
-5. On confirmation, the pallet's location updates; if it was previously stored elsewhere, that location clears automatically in the same transaction.
+3. The worker enters the destination via the same shared Aisle/Bin/Level 3-box entry used elsewhere in the app. Only Aisle and Bin are required to advance — Level is confirmed separately in the next step, so the Level box in this entry is optional (populated automatically only when a full barcode scan already supplied it). A full 8-digit barcode scan into any of the three boxes still resolves the whole location at once, same as everywhere else this entry is used.
+4. The worker confirms the rack level the pallet was physically placed at (pre-filled if a full barcode scan already supplied it in step 3, otherwise entered from scratch) — this is a self-attestation, not validated against the location record until confirmation.
+5. Before the put actually commits, the system runs two blocking checks in order:
+   - **Contraction.** If the destination is flagged Contraction, a Worker is blocked outright with no override. An Inventory Manager or above instead sees a confirmation popup ("This location is on contraction, do you want to complete the put?") and may proceed after accepting it.
+   - **Occupied or Staged.** If the destination is already `STORED` or `STAGED`, the system raises a blocking popup rather than a warning:
+     - If the DPCI of the pallet already stored there matches the DPCI of the pallet being put, the popup instead offers to **combine** the two pallets — available to Inventory Manager and above only. Combining adds the incoming pallet's quantity (pallets/cartons/SSPs) onto the existing pallet, then zeroes the incoming pallet's own quantity, clears its location, and marks its status `Consolidated`. A Worker encountering this scenario can only cancel.
+     - Otherwise (a different DPCI, or a Staged destination with no pallet to compare against), the popup offers **Proceed Anyway** (any role — completes the put as usual; the previous occupant's own record is left untouched), **Place Hold Both (Empty Location) & Cancel** (any role — places a Hold Both with reason code flagging the location as physically empty, then cancels the put), or **Cancel**.
+   - Declining any of these popups (or canceling after a hold placement) returns to the destination-entry step with the pallet ID still scanned, awaiting a location — it does not restart the whole put.
+6. On confirmation, the pallet's location updates; if it was previously stored elsewhere, that location clears automatically in the same transaction.
+7. If a scanned pallet's put is never completed — the worker taps Clear, navigates away from Manual Put entirely, or an idle-timeout logout interrupts the session — the abandoned scan is logged (activity log, visible, not the hidden scan-only entry from step 1) and, if the worker is still on the screen to see it, the local put history updates to show it as canceled instead of leaving it reading as still in progress.
 
 This screen is also how Pallet ID location corrections are made — the Pallet ID screen itself does not allow direct editing of location.
 

@@ -2,7 +2,7 @@ import { app } from '@azure/functions';
 import type { HttpRequest, InvocationContext } from '@azure/functions';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
-import { requireAuth, hasMinRole } from '../lib/permissions.js';
+import { requireAuth, hasMinRole, requireRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { checkPalletEligibility } from '../lib/eligibility.js';
 import { findNextLocation, resolveEffectiveCriteria } from '../lib/zoneLogic.js';
@@ -565,19 +565,39 @@ async function manualScan(req: HttpRequest, _ctx: InvocationContext): Promise<un
  * The worker supplies the destination Aisle+Bin (from a 6 or 8-digit barcode or numpad)
  * and the specific level they placed the pallet at (from the level-selection modal in the UI).
  *
- * If the destination location is already occupied (STORED status), the put still proceeds
- * but the response includes `destinationWasOccupied: true` so the UI can display a warning.
- * Likewise, landing on a STAGED location (committed by a GPMer via STG but not yet filled)
- * still proceeds — `destinationWasStaged: true` — and the location status simply moves on
- * to STORED, same as any other put. Per DevNotes/Screen-Specs/STG.md's "SDP and MNP
- * Interaction". This non-blocking behavior is intentional — MNP is an override path and the
- * worker has already physically placed the pallet; blocking would cause inconsistency.
+ * Three gates run, in order, before the pallet is actually placed — each can require a
+ * resubmission with an extra acknowledgement/resolution field, the same "throw then
+ * resubmit" shape PIP's LEVEL_MISMATCH uses:
+ *
+ * 1. **Contraction** (`Location.contraction`): a Worker is hard-blocked (403 CONTRACTED,
+ *    no override). IM+ gets 409 CONTRACTION_CONFIRM_REQUIRED until resubmitted with
+ *    `acknowledgeContraction: true`.
+ * 2. **Occupied/staged**: if the destination is STORED or STAGED, the put is blocked
+ *    (409 DESTINATION_OCCUPIED, with `{ occupantPalletId, occupantDpci, matchesDpci,
+ *    wasStaged }`) until resubmitted with `resolution: 'proceed'` or `'consolidate'`.
+ *    `resolution: 'proceed'` is rejected (re-thrown) when `matchesDpci` is true — a
+ *    same-DPCI occupant must be resolved via consolidate, not a plain override.
+ * 3. **Consolidate** (`resolution: 'consolidate'`, IM+ only): merges the incoming
+ *    pallet's current quantities onto the STORED occupant of the same DPCI, then zeroes
+ *    and clears the incoming pallet's own location fields and marks it `CONSOLIDATED`
+ *    instead of moving it into the destination. If the incoming pallet had its own prior
+ *    location, that location is freed to `EMPTY`, same as a normal move.
+ *
+ * `resolution: 'proceed'` on a DPCI mismatch (or a STAGED destination) falls through to
+ * the normal placePallet path unchanged — the previous occupant's own Pallet record is
+ * left untouched, same as today's behavior.
  *
  * @param req - HTTP request with body:
- *   `{ palletId: number | string; destinationLocation: string; level: number }`
- * @returns `{ location, level, wasMove, clearedLocation, destinationWasOccupied, destinationWasStaged }`
+ *   `{ palletId: number | string; destinationLocation: string; level: number;
+ *      acknowledgeContraction?: boolean; resolution?: 'proceed' | 'consolidate' }`
+ * @returns Normal put: `{ location, level, wasMove, clearedLocation, destinationWasOccupied, destinationWasStaged }`.
+ *   Consolidate: `{ consolidated: true, targetPalletId, sourcePalletId, location }`.
  * @throws 400 INVALID_INPUT for non-numeric palletId, invalid barcode, or missing level;
- *   404 NOT_FOUND if the exact aisle+bin+level location record does not exist
+ *   403 CONTRACTED if a Worker targets a contracted location;
+ *   403 FORBIDDEN if a non-IM+ user submits `resolution: 'consolidate'`;
+ *   404 NOT_FOUND if the exact aisle+bin+level location record does not exist;
+ *   409 CONTRACTION_CONFIRM_REQUIRED / DESTINATION_OCCUPIED — see above;
+ *   409 CONSOLIDATE_MISMATCH if the destination's occupant no longer matches DPCI (stale resubmission)
  */
 async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
   const auth = await requireAuth(req);
@@ -586,6 +606,8 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     palletId: number | string;
     destinationLocation: string;
     level: number;
+    acknowledgeContraction?: boolean;
+    resolution?: 'proceed' | 'consolidate';
   };
 
   const palletId = typeof body.palletId === 'string'
@@ -600,14 +622,140 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
   const parsed = parseLocationBarcode(body.destinationLocation);
   if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const destLocation = await prisma.location.findUnique({
-    where: { LocationID: { aisle: parsed.aisle, bin: parsed.bin, level: body.level } },
-  });
+  const [pallet, destLocation] = await Promise.all([
+    prisma.pallet.findUniqueOrThrow({ where: { pid: palletId } }),
+    prisma.location.findUnique({
+      where: { LocationID: { aisle: parsed.aisle, bin: parsed.bin, level: body.level } },
+    }),
+  ]);
   if (!destLocation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+  // Contraction gate — blocks all puts to a contracted location; Worker cannot override,
+  // IM+ can after explicit acknowledgement.
+  if (destLocation.contraction) {
+    if (!hasMinRole(auth.role, 'IM')) {
+      throw Object.assign(new Error('CONTRACTED'), { status: 403 });
+    }
+    if (!body.acknowledgeContraction) {
+      throw Object.assign(new Error('CONTRACTION_CONFIRM_REQUIRED'), { status: 409 });
+    }
+  }
 
   // Record whether the destination was already occupied or staged before the move.
   const destinationWasOccupied = destLocation.status === 'STORED';
   const destinationWasStaged   = destLocation.status === 'STAGED';
+
+  if (destinationWasOccupied || destinationWasStaged) {
+    // The occupant is looked up fresh on every call (never trusted from the client) and
+    // excludes the incoming pallet's own pid — a pallet re-put onto its own current spot
+    // isn't "occupied by something else" and falls through to the normal placePallet path.
+    const occupant = destinationWasOccupied
+      ? await prisma.pallet.findFirst({
+          where: {
+            locationAisle: parsed.aisle, locationBin: parsed.bin, locationLevel: body.level,
+            status: 'STORED', pid: { not: pallet.pid },
+          },
+        })
+      : null;
+    const matchesDpci = occupant != null
+      && occupant.dept === pallet.dept && occupant.class === pallet.class && occupant.item === pallet.item;
+
+    // No resolution yet, or a same-DPCI occupant with a plain "proceed" — same-DPCI must
+    // go through consolidate instead, so this re-throws to send the worker back to the
+    // combine popup rather than allowing a silent duplicate-stock override.
+    if (!body.resolution || (body.resolution === 'proceed' && matchesDpci)) {
+      throw Object.assign(new Error('DESTINATION_OCCUPIED'), {
+        status: 409,
+        data: {
+          occupantPalletId: occupant?.pid ?? null,
+          occupantDpci: occupant
+            ? `${String(occupant.dept).padStart(3,'0')}-${String(occupant.class).padStart(2,'0')}-${String(occupant.item).padStart(4,'0')}`
+            : null,
+          matchesDpci,
+          wasStaged: destinationWasStaged,
+        },
+      });
+    }
+
+    if (body.resolution === 'consolidate') {
+      requireRole(auth, 'IM');
+      if (!occupant || !matchesDpci) {
+        throw Object.assign(new Error('CONSOLIDATE_MISMATCH'), { status: 409 });
+      }
+
+      // Untyped-empty-then-push (matching placePallet's `const ops = []` idiom above) so
+      // TS infers a union across the mixed pallet.update/location.update op types below,
+      // rather than locking in whatever the first pushed element's type happens to be.
+      const ops = [];
+      ops.push(
+        prisma.pallet.update({
+          where: { pid: occupant.pid },
+          data: {
+            currentCartons: occupant.currentCartons + pallet.currentCartons,
+            currentPallets: occupant.currentPallets + pallet.currentPallets,
+            currentSSPs:    occupant.currentSSPs + pallet.currentSSPs,
+          },
+        }),
+      );
+      ops.push(
+        prisma.pallet.update({
+          where: { pid: pallet.pid },
+          data: {
+            currentCartons: 0,
+            currentPallets: 0,
+            currentSSPs:    0,
+            status:         'CONSOLIDATED',
+            locationAisle:  null,
+            locationBin:    null,
+            locationLevel:  null,
+            storageCode:    null,
+            size:           null,
+            zone:           null,
+          },
+        }),
+      );
+
+      // Free the incoming pallet's own prior location, if it had one — same as
+      // placePallet's existing wasMove handling for a normal move.
+      if (pallet.locationAisle != null) {
+        ops.push(
+          prisma.location.update({
+            where: { LocationID: { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel! } },
+            data: { status: 'EMPTY' },
+          }),
+        );
+      }
+
+      await prisma.$transaction(ops);
+
+      await writeLog({
+        userId: auth.zNumber,
+        actionType: 'CONSOLID',
+        palletId: pallet.pid,
+        locationAisle: parsed.aisle,
+        locationBin:   parsed.bin,
+        locationLevel: body.level,
+        details: {
+          targetPalletId: occupant.pid,
+          sourcePalletId: pallet.pid,
+          cartons: pallet.currentCartons,
+          pallets: pallet.currentPallets,
+          ssps:    pallet.currentSSPs,
+          method:  'MNP',
+          wasContracted: destLocation.contraction,
+        },
+      });
+
+      return {
+        consolidated:   true,
+        targetPalletId: occupant.pid,
+        sourcePalletId: pallet.pid,
+        location:       locationString(parsed.aisle, parsed.bin, body.level),
+      };
+    }
+    // else: resolution === 'proceed' on a DPCI mismatch (or a STAGED destination) —
+    // falls through to the normal placePallet path below unchanged.
+  }
 
   const { wasMove, clearedLocation } = await placePallet(
     palletId,
@@ -624,7 +772,10 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     locationAisle: parsed.aisle,
     locationBin:   parsed.bin,
     locationLevel: body.level,
-    details: { wasMove, clearedLocation, destinationWasOccupied, destinationWasStaged, method: 'MNP' },
+    details: {
+      wasMove, clearedLocation, destinationWasOccupied, destinationWasStaged, method: 'MNP',
+      wasContracted: destLocation.contraction,
+    },
   });
 
   return {
@@ -635,6 +786,57 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     destinationWasStaged,
     destinationWasOccupied,
   };
+}
+
+// ── POST /api/puts/manual/cancel ──────────────────────────────────────────────
+
+/**
+ * Logs that a Manual Put scan was abandoned without completing — the worker cleared it,
+ * navigated away from MNP, or an idle timeout forced a logout, all while a pallet was
+ * scanned but not yet confirmed at a destination. MNP has no server-side reservation row
+ * (unlike SDP's Reserved-location flow) — the scanned-but-unconfirmed state is purely
+ * client-side, so there's nothing for a background job to discover and expire; this is a
+ * client-triggered, best-effort call instead. `MNP_SCAN` (written by manualScan) already
+ * durably recorded the scan itself; this closes that out with a visible outcome rather
+ * than leaving it looking perpetually in-progress in the activity log.
+ *
+ * Unlike `MNP_SCAN` and `RES_TMOUT`, this actionType is deliberately **not** hidden from
+ * the worker-facing Activity Log (see `HIDDEN_ACTION_TYPES` in `src/lib/activityFormat.ts`)
+ * — the point is to leave a visible audit trail of the abandonment, not just a DB row.
+ *
+ * @param req - HTTP request with body `{ palletId: number | string; stage: 'pallet_scanned' | 'level_modal'; destinationLocation?: string }`
+ * @returns `{ logged: true }`
+ * @throws 400 INVALID_INPUT for non-numeric palletId or missing/invalid stage
+ */
+async function manualCancel(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
+  const auth = await requireAuth(req);
+
+  const body = await req.json() as {
+    palletId: number | string;
+    stage: 'pallet_scanned' | 'level_modal';
+    destinationLocation?: string;
+  };
+
+  const palletId = typeof body.palletId === 'string'
+    ? parseInt(body.palletId, 10)
+    : body.palletId;
+
+  if (isNaN(palletId) || (body.stage !== 'pallet_scanned' && body.stage !== 'level_modal')) {
+    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  }
+
+  await writeLog({
+    userId: auth.zNumber,
+    actionType: 'MNP_CANCEL',
+    palletId,
+    details: {
+      method: 'MNP',
+      stage: body.stage,
+      ...(body.destinationLocation && { destinationLocation: body.destinationLocation }),
+    },
+  });
+
+  return { logged: true };
 }
 
 // ── Route registrations ───────────────────────────────────────────────────────
@@ -679,4 +881,11 @@ app.http('manualConfirm', {
   authLevel: 'anonymous',
   route: 'puts/manual/confirm',
   handler: withHandler(manualConfirm),
+});
+
+app.http('manualCancel', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'puts/manual/cancel',
+  handler: withHandler(manualCancel),
 });

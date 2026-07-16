@@ -24,6 +24,7 @@ const KNOWN_VARIANTS: Record<string, StatusVariant> = {
   DIVERTED: 'warning',
   CANCELED: 'danger',
   PURGED: 'danger',
+  CONSOLIDATED: 'neutral',
   HOLD_IN: 'danger',
   HOLD_OUT: 'danger',
   HOLD_BOTH: 'danger',

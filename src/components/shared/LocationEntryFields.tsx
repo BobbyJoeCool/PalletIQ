@@ -3,17 +3,28 @@ import { useNumpad } from '../../context/NumpadContext';
 import { useNumpadField } from '../../lib/useNumpadField';
 
 interface LocationEntryFieldsProps {
-  /** Called once a full 8-digit Aisle+Bin+Level location is resolved, either by a full
-   *  barcode scan (in any field) or by completing every non-locked manual field in
-   *  sequence. `wasScanned` is true only for the full-barcode-override path — a real
-   *  hardware scan always delivers all 8 digits atomically into whichever field has
-   *  focus, which manual typing structurally cannot produce (each field auto-submits at
-   *  its own maxLength before 8 digits could accumulate) — so this distinction is exact,
-   *  not a heuristic. */
+  /** Called once a location is resolved, either by a barcode scan (in any field) or by
+   *  completing every non-locked manual field in sequence. `wasScanned` is true only for
+   *  a scanned-override path (8-digit always; 6-digit too when `levelOptional` — see its
+   *  doc comment) — a scan atomically delivers a value longer than the receiving field's
+   *  own maxLength, which manual typing structurally cannot produce (each field
+   *  auto-submits at its own maxLength before a longer value could accumulate), so this
+   *  distinction is exact, not a heuristic. `locationId` is normally a full 8-digit
+   *  Aisle+Bin+Level id; when `levelOptional` is set, it may instead be a 6-digit
+   *  Aisle+Bin id — either from a 6-digit scan (`wasScanned: true`) or from the worker
+   *  completing Aisle+Bin manually in sequence (`wasScanned: false`). */
   onResolved: (locationId: string, wasScanned: boolean) => void;
   /** Auto-focuses the first non-locked field on mount — off by default so callers with
    *  their own entry-point logic (e.g. pre-populated from a scan) can opt out. */
   autoFocus?: boolean;
+  // NOTE ON 6-DIGIT SCANS: a physical location barcode only ever encodes Aisle+Bin (see
+  // SDP confirmPut's "physical barcodes only encode aisle+bin" comment) — a full 8-digit
+  // scan is the exception, not the rule, for locations specifically. When `levelOptional`
+  // is set, a 6-digit value landing in *any* box (Aisle, Bin, or Level) is therefore also
+  // treated as a complete override — same "regardless of what's already typed elsewhere"
+  // semantics as the existing 8-digit case, since manual per-box typing can never produce
+  // 6 characters in one box (each box's own maxLength — 3/3/2 — caps it, unless
+  // isScanningRef is suppressing that, which only happens during deliverScan).
   /**
    * Optional external prefill/clear (issue #69) — an 8-digit Aisle+Bin+Level id, or `''`
    * to clear all three boxes. One-way (parent → this component): typing still flows
@@ -48,6 +59,14 @@ interface LocationEntryFieldsProps {
    *  panel, which has room to spare now that Unassign/Blocked Put sit beside it instead
    *  of below it. Other callers all use the default size. */
   size?: 'default' | 'large';
+  /** When true, a manually-typed Aisle+Bin (no Level) is sufficient to resolve — the
+   *  chain does not auto-advance into the Level box, and `onResolved` fires with a
+   *  6-digit id instead of waiting for a 2-digit Level. The Level box still renders (for
+   *  visual consistency with other screens) and a full 8-digit barcode scan into any
+   *  field still resolves atomically as usual. Used by MNP, whose Level is confirmed
+   *  separately via its own Level Confirmation modal rather than typed here. Default
+   *  false — LII/WLH/PAR require the full three-box resolution and are unaffected. */
+  levelOptional?: boolean;
 }
 
 /**
@@ -57,6 +76,8 @@ interface LocationEntryFieldsProps {
  * Level in sequence, or scan a full 8-digit barcode into whichever field currently has
  * focus; an 8-digit confirmed value in any field is treated as a complete override and
  * resolves immediately, regardless of what's already been typed into the other fields.
+ * When `levelOptional` is set, a 6-digit scan (a physical location barcode typically only
+ * encodes Aisle+Bin, not Level) is treated the same way.
  *
  * `lockedAisle`/`lockedLevel` let a caller fix either box to a known value instead of
  * requiring the worker to type it — the box still displays (disabled), and the locked
@@ -64,6 +85,7 @@ interface LocationEntryFieldsProps {
  */
 export function LocationEntryFields({
   onResolved, autoFocus = true, value, highlight = false, onActiveChange, lockedAisle, lockedLevel, size = 'default',
+  levelOptional = false,
 }: LocationEntryFieldsProps) {
   const { hidePanel } = useNumpad();
   // maxLength auto-advances once the fixed-length manual entry is complete (3/3/2 digits);
@@ -105,10 +127,17 @@ export function LocationEntryFields({
     levelField.focus(handleLevelConfirm);
   }
 
-  /** Aisle field submit: an 8-digit value is a full-barcode override (resolves immediately); a 3-digit value advances to Bin. */
+  /** Aisle field submit: an 8-digit value is a full-barcode override; a 6-digit value is a
+   *  full Aisle+Bin override when levelOptional (see the prop's doc comment); a 3-digit
+   *  value advances to Bin. */
   function handleAisleConfirm(value: string) {
     const v = value.trim();
     if (v.length === 8) {
+      hidePanel();
+      onResolved(v, true);
+      return;
+    }
+    if (levelOptional && v.length === 6) {
       hidePanel();
       onResolved(v, true);
       return;
@@ -118,10 +147,17 @@ export function LocationEntryFields({
     setTimeout(() => focusBinField(), 50);
   }
 
-  /** Bin field submit: an 8-digit value is a full-barcode override (resolves immediately); a 3-digit value advances to Level, or resolves immediately if Level is locked. */
+  /** Bin field submit: an 8-digit value is a full-barcode override; a 6-digit value is a
+   *  full Aisle+Bin override when levelOptional; a 3-digit value advances to Level, or
+   *  resolves immediately if Level is locked or levelOptional. */
   function handleBinConfirm(value: string) {
     const v = value.trim();
     if (v.length === 8) {
+      hidePanel();
+      onResolved(v, true);
+      return;
+    }
+    if (levelOptional && v.length === 6) {
       hidePanel();
       onResolved(v, true);
       return;
@@ -133,13 +169,25 @@ export function LocationEntryFields({
       onResolved((lockedAisle ?? aisleValueRef.current) + v + lockedLevel, false);
       return;
     }
+    if (levelOptional) {
+      hidePanel();
+      onResolved((lockedAisle ?? aisleValueRef.current) + v, false);
+      return;
+    }
     setTimeout(() => focusLevelField(), 50);
   }
 
-  /** Level field submit: an 8-digit value is a full-barcode override; a 2-digit value completes Aisle+Bin+Level and resolves. */
+  /** Level field submit: an 8-digit value is a full-barcode override; a 6-digit value is a
+   *  full Aisle+Bin override when levelOptional; a 2-digit value completes Aisle+Bin+Level
+   *  and resolves. */
   function handleLevelConfirm(value: string) {
     const v = value.trim();
     if (v.length === 8) {
+      hidePanel();
+      onResolved(v, true);
+      return;
+    }
+    if (levelOptional && v.length === 6) {
       hidePanel();
       onResolved(v, true);
       return;

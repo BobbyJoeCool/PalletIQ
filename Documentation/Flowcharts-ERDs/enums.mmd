@@ -46,6 +46,10 @@ classDiagram
         S
         M
         L
+        %% XS - Extra Small or Hand Puts
+        %% HS - Half Small
+        %% S - SMall
+
     }
 
     class PalletStatus {
@@ -55,6 +59,7 @@ classDiagram
         PULL_PENDING
         PULLED
         CANCELED
+        CONSOLIDATED
         %% Open — expand as app is built
     }
 
@@ -96,5 +101,35 @@ classDiagram
         HOLD_PLACE
         HOLD_CLEAR
         REINSTATE
+        CONSOLID
+        MNP_CANCEL
         %% Max 10 chars (NVarChar(10))
+    }
+
+    %% Reason Codes are a 3 character enum.  
+    %% The first character is the department.
+    %% The last two digits are numbers: the reason code
+    class ReasonCode_Department {
+        W %% Warehousing
+        I %% Inbound
+        O %% Outbound
+        B %% Breakpack
+        C %% Consolodation
+        M %% Inventory Manager
+        Q %% ICQA
+        L %% Lead or Manager
+        A %% System Admin
+    }
+    class ReasonCode_Code {
+        01 %% Incorrect Count
+        02 %% VCP/SSP Issue
+        03 %% Damaged Product
+        04 %% Empty Location
+        05 %% Blocked Location
+        06 %% Tipped Pallet
+        07 %% Popped Beam
+        08 %% Other Safety Concern
+        09 %% Label in Location
+        10 %% Missing Pallet ID
+        %% Not a Complete List
     }

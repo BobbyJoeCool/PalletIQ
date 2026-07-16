@@ -138,6 +138,12 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
  * Query param `status` controls which locations are eligible:
  *   - "empty" (default) — returns an EMPTY location for the "Scan Empty Location" demo
  *   - "occupied" — returns a STORED location for the "Scan Occupied Location" demo
+ *   - "contracted" — returns any location with `contraction: true`, regardless of
+ *     occupancy status, for MNP's "Scan Contraction" demo (exercises manualConfirm's
+ *     contraction gate)
+ *   - "consolidate" — requires an additional `palletId` query param; finds a *different*
+ *     pallet currently `STORED` with the same DPCI as `palletId` and returns its location,
+ *     for MNP's "Scan Consolidate" demo (exercises manualConfirm's combine popup)
  *
  * `locationId` is a 6-digit zero-padded string (AAABBB format) since only aisle+bin is
  * needed to simulate a destination scan. `level` is also returned — it's the exact level
@@ -146,19 +152,48 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
  * level the randomly-picked location actually is); other callers that don't need it just
  * ignore the extra field.
  *
- * @param req - HTTP request with query param `status` ("empty" | "occupied", default "empty")
+ * @param req - HTTP request with query param `status`
+ *   ("empty" | "occupied" | "contracted" | "consolidate", default "empty") and, for
+ *   "consolidate" only, a required `palletId` query param
  * @returns `{ locationId: string, level: number }` — locationId is a 6-digit zero-padded string
- * @throws 404 NOT_FOUND if no locations match the requested status
+ * @throws 400 INVALID_INPUT if `status=consolidate` is missing/non-numeric `palletId`;
+ *   404 NOT_FOUND if no locations (or, for "consolidate", no source pallet / no same-DPCI
+ *   STORED match) satisfy the request
  */
 async function sampleLocation(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
   await requireAuth(req);
 
-  const statusParam = new URL(req.url).searchParams.get('status') ?? 'empty';
+  const params = new URL(req.url).searchParams;
+  const statusParam = params.get('status') ?? 'empty';
+
+  if (statusParam === 'consolidate') {
+    const palletIdParam = params.get('palletId');
+    const palletId = palletIdParam ? parseInt(palletIdParam, 10) : NaN;
+    if (isNaN(palletId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
+    const source = await prisma.pallet.findUnique({
+      where: { pid: palletId },
+      select: { dept: true, class: true, item: true },
+    });
+    if (!source) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+    const match = await prisma.pallet.findFirst({
+      where: {
+        dept: source.dept, class: source.class, item: source.item,
+        status: 'STORED', pid: { not: palletId }, locationAisle: { not: null },
+      },
+      select: { locationAisle: true, locationBin: true, locationLevel: true },
+    });
+    if (!match) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+    const id = String(match.locationAisle).padStart(3, '0') + String(match.locationBin).padStart(3, '0');
+    return { locationId: id, level: match.locationLevel };
+  }
 
   const where =
-    statusParam === 'empty'
-      ? { status: 'EMPTY' }
-      : { status: 'STORED' };
+    statusParam === 'empty'      ? { status: 'EMPTY' }
+    : statusParam === 'occupied' ? { status: 'STORED' }
+    : /* contracted */            { contraction: true };
 
   const count = await prisma.location.count({ where });
   if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
