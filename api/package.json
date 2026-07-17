@@ -1,6 +1,6 @@
 {
   "name": "palletiq-api",
-  "version": "1.6.3",
+  "version": "1.6.5",
   "description": "PalletIQ — Azure Functions API",
   "type": "module",
   "main": "dist/index.js",

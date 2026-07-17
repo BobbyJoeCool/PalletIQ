@@ -124,8 +124,11 @@ async function getStorageCodes(req: HttpRequest): Promise<unknown> {
  * (an aisle is included only if the *queried* size has at least one non-zero empty or
  * staged count there) but each qualifying aisle's `sizes` breakdown covers every size
  * present in that aisle, not just the one searched for — e.g. searching CR-S returns
- * HS/S/M/L columns for any matching CR aisle. Sorted by totalEmpty (summed across all
- * sizes in the aisle) descending — staged does not affect sort order.
+ * HS/S/M/L columns for any matching CR aisle. Sorted descending by the queried size's own
+ * empty count when `size` is given, or by totalEmpty (summed across all sizes) when it
+ * isn't — staged never affects sort order either way. The frontend may re-sort this
+ * further by whichever column the worker taps (see ELAPage.tsx), so this default ordering
+ * only matters for the initial load and any other consumer of this endpoint.
  *
  * `size` is optional (added for STG's live info panel — see Feature 2 in
  * DevNotes/DesignPrompts/Feature-2-STG-Live-Matching-Aisle-Zone-Info.md, "Storage Code
@@ -190,7 +193,17 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
       const totalEmpty = sizeCounts.reduce((sum, s) => sum + s.empty, 0);
       return { aisle, totalEmpty, sizes: sizeCounts };
     })
-    .sort((a, b) => b.totalEmpty - a.totalEmpty);
+    .sort((a, b) => {
+      // When a size was queried, sort by that size's own empty count — not the all-sizes
+      // total — so the default ordering matches what was actually searched for. Only the
+      // size-less (Storage-Code-only) case falls back to totalEmpty.
+      if (size) {
+        const av = a.sizes.find((s) => s.size === size)?.empty ?? 0;
+        const bv = b.sizes.find((s) => s.size === size)?.empty ?? 0;
+        return bv - av;
+      }
+      return b.totalEmpty - a.totalEmpty;
+    });
 }
 
 /**
@@ -218,7 +231,9 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
  * for that dimension instead of narrowing to one.
  *
  * @param req - HTTP request with query param `aisle` (required), `storageCode` and `size` (both optional)
- * @returns `{ aisle, levels: [{ level, cells: [...] }], zoneSummary: [{ zone, breakdown: [...] }] }`
+ * @returns `{ aisle, levels: [{ level, cells: [...] }], zoneSummary: [{ zone, breakdown: [...] }],
+ *   zoneBinRanges: [{ zone, minBin, maxBin }] }` — `zoneBinRanges` feeds the grid's per-zone
+ *   "BINS: {max} - {min}" header (v1.6.5)
  * @throws 400 INVALID_INPUT if `aisle` is missing or not numeric;
  *   404 NOT_FOUND if the aisle has no location records
  */
@@ -282,7 +297,25 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
       breakdown: [...breakdown.values()].sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size)),
     }));
 
-  return { aisle, levels, zoneSummary };
+  // Per-zone bin range (min/max bin across both sides) — bin numbering is level-invariant
+  // within a zone, so one pass over every location is enough. Feeds ELZ's "BINS: {max} - {min}"
+  // header line (v1.6.5); descending since Zone 1 is conventionally the highest-numbered
+  // bins (see seed.ts's getZone128/getZone192).
+  const zoneBinsMap = new Map<number, { min: number; max: number }>();
+  for (const loc of locations) {
+    const existing = zoneBinsMap.get(loc.zone);
+    if (!existing) {
+      zoneBinsMap.set(loc.zone, { min: loc.bin, max: loc.bin });
+    } else {
+      if (loc.bin < existing.min) existing.min = loc.bin;
+      if (loc.bin > existing.max) existing.max = loc.bin;
+    }
+  }
+  const zoneBinRanges = [...zoneBinsMap.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([zone, { min, max }]) => ({ zone, minBin: min, maxBin: max }));
+
+  return { aisle, levels, zoneSummary, zoneBinRanges };
 }
 
 /**

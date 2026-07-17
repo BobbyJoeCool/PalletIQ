@@ -6,6 +6,8 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.6.5 — 2026-07-16](#165--2026-07-16)
+- [1.6.4 — 2026-07-16](#164--2026-07-16)
 - [1.6.3 — 2026-07-15](#163--2026-07-15)
 - [1.6.2 — 2026-07-14](#162--2026-07-14)
 - [1.6.1 — 2026-07-14](#161--2026-07-14)
@@ -65,7 +67,12 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Major/Important
 
-No issues currently open in this category.
+- [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) — `placePallet` clears a pallet's old location to EMPTY without checking for a second occupant pallet (MNP/SDP)
+- [#85](https://github.com/BobbyJoeCool/PalletIQ/issues/85) — SDP: most of the Pallet ID Directed Put e2e flow fails — demo scans land in the Aisle field instead
+- [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) — Reason codes should be a database table with per-department/role restrictions (needs a product conversation first)
+- [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — MNP/SDP: scanning an unknown Pallet ID crashes with 500 instead of 404
+- [#58](https://github.com/BobbyJoeCool/PalletIQ/issues/58) — STG: selectable freight type/quantity on unstage and restage
+- [#57](https://github.com/BobbyJoeCool/PalletIQ/issues/57) — STG: show matching aisles and zone info as storage code/aisle/size are entered
 
 ### Minor
 
@@ -73,12 +80,98 @@ No issues currently open in this category.
 
 ### Nice-to-have/Cosmetic
 
-- [#73](https://github.com/BobbyJoeCool/PalletIQ/issues/73) — STG: move Fill All and Unstage Aisle buttons onto the operator compartment
-- [#76](https://github.com/BobbyJoeCool/PalletIQ/issues/76) — STG: add a manual Refresh button
+No issues currently open in this category.
+
+### Needs Triage
+
+- [#87](https://github.com/BobbyJoeCool/PalletIQ/issues/87) — LII: show and let the worker switch between multiple pallets at a location
 
 ### Distant Future
 
 - [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
+
+See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
+screen(s) each one touches.
+
+---
+
+## [1.6.5] — 2026-07-16
+
+ELZ follow-up round (`DevNotes/Fixes/ELZ/`'s 3 items, all done via a different, combined
+approach agreed live), plus a couple of gaps found and fixed on ELA along the way.
+
+### 1.6.5 — Added
+
+- **ELZ: weighted row heights.** The grid no longer scrolls — each level's row now gets a
+  share of the fixed display height proportional to its own physical Size (a level's Size
+  is constant across every zone/side within it), so a Large-heavy aisle reads with taller
+  rows than a Half-Small one, and an aisle with many levels still fits without a narrowing
+  threshold.
+- **ELZ: curated Storage Code text coloring.** Each cell's Storage Code is now colored from
+  a fixed, hand-picked palette (one color per real code) for at-a-glance distinctiveness,
+  validated for contrast and colorblind-safe adjacency against the grid's dark background.
+- **ELZ: per-zone bin range header.** Each Zone header now also shows that zone's actual
+  bin range, e.g. `BINS: 128 - 97`.
+- **ELZ: heavier, more visible cell dividers.** Every row/column divider between individual
+  cells is now clearly visible; the zone-to-zone boundary itself is 1.5x heavier still and
+  colored, so it stands out from the more-visible cell grid around it.
+- **ELZ: invalid Storage Code / invalid Aisle message-bar errors**, matching ELA's existing
+  treatment — an unrecognized Storage Code no longer silently narrows to nothing, and a
+  nonexistent Aisle now surfaces an explicit error alongside the existing inline message.
+- **ELZ: Storage Code now dismisses the keyboard on its 2-character auto-commit**, matching
+  ELA's Storage Code field (both use the same opt-in `closeOnAutoSubmit` capability).
+- **App-wide: Size field early-commit.** A single-letter Size code (S/M/L) now commits
+  immediately after that one character instead of waiting for a 2nd keystroke or a
+  refocus — reaches every screen's Size field (ELA, STG's Master Control, SDP's Size
+  override).
+
+### 1.6.5 — Fixed
+
+- **ELA: invalid Size now shows a message-bar error**, matching Storage Code's existing
+  treatment — previously an unrecognized Size silently ran a query that just came back
+  empty, with no explanation.
+
+---
+
+## [1.6.4] — 2026-07-16
+
+ELA follow-up round (`DevNotes/Fixes/ELA/`'s 4 items), the first version shipped under the
+new one-screen-per-version cadence (see `.claude/CLAUDE.md`'s Version Cadence section).
+
+### 1.6.4 — Added
+
+- **ELA: Storage Code browsing without a Size.** Size is now optional — entering just a
+  Storage Code lists every aisle with that code, broken down by every size present there.
+- **ELA: sortable results columns.** The Aisle column and every Size column are now
+  independently tappable to sort by it; tapping the active column flips its direction, with
+  a ▲/▼ indicator shown on whichever column is active. Ascending on a Size column pushes
+  any aisle with a zero count for that size to the bottom instead of surfacing it first
+  (descending already puts zeros last naturally); ties keep prior row order.
+- **ELA: "Displaying {code}: {description}" banner** shown above the results table once a
+  valid Storage Code is entered, so it's always clear what the table is scoped to.
+- **ELA: invalid Storage Code detection.** Entering a code that isn't a real Storage Code
+  now shows `"Invalid Storage Code — {code}"` in the message bar instead of silently
+  running a query that would just come back empty.
+- **ELA: Storage Code now auto-dismisses the keyboard** once its 2 characters are typed, in
+  addition to auto-committing (opt-in `closeOnAutoSubmit` prop on the shared
+  `CodePickerField`/`StorageCodeField`, scoped to this one field — every other screen's
+  Storage Code/Size fields are unaffected).
+
+### 1.6.4 — Changed
+
+- **ELA's default result sort** now matches what was actually searched for: descending by
+  the matched size's own empty count when a Size was entered, or ascending by Aisle number
+  for a Storage-Code-only query — instead of always sorting by the all-sizes total.
+- **STG's pre-population from ELA/ELZ's "Stage Aisle"** now only fills Master Control; no
+  fork/stack slot is written directly. The worker fills stacks themselves via "Fill All" or
+  a per-stack fill button. This reverses v1.4.1/issue #81's "auto-fill all three slots"
+  behavior (product decision made while fixing `DevNotes/Fixes/ELA/03` and
+  `DevNotes/Fixes/STG/05`).
+
+### 1.6.4 — Fixed
+
+- **ELA's results sort** used the all-sizes total even when a specific Storage Code + Size
+  had been searched, instead of that size's own count (`DevNotes/Fixes/ELA/02`).
 
 ---
 

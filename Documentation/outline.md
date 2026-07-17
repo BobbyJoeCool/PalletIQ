@@ -291,7 +291,7 @@ Holds communicate that something is operationally wrong with a location and gate
 
 ## Empty Locations by Aisle
 
-The worker enters a **Storage Code** and a **Size**. The system returns, per aisle, a count of empty locations matching those criteria.
+The worker enters a **Storage Code** (required) and, optionally, a **Size** to narrow further. The system returns, per aisle, a count of empty locations matching those criteria — Storage Code alone lists every aisle with that code, broken down by every size present. Results are sortable by tapping the Aisle or any Size column (v1.6.4).
 
 From a result, the worker can select an aisle and choose to:
 
@@ -302,12 +302,12 @@ From a result, the worker can select an aisle and choose to:
 
 ## Empty Locations by Zone
 
-The worker enters an **Aisle** and a **Storage Code**. The screen shows a visual grid representing the aisle's physical layout:
+The worker enters an **Aisle** (required) and, optionally, a **Storage Code** to narrow the summary panel. The screen shows a visual grid representing the aisle's physical layout:
 
-- **Columns:** Zone 1 through Zone 4, each split into an Odd-side column and an Even-side column (8 columns total), reflecting that every aisle has 4 zones with bins typically numbered odd on one side and even on the other.
-- **Rows:** one row per physical level in the aisle, with Level 1 (ground) at the bottom of the grid and the highest level at the top, mirroring the physical aisle.
-- **Each cell** represents one level within one zone/side and displays that location's `{Storage Code}-{Size}` designation.
-- The only status color-coding on the grid is **Contraction** — a Lead+ designation (managed outside this app, via Aisle Setup) that blocks staging and putting for that zone-side/level. Occupied, empty, staged, and reserved states are not reflected in the grid; the per-zone summary panel below is where empty/staged counts are surfaced.
+- **Columns:** Zone 1 through Zone 4, each split into an Odd-side column and an Even-side column (8 columns total), reflecting that every aisle has 4 zones with bins typically numbered odd on one side and even on the other. Each Zone header also shows that zone's actual bin range (e.g. "BINS: 128 - 97").
+- **Rows:** one row per physical level in the aisle, with Level 1 (ground) at the bottom of the grid and the highest level at the top, mirroring the physical aisle. Row height is weighted by that level's physical Size (v1.6.5) rather than fixed, so the grid always fits its display without scrolling regardless of level count.
+- **Each cell** represents one level within one zone/side and displays that location's `{Storage Code}-{Size}` designation, the Storage Code portion colored from a curated per-code palette (v1.6.5) for at-a-glance distinctiveness.
+- The only *status* color-coding on the grid is **Contraction** — a Lead+ designation (managed outside this app, via Aisle Setup) that blocks staging and putting for that zone-side/level. Occupied, empty, staged, and reserved states are not reflected in the grid; the per-zone summary panel below is where empty/staged counts are surfaced.
 
 Below or alongside the grid, a **per-zone summary** (combining both odd and even sides of that zone) shows counts of each open `{Storage Code}-{Size}` combination — this is the actionable number a General Pallet Mover (GPMer) uses to decide where to stage incoming pallet stacks.
 

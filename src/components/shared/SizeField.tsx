@@ -20,16 +20,22 @@ interface SizeFieldProps {
   disabled?: boolean;
 }
 
+/** A single-letter code is already a complete, unambiguous Size — "X" and "H" are held
+ *  back since they could still extend into "XS"/"HS". */
+function isCompleteSingleLetterSize(v: string): boolean {
+  return ['S', 'M', 'L'].includes(v.toUpperCase());
+}
+
 /**
  * Shared Size entry field (issue #78; converted from a native `<select>` to free-text +
  * dropdown-helper-popup per issue #80) — the fixed XS/HS/S/M/L set used identically by
- * ELA/STG/SDP. A worker can type a size they know (e.g. "M" — auto-commits at 2 characters,
- * same as Storage Code; a single-letter code like "S"/"M"/"L" commits via the existing
- * synthetic-Enter-on-refocus path when the worker moves to the next field, so it's never
- * stuck uncommitted in practice) or tap the helper button to pick from a popup showing
- * each code's full name. Narrowed to what's actually available when the caller knows
- * enough context (e.g. an aisle + Storage Code already entered), or the full list otherwise
- * — Size has no lookup table to fetch from, so the un-narrowed case is just this static list.
+ * ELA/STG/SDP. A worker can type a size they know: two-letter codes ("XS"/"HS") auto-commit
+ * at 2 characters same as Storage Code, and single-letter codes ("S"/"M"/"L") commit
+ * immediately after that one character (v1.6.5) rather than waiting for a 2nd keystroke or
+ * a refocus-triggered Blur — or tap the helper button to pick from a popup showing each
+ * code's full name. Narrowed to what's actually available when the caller knows enough
+ * context (e.g. an aisle + Storage Code already entered), or the full list otherwise — Size
+ * has no lookup table to fetch from, so the un-narrowed case is just this static list.
  */
 export function SizeField({ value, onChange, options, size = 'default', width, label = 'Size', ariaLabel, disabled = false }: SizeFieldProps) {
   return (
@@ -39,6 +45,7 @@ export function SizeField({ value, onChange, options, size = 'default', width, l
       options={options ?? FULL_SIZE_OPTIONS}
       panel="keyboard"
       maxLength={2}
+      earlyCommit={isCompleteSingleLetterSize}
       transform={(v) => v.toUpperCase()}
       size={size}
       width={width}

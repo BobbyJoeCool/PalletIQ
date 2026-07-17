@@ -19,7 +19,14 @@ import { useNumpad } from '../context/NumpadContext';
  *   definition); use for fixed-width numeric codes (Aisle/Bin/Level) where a worker
  *   shouldn't have to type leading zeros, not for fields where a short value has its own
  *   distinct meaning.
+ * @param earlyCommit - Optional predicate checked against the accumulated value after every
+ *   keystroke; returning true auto-submits immediately (same as reaching `maxLength`,
+ *   `explicit: false`) even though `maxLength` hasn't been reached yet — e.g. Size's field
+ *   passes `(v) => ['S','M','L'].includes(v)` so a single-letter code commits right away
+ *   instead of waiting for a 2nd character or a refocus-triggered Blur, while a first
+ *   character that could still extend into a longer code (e.g. "X" → "XS") keeps waiting.
  *
+
  * onSubmit's second argument, `explicit`, is true when the value was committed by an
  * actual Enter/OK key (a scan's trailing synthetic Enter, or a synthetic Blur that had
  * something newly typed to submit — see the 'Blur' handling below), false when it was
@@ -37,7 +44,7 @@ import { useNumpad } from '../context/NumpadContext';
  * after a failed submission specifically so the worker can go fix another field and
  * retry) doesn't silently resubmit it.
  */
-export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLength?: number, padOnSubmit?: boolean) {
+export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLength?: number, padOnSubmit?: boolean, earlyCommit?: (value: string) => boolean) {
   const { setKeyHandler, showNumpad, showKeyboard, activeFieldId, isScanningRef } = useNumpad();
   const fieldId = useId();
   const isActive = activeFieldId === fieldId;
@@ -107,7 +114,8 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLengt
       const next = base + key;
       valueRef.current = next;
       setValue(next);
-      if (maxLength != null && next.length >= maxLength && !isScanningRef.current) {
+      const reachedMaxLength = maxLength != null && next.length >= maxLength;
+      if ((reachedMaxLength || earlyCommit?.(next)) && !isScanningRef.current) {
         submittingRef.current = true;
         try {
           submitRef.current?.(next, false);
@@ -116,7 +124,7 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLengt
         }
       }
     }
-  }, [maxLength, padOnSubmit, isScanningRef]);
+  }, [maxLength, padOnSubmit, earlyCommit, isScanningRef]);
 
   /** Registers this field as the active numpad/keyboard target and opens the matching panel. */
   const focus = useCallback(

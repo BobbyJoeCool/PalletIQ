@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Triple from '../assets/Triple.png';
-import { AisleGrid, type GridLevel } from '../components/shared/AisleGrid';
+import { AisleGrid, type GridLevel, type ZoneBinRange } from '../components/shared/AisleGrid';
 import { CellValue } from '../components/shared/CellValue';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { SizeField } from '../components/shared/SizeField';
@@ -37,6 +37,7 @@ interface ZoneSummaryEntry { zone: number; breakdown: ZoneBreakdown[] }
 interface ZoneMapResult {
   levels: GridLevel[];
   zoneSummary: ZoneSummaryEntry[];
+  zoneBinRanges: ZoneBinRange[];
 }
 
 interface AisleSizeCount { size: string; empty: number; staged: number }
@@ -538,8 +539,8 @@ function NoMatches({ text }: { text: string }) {
 function ElzFormat({ result, label }: { result: ZoneMapResult; label: string }) {
   return (
     <div className="flex-1 flex gap-4 overflow-hidden px-4 py-3">
-      <div className="flex-[6] overflow-auto">
-        <AisleGrid levels={result.levels} dense />
+      <div className="flex-[6] overflow-hidden">
+        <AisleGrid levels={result.levels} zoneBinRanges={result.zoneBinRanges} dense />
       </div>
       <div className="flex-[4] overflow-y-auto border-l border-[#2A2A2A] pl-4">
         {result.zoneSummary.length === 0 ? (
@@ -1052,26 +1053,22 @@ function STGScreen() {
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
 
   // Pre-population from ELA "Stage Aisle" / ELZ "Stage Aisle" — see STG.md's
-  // Pre-population section. Only applied once per navigation (route state is consumed, not
-  // re-applied on every render) — the front slot's empty aisle is used as the "not yet
-  // applied" signal. Issue #81 restored the three-stack model, so "Fill All" auto-
-  // triggering on entry means applying storageCode/size to all three slots again, matching
-  // the pre-#77 behavior — each still needs its own Quantity before it can be staged.
+  // Pre-population section. Only applies to Master Control, never the fork/stack slots
+  // directly — a worker still has to tap "Fill All" (or a per-stack fill button) to push
+  // Master Control's values onto any slot. Reverses the earlier "also write all three
+  // stacks" behavior (previously justified as restoring pre-#77 parity) per product
+  // decision made while fixing DevNotes/Fixes/ELA/03 and STG/05. Only applied once per
+  // navigation (route state is consumed, not re-applied on every render) — Master
+  // Control's own empty aisle is used as the "not yet applied" signal.
   useEffect(() => {
     const state = routerLocation.state as NavState | null;
-    if (!state?.aisle || stacks[0].aisle) return;
-    const aisle = String(state.aisle);
-    updateStack(0, { aisle });
-    setMaster({ aisle });
-    if (state.storageCode) {
-      // ELZ only ever supplies storageCode (no Size concept on that screen); ELA supplies
-      // both. Apply whichever fields are present rather than requiring both together.
-      setMaster({ storageCode: state.storageCode, ...(state.size ? { size: state.size } : {}) });
-      ([0, 1, 2] as const).forEach((i) => updateStack(i, {
-        storageCode: state.storageCode!,
-        ...(state.size ? { size: state.size } : {}),
-      }));
-    }
+    if (!state?.aisle || master.aisle) return;
+    // ELZ only ever supplies storageCode (no Size concept on that screen); ELA supplies
+    // both. Apply whichever fields are present rather than requiring both together.
+    setMaster({
+      aisle: String(state.aisle),
+      ...(state.storageCode ? { storageCode: state.storageCode, ...(state.size ? { size: state.size } : {}) } : {}),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routerLocation.state]);
 

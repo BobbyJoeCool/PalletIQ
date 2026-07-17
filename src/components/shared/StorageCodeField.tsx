@@ -15,6 +15,10 @@ interface StorageCodeFieldProps {
   width?: string;
   label?: string;
   disabled?: boolean;
+  /** Opt-in: dismiss the keyboard as soon as the 2nd character commits, not just on an
+   *  explicit Enter/OK — see CodePickerField's own doc. Off by default; every existing
+   *  call site (SDP/STG/LII/ELZ) keeps today's behavior unless it opts in. */
+  closeOnAutoSubmit?: boolean;
 }
 
 /**
@@ -25,7 +29,7 @@ interface StorageCodeFieldProps {
  * what's actually present when the caller knows enough context to narrow, or the full
  * `GET /api/storage-codes` reference list otherwise.
  */
-export function StorageCodeField({ value, onChange, options, size = 'default', width, label = 'Storage Code', disabled = false }: StorageCodeFieldProps) {
+export function StorageCodeField({ value, onChange, options, size = 'default', width, label = 'Storage Code', disabled = false, closeOnAutoSubmit = false }: StorageCodeFieldProps) {
   // Always called (Rules of Hooks) — its cached result is simply unused once the caller
   // supplies a narrowed `options` list.
   const fullList = useStorageCodes();
@@ -44,6 +48,7 @@ export function StorageCodeField({ value, onChange, options, size = 'default', w
       label={label}
       ariaLabel={label}
       disabled={disabled}
+      closeOnAutoSubmit={closeOnAutoSubmit}
     />
   );
 }

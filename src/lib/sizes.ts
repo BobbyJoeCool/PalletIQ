@@ -10,3 +10,14 @@ export const SIZE_NAMES: Record<string, string> = {
   M: 'Medium',
   L: 'Large',
 };
+
+/** Relative physical-size weights (Large = 1, halving down through each smaller tier,
+ *  Medium = 2/3 Large) — drives AisleGrid's per-level row-height weighting (v1.6.5), since
+ *  a level's Size is constant across every zone/side within it (see seed.ts's getSize). */
+export const SIZE_WEIGHTS: Record<string, number> = {
+  XS: 0.125,
+  HS: 0.25,
+  S: 0.5,
+  M: 0.667,
+  L: 1,
+};

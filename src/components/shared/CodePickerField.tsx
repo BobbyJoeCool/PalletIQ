@@ -28,6 +28,15 @@ interface CodePickerFieldProps {
   /** Disables both the entry field and the dropdown-helper button — e.g. SDP locks its
    *  override fields while a directed reservation is active. */
   disabled?: boolean;
+  /** Opt-in: also dismiss the input panel on a maxLength auto-submit, not just an explicit
+   *  Enter/OK confirm. Off by default (see useNumpadField's `explicit` doc for why auto-
+   *  submit normally leaves the panel open) — only enable for a field where reaching
+   *  maxLength reliably means "done" for every valid value, e.g. ELA's Storage Code. */
+  closeOnAutoSubmit?: boolean;
+  /** Passed straight through to useNumpadField's own `earlyCommit` — auto-submits before
+   *  `maxLength` is reached when the accumulated value already satisfies this predicate
+   *  (e.g. SizeField's single-letter S/M/L codes). */
+  earlyCommit?: (value: string) => boolean;
 }
 
 /**
@@ -41,9 +50,9 @@ interface CodePickerFieldProps {
  * or full) and entry-field specifics (maxLength, uppercasing, styling).
  */
 export function CodePickerField({
-  value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false,
+  value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false, closeOnAutoSubmit = false, earlyCommit,
 }: CodePickerFieldProps) {
-  const field = useNumpadField(panel, maxLength);
+  const field = useNumpadField(panel, maxLength, undefined, earlyCommit);
   const { hidePanel } = useNumpad();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -72,7 +81,7 @@ export function CodePickerField({
     // necessarily confirmed.
     field.focus((v, explicit) => {
       onChange(transform ? transform(v.trim()) : v.trim());
-      if (explicit) hidePanel();
+      if (explicit || closeOnAutoSubmit) hidePanel();
     });
   }
 

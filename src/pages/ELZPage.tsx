@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AisleGrid, type GridLevel } from '../components/shared/AisleGrid';
+import { AisleGrid, type GridLevel, type ZoneBinRange } from '../components/shared/AisleGrid';
 import { CellValue } from '../components/shared/CellValue';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { useAuth } from '../context/AuthContext';
@@ -27,6 +27,7 @@ interface EmptyByZoneResult {
   aisle: number;
   levels: GridLevel[];
   zoneSummary: ZoneSummaryEntry[];
+  zoneBinRanges: ZoneBinRange[];
 }
 
 interface NavState {
@@ -69,6 +70,12 @@ export function ELZPage() {
   const storageCodeOptions = aisleTypes && fullStorageCodes
     ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
     : undefined;
+  // Checked against the full reference list (not the aisle-narrowed storageCodeOptions
+  // above) — a real code just absent from this aisle isn't "invalid," it's a valid code
+  // that happens to return an empty breakdown. Stays false while the list is still loading,
+  // same reasoning as ELA's identical guard.
+  const isInvalidStorageCode = !!storageCode && fullStorageCodes != null
+    && !fullStorageCodes.some((c) => c.code === storageCode);
 
   // Pre-populate the Aisle field display from router state (ELA "View Zone Map" / STG) on
   // mount — Storage Code's pre-population is handled by StorageCodeField's own value-sync effect.
@@ -96,12 +103,18 @@ export function ELZPage() {
   // and focusStorageField — so there's no complete-to-incomplete transition to reset here.)
   useEffect(() => {
     if (aisle == null) return;
+    if (isInvalidStorageCode) {
+      setMessage({ type: 'error', text: `Invalid Storage Code — ${storageCode}` });
+    }
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetch-on-filter-change effect
     setLoading(true);
     setNotFound(false);
     const params = new URLSearchParams({ aisle: String(aisle) });
-    if (storageCode) params.set('storageCode', storageCode);
+    // An invalid Storage Code is surfaced via the message bar above rather than sent as a
+    // filter — the grid still loads (Aisle alone gates it), just without narrowing by a
+    // code that doesn't exist.
+    if (storageCode && !isInvalidStorageCode) params.set('storageCode', storageCode);
     apiFetch<EmptyByZoneResult>(
       `/api/locations/empty-by-zone?${params.toString()}`,
       token!,
@@ -112,6 +125,7 @@ export function ELZPage() {
         if (err instanceof Error && err.message === 'NOT_FOUND') {
           setResult(null);
           setNotFound(true);
+          setMessage({ type: 'error', text: `Invalid Aisle — ${aisle}` });
         } else {
           setResult(null);
           setMessage({ type: 'error', text: `Lookup failed — ${err instanceof Error ? err.message : 'please try again'}` });
@@ -119,7 +133,7 @@ export function ELZPage() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [aisle, storageCode, token, setMessage]);
+  }, [aisle, storageCode, isInvalidStorageCode, token, setMessage]);
 
   /** Navigates to STG, pre-populated with the currently queried aisle and Storage Code. */
   function stageAisle() {
@@ -146,12 +160,12 @@ export function ELZPage() {
             {aisleField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
           </button>
         </div>
-        <StorageCodeField value={storageCode} onChange={setStorageCode} options={storageCodeOptions} />
+        <StorageCodeField value={storageCode} onChange={setStorageCode} options={storageCodeOptions} closeOnAutoSubmit />
       </div>
 
       {/* Main area: grid + zone summary */}
       <div className="flex-1 flex gap-5 overflow-hidden">
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-hidden">
           {aisle == null ? (
             <div className="w-full h-full flex items-center justify-center">
               <p className="font-ui text-[18px] text-[#555]">
@@ -169,7 +183,7 @@ export function ELZPage() {
               </p>
             </div>
           ) : (
-            <AisleGrid levels={result.levels} />
+            <AisleGrid levels={result.levels} zoneBinRanges={result.zoneBinRanges} />
           )}
         </div>
 
