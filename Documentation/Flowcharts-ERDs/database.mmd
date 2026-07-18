@@ -43,6 +43,7 @@ erDiagram
         int packingZoneCode FK "→ PackingZone"
         string storageCode FK "NVarChar(2) → StorageCode"
         boolean conveyable "default: true"
+        boolean requiresExpirationDate "default: false, v1.6.7 — per-DPCI setting, seeded true for food Storage Codes (FD/NF/RF); not derived from storageCode at runtime"
     }
 
     PackingZone {
@@ -99,6 +100,9 @@ erDiagram
         datetime putAt "nullable"
         string lastPulledByZ FK "nullable, NVarChar(7) → User"
         datetime lastPulledAt "nullable"
+        string poNumber "nullable, NVarChar(20), v1.6.7 — receiving-side identifier, null on a PAR-reinstated pallet, read-only from every screen"
+        string apptNumber "nullable, NVarChar(20), v1.6.7 — receiving-side identifier, same null/read-only rules as poNumber"
+        date expirationDate "nullable, db.Date, v1.6.7 — editable via PII Edit Mode (IM+); 1-month floor / 3-month confirm gate enforced in app logic"
     }
 
     Label {

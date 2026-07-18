@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.6.7 — 2026-07-18](#167--2026-07-18)
 - [1.6.6 — 2026-07-17](#166--2026-07-17)
 - [1.6.5 — 2026-07-16](#165--2026-07-16)
 - [1.6.4 — 2026-07-16](#164--2026-07-16)
@@ -59,6 +60,20 @@ conversation and build plan when picked up.
   staging summary for GPMers. Leads/Managers get a separate cross-worker reporting screen; IRP
   always shows only the logged-in user's own data.
 - **PRQ — Pull Request by Label.** Not yet designed.
+- **Bulk Pull.** Not yet designed — will let a location hold multiple full pallets plus a
+  partial at once (the underlying data-model concept already exists — see this doc's own
+  Quantity granularity note — but no pull flow accounts for it yet). Flagged
+  ([#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89)) as needing a PII Edit Mode
+  amendment once it ships: today's Edit Mode edits one Pallet's Full Pallets/Cartons/SSPs
+  as one blended set, which won't distinguish "correct the full-pallet count" from "correct
+  the partial's loose cartons/SSPs" once multiple pallets can share a location.
+- **Per-record audit trail (PII/LII/Container ID).** Not yet designed
+  ([#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90)) — a scoped activity history
+  for one specific Pallet ID, Location ID, or (new, undesigned) Container ID, distinct from
+  the header's own rolling 12-hour Activity overlay. Container ID needs its own product
+  conversation first — a reusable label representing a carton, SSP, or outbound pallet,
+  possibly overlapping with the already-reserved-but-unbuilt CII ("label cancellation")
+  jump code referenced in `Documentation/ScreenSpecs/LOG.md`.
 
 ---
 
@@ -85,6 +100,8 @@ No issues currently open in this category.
 
 - [#87](https://github.com/BobbyJoeCool/PalletIQ/issues/87) — LII: show and let the worker switch between multiple pallets at a location
 - [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — Bad Contraction data: every RS/RF/BS location, plus some HS locations on Levels 2-9, incorrectly flagged as contracted
+- [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) — PII Edit Mode will need per-pallet-vs-partial quantity editing once Bulk Pull ships (post-v1.7.0)
+- [#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90) — Add per-record audit trail to PII, LII, and a future Container ID screen (post-v1.7.0)
 
 ### Distant Future
 
@@ -92,6 +109,54 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.6.7] — 2026-07-18
+
+PII's fix-and-polish pass — the screen's 5-item fix list, three new pallet fields (PO
+Number, Appointment Number, Expiration Date), and an Edit Mode UI round covering every
+editable field's input mechanism and validation feedback.
+
+### 1.6.7 — Added
+
+- **PII: PO Number and Appointment Number.** New read-only receiving-side identifiers on
+  every pallet — `"DEMO1234"` on seeded/received pallets (no real Inbound receiving flow
+  exists yet), `null` on a pallet created manually via Pallet Reinstate. Never editable from
+  any screen.
+- **PII: Expiration Date.** New nullable, editable (Edit Mode, IM+) date field. A newly-set
+  date under 1 month out is rejected outright; 1–3 months out shows an in-app confirm
+  popup; 3+ months out (or clearing it) needs neither. Items can be flagged as requiring one
+  (`Item.requiresExpirationDate` — seeded true for the food Storage Codes FD/NF/RF) — PII
+  shows an inline "Required for this item" prompt when true and still unset, not a hard
+  block.
+- **PII: VCP/SSP relationship validation.** `PATCH /api/pallets/:id` now rejects a save
+  where SSP doesn't evenly divide VCP, or where the pallet's loose SSPs-on-Pallet reaches a
+  full carton's worth (`vcp/ssp`) — re-checked on every save regardless of which field
+  changed, so an edit can never leave the pallet inconsistent. VCP, SSP, and SSPs on Pallet
+  each also warn immediately (non-blocking) on defocus using the identical rule, so a
+  worker sees the problem right away instead of only at Save.
+- **PII: every Edit-mode field is now numpad-driven**, each with a "Current: {value}"
+  indicator showing the pre-edit value — replaces the previous native `<input>`/
+  `<input type="number">` fields (DPCI, VCP, SSP, Total Cartons, SSPs on Pallet, Full
+  Pallets). VCP/SSP are merged onto one Edit-mode row, matching the read-only display.
+- **Reason Code redesigned app-wide.** The shared `ReasonCodeField` (PII, WLH's hold panel
+  — also reused by PIP/SDP/MNP's inline quick-hold — and STG's reject/hold popup) is now an
+  entry-with-dropdown-helper field matching Storage Code/Size, replacing the old native
+  `<select>` + "Type a code…" design.
+
+### 1.6.7 — Changed
+
+- **PII: VCP and SSP merged onto one read-only display row** (`VCP / SSP: 12 / 6 · 2 SSPs
+  per Carton`), replacing two separate rows.
+- **PII: the loaded pallet now survives navigating away and back**, via a new `PIIContext`/
+  `PIIProvider` (mirrors `StagingContext`'s pattern; scoped to PII only for now — LII/ISI
+  need the identical pattern later, per direct product decision, not generalized early).
+
+### 1.6.7 — Fixed
+
+- **PII: the Pallet ID field no longer clears itself** on a failed/not-found scan — the
+  typed value stays visible so the worker can see and correct it.
 
 ---
 

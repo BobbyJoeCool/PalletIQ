@@ -245,14 +245,20 @@ Accessed via a dedicated menu entry (manual entry or scan of a pallet ID), or by
 - Who put the pallet and when
 - Who last pulled from the pallet and when
 - Who received the pallet and when
+- PO Number and Appointment Number (v1.6.7) — receiving-side identifiers; null on a pallet
+  created manually via Pallet Reinstate rather than through a (simulated) receiving event
+- Expiration Date (v1.6.7) — nullable; certain items (currently: food) are flagged as
+  requiring one, surfaced here as a prompt when still unset, not a hard requirement
 
 **Editable — Inventory Manager and above only, and only after an explicit "Edit" keypress** (role alone does not unlock editing; the additional keypress prevents accidental edits on what is normally a read-only lookup screen):
 
 - DPCI (changes the item; UPC updates automatically to match)
 - VCP / SSP (correcting receiving errors)
 - Quantity (correcting missing or extra cartons)
+- Expiration Date (v1.6.7) — a newly-set date under 1 month out is rejected; 1–3 months out
+  warns and needs confirmation; 3+ months out (or clearing it) needs neither
 
-**Not editable from this screen under any role:** location (use Manual Put instead), timestamps, user attribution fields.
+**Not editable from this screen under any role:** location (use Manual Put instead), timestamps, user attribution fields, PO Number/Appointment Number (v1.6.7 — set once, only by receiving/Pallet Reinstate).
 
 **Navigation:** a button on this screen jumps to the Location ID screen, auto-populated with this pallet's current location.
 

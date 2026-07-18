@@ -76,6 +76,7 @@ async function main() {
     status: string;
     locationAisle: null; locationBin: null; locationLevel: null;
     receivedByZ: string; receivedAt: Date;
+    poNumber: string; apptNumber: string;
   }[] = []
 
   const summary: string[] = []
@@ -108,6 +109,7 @@ async function main() {
         locationAisle: null, locationBin: null, locationLevel: null,
         receivedByZ: 'z002p21',
         receivedAt: now,
+        poNumber: 'DEMO1234', apptNumber: 'DEMO1234',
       })
     }
 

@@ -451,6 +451,12 @@ type PalletRow = {
   receivedByZ: string; receivedAt: Date
   putByZ: string; putAt: Date
   lastPulledByZ: null; lastPulledAt: null
+  // Every pallet this generator builds represents a "received via inbound" pallet — no real
+  // Inbound receiving flow exists yet, so DEMO1234 is a placeholder for both (a manually
+  // PAR-created pallet gets null instead — see pallets.ts's reinstate handler).
+  // expirationDate stays null even for food items; only ever set by a worker via PII's Edit
+  // Mode.
+  poNumber: string; apptNumber: string
 }
 
 const VCP_OPTIONS = [6, 8, 10, 12, 16, 20, 24]
@@ -503,6 +509,7 @@ function buildLocationsAndPallets() {
             receivedByZ: 'z002p21', receivedAt,
             putByZ: 'z002p22', putAt,
             lastPulledByZ: null, lastPulledAt: null,
+            poNumber: 'DEMO1234', apptNumber: 'DEMO1234',
           })
         }
       }
@@ -716,10 +723,16 @@ async function main() {
   })
 
   // 3. Items
+  // requiresExpirationDate is a real per-DPCI setting (not derived from Storage Code at
+  // runtime), but the food Storage Codes (FD/NF/RF — see seed-reference.md) are a
+  // reasonable default population for this demo dataset's ~200 items rather than hand-
+  // flagging each one individually.
+  const FOOD_STORAGE_CODES = ['FD', 'NF', 'RF']
   await insertInChunks('items', ITEMS.map(({ retailPrice, cost, ...rest }) => ({
     ...rest,
     retailPrice: String(retailPrice),
     cost: String(cost),
+    requiresExpirationDate: FOOD_STORAGE_CODES.includes(rest.storageCode),
   })), 100, (chunk) => prisma.item.createMany({ data: chunk as Parameters<typeof prisma.item.createMany>[0]['data'] }))
 
   // 4. Locations + Pallets
