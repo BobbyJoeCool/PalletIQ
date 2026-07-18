@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.6.6 — 2026-07-17](#166--2026-07-17)
 - [1.6.5 — 2026-07-16](#165--2026-07-16)
 - [1.6.4 — 2026-07-16](#164--2026-07-16)
 - [1.6.3 — 2026-07-15](#163--2026-07-15)
@@ -71,8 +72,6 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 - [#85](https://github.com/BobbyJoeCool/PalletIQ/issues/85) — SDP: most of the Pallet ID Directed Put e2e flow fails — demo scans land in the Aisle field instead
 - [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) — Reason codes should be a database table with per-department/role restrictions (needs a product conversation first)
 - [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — MNP/SDP: scanning an unknown Pallet ID crashes with 500 instead of 404
-- [#58](https://github.com/BobbyJoeCool/PalletIQ/issues/58) — STG: selectable freight type/quantity on unstage and restage
-- [#57](https://github.com/BobbyJoeCool/PalletIQ/issues/57) — STG: show matching aisles and zone info as storage code/aisle/size are entered
 
 ### Minor
 
@@ -85,6 +84,7 @@ No issues currently open in this category.
 ### Needs Triage
 
 - [#87](https://github.com/BobbyJoeCool/PalletIQ/issues/87) — LII: show and let the worker switch between multiple pallets at a location
+- [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — Bad Contraction data: every RS/RF/BS location, plus some HS locations on Levels 2-9, incorrectly flagged as contracted
 
 ### Distant Future
 
@@ -92,6 +92,80 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.6.6] — 2026-07-17
+
+STG's fix-and-polish pass — a full layout/graphic redesign (previously deferred, no longer
+out of scope) plus the screen's own 7-item fix list (`DevNotes/Fixes/STG/`) and several
+issues found live along the way. GitHub #57 and #58 confirmed already fixed by existing
+code and closed as housekeeping.
+
+### 1.6.6 — Added
+
+- **STG: fork graphic redesign.** The triple graphic is now a two-piece Cab + Forks-strip
+  crop (instead of one small, mostly-blank image) so the forks visually extend under all
+  three pallet stacks, which now ride directly on top of them.
+- **STG: Master Control reorganized.** Fill All and Unstage Aisle (IM+) sit together on the
+  left of Master Control's own row; Storage Code/Aisle/Size center; Refresh sits at the
+  right, immediately beside the Locations panel. A new **Clear Forks** button lives on the
+  Cab graphic — clears all three stacks' local, unsubmitted entry fields (Aisle/Storage/
+  Size/Qty); unlike Unstage Aisle, it touches nothing already staged, so it's available to
+  every role.
+- **STG: per-stack Fill/Clear buttons.** Each of the three stacks gets its own "Fill" (pulls
+  Master Control's Aisle/Storage/Size into just that stack) and "Clear" button, independent
+  of the aisle-wide Fill All/Clear Forks.
+- **STG: per-stack Storage Code/Size are now entry-with-dropdown-helper fields** (type a
+  known code, or tap the chevron for a popup), scoped to each stack's own Aisle — matching
+  Master Control's own field pattern instead of a plain dropdown.
+- **STG: field validation.** A Storage Code, Size, or Aisle typed into any stack (or Master
+  Control) that isn't actually valid now clears itself and posts an explicit message-bar
+  error (`"{Stack} Stack - Storage Code/Size/Aisle - Invalid Entry"`, or `"Master Control -
+  ..."`) instead of silently committing.
+- **STG/ELZ: color-coded pallet-count badges.** Zone Summary now shows each Storage
+  Code-Size's empty/staged counts as a pill (e.g. `CR-M: 5(2)`) colored to match its cells
+  on the Zone Map — compact and horizontal on STG, larger on ELZ.
+- **STG: dynamic Locations-panel bubble sizing.** Destination-location bubbles now size
+  themselves (width, height, and text) to the Locations panel's own available space and the
+  number of pallets queued, laying out into 1, 2, or 3 columns as the count grows, instead
+  of a fixed 112×32px size capped at 5-per-column.
+- **STG: Unstage/Restage modal now lists every freight type present in the aisle** (empty,
+  staged, or already occupied — not just currently-staged ones), and the type's own
+  Storage-Code-Size bubble is now the active/inactive toggle itself rather than a separate
+  checkbox beside it.
+
+### 1.6.6 — Changed
+
+- **STG's "no Aisle" bottom info panel now shows the literal same sortable results table
+  ELA's own screen uses** (extracted into a new shared `AisleSizeTable` component, which
+  `ELAPage.tsx` was also switched onto) — tap a column header to sort, tap a row to send
+  that Aisle straight to Master Control. Previously a simpler, non-sortable STG-specific
+  list.
+- **STG's final assigned location bubble is green and tappable** (into the same
+  reject/hold flow as the "next" bubble), not red and dead.
+- **STG's Staging stack** (the only one that's ever actually stageable) now sits in its own
+  blue-bordered, lightly-tinted box, to stand out from Next/On Deck at a glance.
+
+### 1.6.6 — Fixed
+
+- **STG: location bubbles didn't clear when a valid Quantity became invalid/empty** — the
+  refresh effect only ever guarded the empty→valid direction.
+- **STG: Unstage/Restage's Apply button dropped a typed-but-unconfirmed quantity** (no
+  Enter pressed) instead of committing it first.
+- **STG: "Fill All" was incorrectly disabled** when arriving from ELZ (which has no Size
+  concept), even though each stack has its own independent Size field.
+- **STG: a fully-contracted Storage Code/Size never appeared in any dropdown-helper popup**
+  on STG, ELZ, or SDP, even though it should still be selectable — the shared narrowing
+  hook derived its list from an endpoint that deliberately excludes contracted locations.
+- **STG: location bubbles grew without bound once 3 or more pallets were queued** — the
+  panel's own height was only ever set via flex stretch, which made it a function of its
+  own bubble sizes, which were in turn computed from that same measured height: a closed
+  loop with no independent anchor. Fixed by anchoring the panel's height to the
+  (genuinely content-independent) Master-Control-plus-graphic column instead.
+- **STG: bubbles were slightly oversized at 3+ per column or 3 columns**, clipping at the
+  bottom or sides — the sizing math never accounted for the gap actually rendered between
+  bubbles.
 
 ---
 

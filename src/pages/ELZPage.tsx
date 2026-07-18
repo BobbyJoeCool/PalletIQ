@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AisleGrid, type GridLevel, type ZoneBinRange } from '../components/shared/AisleGrid';
-import { CellValue } from '../components/shared/CellValue';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
+import { ZoneCodeBadge } from '../components/shared/ZoneCodeBadge';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
@@ -201,14 +201,11 @@ export function ELZPage() {
               result.zoneSummary.map((z) => (
                 <div key={z.zone} className="px-5 py-3 border-b border-[#1A1A1A]">
                   <span className="font-ui text-[15px] font-semibold text-white">Zone {z.zone}</span>
-                  <div className="flex flex-col gap-1 mt-2">
+                  {/* Color-coded badges (v1.6.6, matching STG's own Zone Summary) — larger
+                      here than STG's compact version, this panel's own full width. */}
+                  <div className="flex flex-wrap gap-2 mt-2">
                     {z.breakdown.map((b) => (
-                      <div key={`${b.storageCode}-${b.size}`} className="flex items-center justify-between">
-                        <span className="font-data text-[14px] text-[#CFCFCF]">
-                          {b.storageCode}-{b.size}
-                        </span>
-                        <CellValue empty={b.empty} staged={b.staged} />
-                      </div>
+                      <ZoneCodeBadge key={`${b.storageCode}-${b.size}`} storageCode={b.storageCode} size={b.size} empty={b.empty} staged={b.staged} />
                     ))}
                   </div>
                 </div>

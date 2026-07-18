@@ -107,13 +107,18 @@ async function stageLocations(req: HttpRequest): Promise<unknown> {
 // ── GET /api/staging/staged-types ──────────────────────────────────────────────
 
 /**
- * Returns the distinct freight types (StorageCode+Size) currently STAGED in an aisle,
- * each with its current STAGED count and EMPTY count — the row set and `max` value for
- * STG's per-type Unstage/Restage panel (DevNotes/DesignPrompts/Feature-1-STG-Per-Freight-
- * Type-Unstage-Restage.md). Only types with at least one STAGED location appear, which is
- * what naturally bounds the panel to 1-6 rows. Sorted by StorageCode then Size for a
- * stable row order across repeated fetches (the frontend maps a fixed set of numpad field
- * instances onto row indices).
+ * Returns every freight type (StorageCode+Size) *present* in an aisle — EMPTY, STAGED, or
+ * STORED (occupied) — each with its current STAGED count and EMPTY count, the row set and
+ * `max` value for STG's per-type Unstage/Restage panel (DevNotes/DesignPrompts/Feature-1-
+ * STG-Per-Freight-Type-Unstage-Restage.md; broadened beyond STAGED-only per STG#07 —
+ * `DevNotes/Fixes/STG/07-unstage-aisle-show-all-freight-types.md` — so a worker can correct
+ * staging even when nothing is systematically staged yet but pallets physically exist).
+ * STORED locations only make a type appear as a row; they never count toward `staged`,
+ * `empty`, or `max` (unaffected by restage, which only ever clears STAGED and fills EMPTY).
+ * This is the only caller of this endpoint (`UnstageModal` in `STGPage.tsx`), so its
+ * contract was safe to broaden in place rather than adding a new one. Sorted by StorageCode
+ * then Size for a stable row order across repeated fetches (the frontend maps a fixed set
+ * of numpad field instances onto row indices).
  *
  * @param req - HTTP request with query param `aisle`
  * @returns `{ storageCode: string; size: string; staged: number; empty: number; max: number }[]`
@@ -128,7 +133,7 @@ async function getStagedTypes(req: HttpRequest): Promise<unknown> {
   const aisle = parseInt(aisleParam, 10);
   if (isNaN(aisle)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const [stagedRows, emptyRows] = await Promise.all([
+  const [stagedRows, emptyRows, storedRows] = await Promise.all([
     prisma.location.groupBy({
       by: ['storageCode', 'size'],
       where: { aisle, status: 'STAGED' },
@@ -139,14 +144,25 @@ async function getStagedTypes(req: HttpRequest): Promise<unknown> {
       where: { aisle, status: 'EMPTY' },
       _count: { _all: true },
     }),
+    prisma.location.groupBy({
+      by: ['storageCode', 'size'],
+      where: { aisle, status: 'STORED' },
+      _count: { _all: true },
+    }),
   ]);
 
+  const stagedByType = new Map(stagedRows.map((r) => [`${r.storageCode}-${r.size}`, r._count._all]));
   const emptyByType = new Map(emptyRows.map((r) => [`${r.storageCode}-${r.size}`, r._count._all]));
+  const typesPresent = new Map(
+    [...stagedRows, ...emptyRows, ...storedRows].map((r) => [`${r.storageCode}-${r.size}`, { storageCode: r.storageCode, size: r.size }]),
+  );
 
-  return stagedRows
-    .map((r) => {
-      const empty = emptyByType.get(`${r.storageCode}-${r.size}`) ?? 0;
-      return { storageCode: r.storageCode, size: r.size, staged: r._count._all, empty, max: empty + r._count._all };
+  return [...typesPresent.values()]
+    .map(({ storageCode, size }) => {
+      const key = `${storageCode}-${size}`;
+      const staged = stagedByType.get(key) ?? 0;
+      const empty = emptyByType.get(key) ?? 0;
+      return { storageCode, size, staged, empty, max: empty + staged };
     })
     .sort((a, b) => a.storageCode.localeCompare(b.storageCode) || a.size.localeCompare(b.size));
 }

@@ -37,6 +37,16 @@ interface CodePickerFieldProps {
    *  `maxLength` is reached when the accumulated value already satisfies this predicate
    *  (e.g. SizeField's single-letter S/M/L codes). */
   earlyCommit?: (value: string) => boolean;
+  /** When true, a committed non-empty value that isn't one of `options`' codes is rejected
+   *  instead of committed: the field clears itself and `onInvalid` fires in place of
+   *  `onChange`. Off by default — most callers (SDP's manual overrides, LII, etc.) let a
+   *  worker type any code and rely on a later step to reject it; opt in only where the
+   *  caller can guarantee `options` is the complete, current set of valid values (skipped
+   *  automatically while `optionsLoading` is true, so a still-fetching reference list can't
+   *  falsely reject a value that just hasn't loaded yet). */
+  strict?: boolean;
+  /** Required when `strict` is true — called with the rejected value in place of `onChange`. */
+  onInvalid?: (code: string) => void;
 }
 
 /**
@@ -50,7 +60,7 @@ interface CodePickerFieldProps {
  * or full) and entry-field specifics (maxLength, uppercasing, styling).
  */
 export function CodePickerField({
-  value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false, closeOnAutoSubmit = false, earlyCommit,
+  value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false, closeOnAutoSubmit = false, earlyCommit, strict = false, onInvalid,
 }: CodePickerFieldProps) {
   const field = useNumpadField(panel, maxLength, undefined, earlyCommit);
   const { hidePanel } = useNumpad();
@@ -80,7 +90,13 @@ export function CodePickerField({
     // synthetic-Enter-on-refocus path" note) for a value that's merely full-length, not
     // necessarily confirmed.
     field.focus((v, explicit) => {
-      onChange(transform ? transform(v.trim()) : v.trim());
+      const trimmed = transform ? transform(v.trim()) : v.trim();
+      if (strict && trimmed && !optionsLoading && !options.some((o) => o.code === trimmed)) {
+        field.clear();
+        onInvalid?.(trimmed);
+      } else {
+        onChange(trimmed);
+      }
       if (explicit || closeOnAutoSubmit) hidePanel();
     });
   }

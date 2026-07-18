@@ -18,6 +18,10 @@ interface SizeFieldProps {
   label?: string;
   ariaLabel?: string;
   disabled?: boolean;
+  /** See CodePickerField's own doc — rejects a typed value not present in `options`
+   *  (or the full XS–L list, if `options` is omitted) instead of committing it. */
+  strict?: boolean;
+  onInvalid?: (code: string) => void;
 }
 
 /** A single-letter code is already a complete, unambiguous Size — "X" and "H" are held
@@ -37,7 +41,7 @@ function isCompleteSingleLetterSize(v: string): boolean {
  * context (e.g. an aisle + Storage Code already entered), or the full list otherwise — Size
  * has no lookup table to fetch from, so the un-narrowed case is just this static list.
  */
-export function SizeField({ value, onChange, options, size = 'default', width, label = 'Size', ariaLabel, disabled = false }: SizeFieldProps) {
+export function SizeField({ value, onChange, options, size = 'default', width, label = 'Size', ariaLabel, disabled = false, strict = false, onInvalid }: SizeFieldProps) {
   return (
     <CodePickerField
       value={value}
@@ -52,6 +56,8 @@ export function SizeField({ value, onChange, options, size = 'default', width, l
       label={label}
       ariaLabel={ariaLabel ?? label}
       disabled={disabled}
+      strict={strict}
+      onInvalid={onInvalid}
     />
   );
 }

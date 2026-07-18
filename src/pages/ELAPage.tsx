@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CellValue } from '../components/shared/CellValue';
+import { AisleSizeTable, type AisleSizeRow, type AisleSizeSort } from '../components/shared/AisleSizeTable';
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { useAuth } from '../context/AuthContext';
@@ -9,41 +9,8 @@ import { apiFetch } from '../lib/api';
 import { SIZES } from '../lib/sizes';
 import { useStorageCodes } from '../lib/useStorageCodes';
 
-interface SizeCount {
-  size: string;
-  empty: number;
-  staged: number;
-}
-
-interface AisleRow {
-  aisle: number;
-  totalEmpty: number;
-  sizes: SizeCount[];
-}
-
-/** Sort key is either 'aisle' or one of the size codes shown as a results column. */
-interface SortState {
-  column: string;
-  direction: 'asc' | 'desc';
-}
-
-/**
- * Sorts aisle rows by the active column. Ascending sort on a size column pushes any aisle
- * with a zero count for that size to the bottom instead of surfacing it first (a 0 there
- * isn't a useful "smallest" result) — descending naturally already puts zeros last, so
- * only ascending needs the special case. Aisle-column sorts are always plain numeric.
- * Ties keep whatever relative order the rows were already in (stable sort).
- */
-function sortRows(list: AisleRow[], sort: SortState): AisleRow[] {
-  const getValue = (r: AisleRow) => (sort.column === 'aisle' ? r.aisle : (r.sizes.find((s) => s.size === sort.column)?.empty ?? 0));
-  if (sort.column !== 'aisle' && sort.direction === 'asc') {
-    const nonZero = list.filter((r) => getValue(r) > 0).sort((a, b) => getValue(a) - getValue(b));
-    const zero = list.filter((r) => getValue(r) === 0);
-    return [...nonZero, ...zero];
-  }
-  const dir = sort.direction === 'asc' ? 1 : -1;
-  return [...list].sort((a, b) => (getValue(a) - getValue(b)) * dir);
-}
+type AisleRow = AisleSizeRow;
+type SortState = AisleSizeSort;
 
 /**
  * ELA — Empty Locations by Aisle.
@@ -121,17 +88,6 @@ export function ELAPage() {
   }, [storageCode, size, isInvalidCode, isInvalidSize, token, setMessage]);
 
   const selectedRow = rows?.find((r) => r.aisle === selected) ?? null;
-
-  // Size columns are the union of every size actually present across all returned aisles
-  // (each aisle reports its full size breakdown, not just the queried size), in canonical
-  // SIZES order rather than API/Set insertion order.
-  const sizeCols = useMemo(() => {
-    const set = new Set<string>();
-    rows?.forEach((r) => r.sizes.forEach((s) => set.add(s.size)));
-    return SIZES.filter((s) => set.has(s));
-  }, [rows]);
-
-  const sortedRows = useMemo(() => sortRows(rows ?? [], sort), [rows, sort]);
 
   /** Selects a result row, or deselects it if it's already the selected row. */
   function toggleRow(aisle: number) {
@@ -223,53 +179,7 @@ export function ELAPage() {
             </p>
           </div>
         ) : (
-          <>
-            <div className="flex bg-[#111111] border-b border-[#2A2A2A] shrink-0">
-              <button type="button" onClick={() => handleSort('aisle')} className="w-[140px] px-4 py-3 text-left">
-                <span className="font-ui text-[14px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
-                  Aisle{sort.column === 'aisle' && (sort.direction === 'asc' ? ' ▲' : ' ▼')}
-                </span>
-              </button>
-              {/* Subtle divider between size columns (issue #63) — border-l on every column
-                  after the first also separates the size columns from the Aisle column. */}
-              {sizeCols.map((s, i) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => handleSort(s)}
-                  className={`flex-1 px-4 py-3 text-center ${i > 0 ? 'border-l border-[#1F1F1F]' : ''}`}
-                >
-                  <span className="font-ui text-[14px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
-                    {s}{sort.column === s && (sort.direction === 'asc' ? ' ▲' : ' ▼')}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {sortedRows.map((row) => (
-                <button
-                  key={row.aisle}
-                  type="button"
-                  onClick={() => toggleRow(row.aisle)}
-                  className={`flex w-full border-b border-[#1A1A1A] transition-colors ${
-                    selected === row.aisle ? 'bg-[#1A2A3A]' : 'hover:bg-[#111111]'
-                  }`}
-                >
-                  <div className="w-[140px] px-4 py-3 text-left">
-                    <span className="font-data text-[20px] font-semibold text-white">{row.aisle}</span>
-                  </div>
-                  {sizeCols.map((s, i) => {
-                    const cell = row.sizes.find((sz) => sz.size === s);
-                    return (
-                      <div key={s} className={`flex-1 px-4 py-3 text-center ${i > 0 ? 'border-l border-[#1F1F1F]' : ''}`}>
-                        {cell && <CellValue empty={cell.empty} staged={cell.staged} large />}
-                      </div>
-                    );
-                  })}
-                </button>
-              ))}
-            </div>
-          </>
+          <AisleSizeTable rows={rows} sort={sort} onSortChange={handleSort} selected={selected} onSelectAisle={toggleRow} />
         )}
       </div>
     </div>

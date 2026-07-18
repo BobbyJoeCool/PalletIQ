@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Triple from '../assets/Triple.png';
 import { AisleGrid, type GridLevel, type ZoneBinRange } from '../components/shared/AisleGrid';
-import { CellValue } from '../components/shared/CellValue';
+import { AisleSizeTable, type AisleSizeRow, type AisleSizeSort } from '../components/shared/AisleSizeTable';
+import { type CodeOption } from '../components/shared/CodePickerField';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { SizeField } from '../components/shared/SizeField';
+import { ZoneCodeBadge } from '../components/shared/ZoneCodeBadge';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
@@ -14,7 +16,7 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
-import { SIZES, SIZE_NAMES } from '../lib/sizes';
+import { SIZE_NAMES } from '../lib/sizes';
 import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useStorageCodes } from '../lib/useStorageCodes';
@@ -40,8 +42,7 @@ interface ZoneMapResult {
   zoneBinRanges: ZoneBinRange[];
 }
 
-interface AisleSizeCount { size: string; empty: number; staged: number }
-interface AisleRow { aisle: number; totalEmpty: number; sizes: AisleSizeCount[] }
+type AisleRow = AisleSizeRow;
 
 /**
  * Fetches up to `count` destination locations for the front stack in a single request —
@@ -94,30 +95,27 @@ function FieldDisplay({
 /** A single pallet-styled input box, sized to sit inside the front-stack box. Two thin
  *  internal lines suggest pallet slats — kept distinct from the generic shared field
  *  components (issue #78) on purpose: this compact stacked-pallet visual is specific to
- *  STG's front-stack box, not a pattern reused elsewhere in the app. `emphasize` (used for
- *  Qty) makes the box taller and brighter — it's the field a GPMer taps most, since
- *  Aisle/Storage/Size normally arrive from Master Control's "Fill All". */
+ *  STG's front-stack box, not a pattern reused elsewhere in the app. `tinted` (used for
+ *  Qty, v1.6.6) shades the box with an 80%-transparent red — same size as every other
+ *  field now (an earlier `emphasize` variant also made Qty taller/brighter; that's gone,
+ *  per the size-parity request, leaving just the color as Qty's visual distinction). */
 function PalletBox({
-  label, value, onFocus, active = false, emphasize = false,
-}: { label: string; value: string; onFocus: () => void; active?: boolean; emphasize?: boolean }) {
+  label, value, onFocus, active = false, tinted = false,
+}: { label: string; value: string; onFocus: () => void; active?: boolean; tinted?: boolean }) {
   return (
     <button
       type="button"
       onClick={onFocus}
-      className={`relative flex items-center justify-between px-2 rounded-[5px] border-2 transition-colors min-h-0 ${
-        emphasize
-          ? 'flex-[1.6] bg-[#1A0D0D] border-[#CC0000]'
-          : active
-          ? 'flex-1 bg-[#0D0D0D] border-[#CC0000]'
-          : 'flex-1 bg-[#0D0D0D] border-[#3A3A3A] hover:border-[#555]'
-      }`}
+      className={`relative flex-1 flex items-center justify-between px-2 rounded-[5px] border-2 transition-colors min-h-0 ${
+        tinted ? 'bg-[#CC000033]' : 'bg-[#0D0D0D]'
+      } ${active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
     >
       <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
       <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
-      <span className={`relative font-ui font-medium uppercase tracking-wider text-[#9A9A9A] ${emphasize ? 'text-[12px]' : 'text-[9px]'}`}>
+      <span className="relative font-ui font-medium uppercase tracking-wider text-[#9A9A9A] text-[9px]">
         {label}
       </span>
-      <span className={`relative font-data font-semibold text-white ${emphasize ? 'text-[22px]' : 'text-[15px]'}`}>
+      <span className="relative font-data font-semibold text-white text-[15px]">
         {value || <span className="text-[#444]">—</span>}
       </span>
       {active && <span className="absolute right-1 top-1 bottom-1 w-[2px] bg-[#CC0000] animate-pulse rounded-sm" />}
@@ -125,24 +123,120 @@ function PalletBox({
   );
 }
 
-/** Pallet-styled Size dropdown — same visual treatment as PalletBox, but a native `<select>`. */
-function PalletSelect({
-  label, ariaLabel, value, onChange,
-}: { label: string; ariaLabel: string; value: string; onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void }) {
+/**
+ * Pallet-styled entry + dropdown-helper field — PalletBox's own visual chrome (flex-1
+ * height, `rounded-[5px]`, slat lines, corner label baked into the box) with
+ * CodePickerField's tap-to-type-or-pick-from-popup interaction, narrowed to whatever
+ * `options` the caller supplies. Used for Storage/Size on a stack (STG's per-stack
+ * scoped-entry checklist item) — CodePickerField itself isn't reskinnable to this box's
+ * exact rounding/height/label position via its own props (its `size` variants target
+ * filter-bar-style boxes, not this pallet-slat look), so this is a dedicated local
+ * component rather than a StorageCodeField/SizeField call site, reimplementing just enough
+ * of CodePickerField's own field+popup logic to match.
+ */
+function PalletCodePicker({
+  label, ariaLabel, value, onChange, options, maxLength, transform, earlyCommit, strict, onInvalid,
+}: {
+  label: string;
+  ariaLabel: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: CodeOption[];
+  maxLength?: number;
+  transform?: (raw: string) => string;
+  earlyCommit?: (value: string) => boolean;
+  /** See CodePickerField's own doc — rejects a typed value not present in `options`
+   *  instead of committing it (clears the field, calls `onInvalid` in place of `onChange`). */
+  strict?: boolean;
+  onInvalid?: (code: string) => void;
+}) {
+  const field = useNumpadField('keyboard', maxLength, undefined, earlyCommit);
+  const { hidePanel } = useNumpad();
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { field.set(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tap-outside closes the popup — same lightweight-anchored-dropdown behavior as
+  // CodePickerField's own (see that component for the reasoning).
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
+
+  function focusField() {
+    setOpen(false);
+    field.focus((v, explicit) => {
+      const trimmed = transform ? transform(v.trim()) : v.trim();
+      if (strict && trimmed && !options.some((o) => o.code === trimmed)) {
+        field.clear();
+        onInvalid?.(trimmed);
+      } else {
+        onChange(trimmed);
+      }
+      if (explicit) hidePanel();
+    });
+  }
+
+  function selectOption(code: string) {
+    setOpen(false);
+    onChange(code);
+  }
+
   return (
-    <div className="relative flex-1 min-h-0 flex items-center justify-between px-2 rounded-[5px] border-2 bg-[#0D0D0D] border-[#3A3A3A]">
-      <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
-      <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
-      <span className="relative font-ui text-[9px] font-medium uppercase tracking-wider text-[#9A9A9A]">{label}</span>
-      <select
+    <div ref={wrapperRef} className="relative flex-1 min-h-0 flex items-stretch gap-1">
+      <button
+        type="button"
+        onClick={focusField}
         aria-label={ariaLabel}
-        value={value}
-        onChange={onChange}
-        className="relative bg-transparent font-data text-[15px] font-semibold text-white focus:outline-none"
+        className={`relative flex-1 min-w-0 flex items-center justify-between px-2 rounded-[5px] border-2 bg-[#0D0D0D] transition-colors ${
+          field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'
+        }`}
       >
-        <option value="">—</option>
-        {SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
-      </select>
+        <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
+        <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
+        <span className="relative font-ui font-medium uppercase tracking-wider text-[#9A9A9A] text-[9px]">
+          {label}
+        </span>
+        <span className="relative font-data font-semibold text-white text-[15px]">
+          {field.value || <span className="text-[#444]">—</span>}
+        </span>
+        {field.isActive && <span className="absolute right-1 top-1 bottom-1 w-[2px] bg-[#CC0000] animate-pulse rounded-sm" />}
+      </button>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`${ariaLabel} options`}
+        className={`shrink-0 w-[20px] rounded-[5px] border-2 flex items-center justify-center transition-colors ${
+          open ? 'border-[#CC0000] text-white' : 'border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white'
+        }`}
+      >
+        <span className="text-[9px]">▾</span>
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-30 min-w-[160px] w-max max-w-[240px] max-h-[220px] overflow-y-auto bg-[#0D0D0D] border border-[#3A3A3A] rounded-[10px] shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
+          {options.length === 0 ? (
+            <p className="font-ui text-[12px] text-[#555] px-3 py-2">No values available</p>
+          ) : (
+            options.map((opt) => (
+              <button
+                key={opt.code}
+                type="button"
+                onClick={() => selectOption(opt.code)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-[#1A1A1A] transition-colors border-b border-[#1A1A1A] last:border-b-0"
+              >
+                <span className="font-data text-[13px] font-semibold text-white shrink-0">{opt.code}</span>
+                <span className="font-ui text-[11px] text-[#9A9A9A] truncate">— {opt.desc}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -229,12 +323,13 @@ const STACK_LABELS = ['Staging', 'Next', 'On Deck'] as const;
  * panel), index 2 at the leftmost (closest to the mast/operator) — see STGScreen.
  */
 function StackBox({ index }: { index: 0 | 1 | 2 }) {
-  const { stacks, updateStack } = useStaging();
+  const { stacks, updateStack, master } = useStaging();
   const { hidePanel } = useNumpad();
+  const { token } = useAuth();
+  const { setMessage } = useMessageBar();
   const stack = stacks[index];
 
   const aisleField = useNumpadField('numpad');
-  const storageField = useNumpadField('keyboard');
   const quantityField = useNumpadField('numpad');
 
   // Keep the on-screen field displays in sync with context — covers the worker's own
@@ -242,54 +337,187 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   // queue compaction after a sibling stage, all of which mutate context directly rather
   // than going through these field hooks.
   useEffect(() => { aisleField.set(stack.aisle); }, [stack.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { storageField.set(stack.storageCode); }, [stack.storageCode]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { quantityField.set(stack.quantity); }, [stack.quantity]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Registers this stack's Aisle field numpad handler; writes the confirmed value into StagingContext. */
-  const focusAisleField = useCallback(() => {
-    aisleField.focus((v) => { updateStack(index, { aisle: v.trim() }); hidePanel(); });
-  }, [aisleField, hidePanel, index, updateStack]);
+  // Storage/Size are entry-with-dropdown-helper fields (StorageCodeField/SizeField, same
+  // shared components Master Control uses) narrowed to this stack's own Aisle (the open STG
+  // validation-checklist item — "storage and size should be entries with scoped dropdowns
+  // based on the aisle for that stack" — corrected from an earlier plain-`<select>` pass to
+  // match Master Control's own entry-box-plus-popup interaction, per direct instruction).
+  // A typed value is now validated the same as a popup selection would be (`strict` below) —
+  // previously a worker typing a code not actually present in this aisle committed silently
+  // with no error, unlike Aisle just below. Gated on the narrowing data actually being ready
+  // (an Aisle entered, and — for Storage — the reference list loaded) so a value typed before
+  // that data arrives isn't rejected just for being temporarily unverifiable.
+  const stackAisleNum = parseInt(stack.aisle, 10);
+  const aisleTypes = useAisleFreightTypes(isNaN(stackAisleNum) ? null : stackAisleNum);
+  const fullStorageCodes = useStorageCodes();
+  const storageOptions = aisleTypes && fullStorageCodes
+    ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
+    : [];
+  const sizeOptions = aisleTypes
+    ? aisleTypes.sizesFor(stack.storageCode || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
+    : [];
+  const storageStrict = aisleTypes !== null && fullStorageCodes !== null;
+  const sizeStrict = aisleTypes !== null;
+  const handleInvalidStorage = useCallback(() => {
+    playAlert('error');
+    setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Storage Code - Invalid Entry` });
+  }, [index, setMessage]);
+  const handleInvalidSize = useCallback(() => {
+    playAlert('error');
+    setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Size - Invalid Entry` });
+  }, [index, setMessage]);
 
-  /** Registers this stack's Storage Code field keyboard handler; writes the confirmed value into StagingContext. */
-  const focusStorageField = useCallback(() => {
-    storageField.focus((v) => { updateStack(index, { storageCode: v.trim().toUpperCase() }); hidePanel(); });
-  }, [storageField, hidePanel, index, updateStack]);
+  /** Validates a confirmed Aisle entry actually exists (the other open STG validation-
+   *  checklist item), mirroring SDP's own `handleAisleConfirm` — clears the field and
+   *  reports `"{Stack} Stack - Aisle - Invalid Entry"` on the status bar if not, otherwise
+   *  commits it into StagingContext. */
+  const handleAisleConfirm = useCallback(async (v: string) => {
+    const trimmed = v.trim();
+    hidePanel();
+    const aisleNum = parseInt(trimmed, 10);
+    if (trimmed && !isNaN(aisleNum)) {
+      try {
+        await apiFetch(`/api/locations/empty-by-zone?aisle=${aisleNum}`, token!);
+      } catch (err) {
+        const code = err instanceof Error ? err.message : '';
+        if (code === 'NOT_FOUND') {
+          playAlert('error');
+          updateStack(index, { aisle: '' });
+          setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Aisle - Invalid Entry` });
+          return;
+        }
+      }
+    }
+    updateStack(index, { aisle: trimmed });
+  }, [hidePanel, index, updateStack, token, setMessage]);
+
+  /** Registers this stack's Aisle field numpad handler. */
+  const focusAisleField = useCallback(() => {
+    aisleField.focus(handleAisleConfirm);
+  }, [aisleField, handleAisleConfirm]);
 
   /** Registers this stack's Quantity field numpad handler; writes the confirmed value into StagingContext. */
   const focusQuantityField = useCallback(() => {
     quantityField.focus((v) => { updateStack(index, { quantity: v.trim() }); hidePanel(); });
   }, [quantityField, hidePanel, index, updateStack]);
 
+  /** Fills this one stack's Aisle/StorageCode/Size from Master Control — the single-slot
+   *  version of `fillAll()`'s own logic (STG#06), independent of the other two stacks. */
+  const fillFromMaster = useCallback(() => {
+    updateStack(index, { aisle: master.aisle, storageCode: master.storageCode, size: master.size });
+  }, [index, master.aisle, master.storageCode, master.size, updateStack]);
+
+  /** Clears this one stack's Aisle/Storage/Size/Qty and any computed locations/shortfall —
+   *  the single-slot version of `clearForks()`'s own logic, independent of the other two
+   *  stacks (mirrors STG#06's per-stack scoping). */
+  const clearStack = useCallback(() => {
+    updateStack(index, { aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0 });
+  }, [index, updateStack]);
+
   return (
-    <div className="flex-1 min-w-0 flex flex-col items-stretch gap-1 h-full">
-      <span className="font-ui text-[10px] font-semibold text-[#666] uppercase tracking-wider text-center shrink-0">
+    <div
+      className={`flex-1 min-w-0 flex flex-col items-stretch gap-1 h-full ${
+        index === 0 ? 'border-2 border-[#3A6BB0] bg-[#3A6BB033] rounded-[8px] p-1' : ''
+      }`}
+    >
+      {/* Staging (index 0, the front/active slot — the only one that computes locations and
+       *  stages) reads larger and red to stand out from Next/On Deck — also gets its own
+       *  blue box (border + 80%-transparent fill, per direct instruction) to set it apart
+       *  from Next/On Deck at a glance, not just via the label's own color/size. */}
+      <span
+        className={`font-ui font-semibold uppercase tracking-wider text-center shrink-0 ${
+          index === 0 ? 'text-[12.5px] text-[#CC0000]' : 'text-[10px] text-[#666]'
+        }`}
+      >
         {STACK_LABELS[index]}
       </span>
+      {/* flex-col-reverse displays its *last* DOM child at the top — "Fill from Master" is
+       *  listed last here specifically so it renders directly under the stack label above,
+       *  same size as the other fields (v1.6.6). */}
       <div className="flex-1 min-h-0 flex flex-col-reverse gap-[3px]">
         <PalletBox label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} />
-        <PalletBox label="Storage" value={storageField.value} onFocus={focusStorageField} active={storageField.isActive} />
-        <PalletSelect
+        <PalletCodePicker
+          label="Storage"
+          ariaLabel={`${STACK_LABELS[index]} Storage Code`}
+          value={stack.storageCode}
+          onChange={(v) => updateStack(index, { storageCode: v })}
+          options={storageOptions}
+          maxLength={2}
+          transform={(v) => v.toUpperCase()}
+          strict={storageStrict}
+          onInvalid={handleInvalidStorage}
+        />
+        <PalletCodePicker
           label="Size"
           ariaLabel={`${STACK_LABELS[index]} Size`}
           value={stack.size}
-          onChange={(e) => updateStack(index, { size: e.target.value })}
+          onChange={(v) => updateStack(index, { size: v })}
+          options={sizeOptions}
+          maxLength={2}
+          transform={(v) => v.toUpperCase()}
+          earlyCommit={(v) => ['S', 'M', 'L'].includes(v)}
+          strict={sizeStrict}
+          onInvalid={handleInvalidSize}
         />
-        <PalletBox label="Qty" value={quantityField.value} onFocus={focusQuantityField} active={quantityField.isActive} emphasize />
+        <PalletBox label="Qty" value={quantityField.value} onFocus={focusQuantityField} active={quantityField.isActive} tinted />
+        {/* Fills this stack from Master Control's Aisle/StorageCode/Size (STG#06), or clears
+         *  it entirely — both independent of the Cab's aisle-wide Fill All/Clear Forks
+         *  (v1.6.6). Share the row Fill from Master's standalone pill used to occupy alone. */}
+        <div className="flex-1 min-h-0 w-4/5 self-center flex gap-1">
+          <button
+            type="button"
+            onClick={fillFromMaster}
+            className="flex-1 min-h-0 flex items-center justify-center px-1 rounded-full border-2 border-[#003366] bg-[#003366] hover:bg-[#004488] transition-colors"
+          >
+            <span className="font-ui text-[10px] font-bold text-white uppercase tracking-wider text-center">
+              Fill
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={clearStack}
+            className="flex-1 min-h-0 flex items-center justify-center px-1 rounded-full border-2 border-[#CC0000] text-[#CC0000] hover:bg-[#CC0000] hover:text-white transition-colors"
+          >
+            <span className="font-ui text-[10px] font-bold uppercase tracking-wider text-center">
+              Clear
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Locations panel ──────────────────────────────────────────────────────────────
-
-/** Bubbles are laid out 5 per column, wrapping into additional columns beyond that (issue
- *  #81 — some HS stacks run up to 10 pallets, which needs 2 columns of 5 to stay legible;
- *  a generic chunk-by-5 handles any count without a hardcoded 2-column limit). */
-function chunkBy5<T>(items: T[]): T[][] {
+/** Splits `items` into consecutive groups of `size` — the general form behind both
+ *  LocationsPanel's bubble columns and LogPanel's 3-per-column log entries. */
+function chunkBy<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += 5) chunks.push(items.slice(i, i + 5));
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
   return chunks;
 }
+
+/** Tracks a ref'd element's own content-box size via ResizeObserver — LocationsPanel uses
+ *  this to size its bubbles as a live fraction of the actual rendered container rather than
+ *  a fixed px guess (the open STG checklist item asking for dynamic bubble sizing). */
+function useElementSize<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const box = entry.contentBoxSize?.[0];
+      setSize(box ? { width: box.inlineSize, height: box.blockSize } : { width: el.clientWidth, height: el.clientHeight });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, size] as const;
+}
+
+// ── Locations panel ──────────────────────────────────────────────────────────────
 
 /**
  * The front stack's (StagingContext stacks[0]) computed destination-location list and
@@ -300,7 +528,7 @@ function chunkBy5<T>(items: T[]): T[][] {
  * The very next suggested location (`locations[0]`) is still a button — tapping it opens
  * the reject/hold flow rather than staging anything, unchanged from #77.
  */
-function LocationsPanel() {
+function LocationsPanel({ height }: { height?: number }) {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
   const { stacks, updateStack, resetStackAfterStage, addLogEntry, bumpDataVersion, dataVersion } = useStaging();
@@ -319,7 +547,15 @@ function LocationsPanel() {
   // issue #76 — was pressed).
   useEffect(() => {
     const qty = parseInt(front.quantity, 10);
-    if (!front.aisle || !front.storageCode || !front.size || !qty || qty <= 0) return;
+    if (!front.aisle || !front.storageCode || !front.size || !qty || qty <= 0) {
+      // Fix STG#01: a valid→invalid transition (e.g. Quantity cleared) must clear stale
+      // bubbles too, not just skip fetching new ones — this guard used to only handle the
+      // empty→valid direction.
+      if (front.locations.length > 0 || front.shortfall > 0) {
+        updateStack(0, { locations: [], shortfall: 0 });
+      }
+      return;
+    }
     let cancelled = false;
     fetchStagingLocations(token!, front.aisle, front.storageCode, front.size, qty)
       .then((locations) => {
@@ -396,18 +632,67 @@ function LocationsPanel() {
     ...front.locations.map((loc, i) => ({ key: loc, loc, isNext: i === 0, isLast: i === front.locations.length - 1 && front.shortfall === 0 })),
     ...Array.from({ length: front.shortfall }, (_, i) => ({ key: `shortfall-${i}`, loc: null, isNext: false, isLast: i === front.shortfall - 1 })),
   ];
-  const columns = chunkBy5(bubbles);
+
+  // Dynamic bubble sizing (the open STG checklist item): more pallets → smaller bubbles, so
+  // more of the queue stays visible without scrolling; fewer pallets → larger, easier-to-tap
+  // bubbles. Column count is bucketed off the total count (1 up to 4, 2 up to 8, else 3 —
+  // per the checklist's own thresholds), and each bubble's width/height is the container's
+  // own measured content-box size (`useElementSize`, padding already excluded), *minus* the
+  // gap space the columns/rows actually consume (see below), divided by columns/rows, and
+  // clamped to the checklist's stated min/max fractions of that same gap-adjusted space:
+  // width in [1/3, 1/2], height in [1/5, 1/3]. A fixed 112×32px fallback covers the first
+  // render, before ResizeObserver has reported a real measurement.
+  //
+  // BUG (found live, 3+ pallets): this panel's own outer height was never externally fixed —
+  // it only got a height via the row's default `items-stretch`, which (since the row itself
+  // has no explicit height) computes from each sibling's own *content* height. That made this
+  // panel's height partly a function of its own bubbles' height, which this effect was in turn
+  // computing *from* that same measured height — a closed loop with no independent anchor, so
+  // each ResizeObserver tick fed a taller number back into itself and bubbles grew without
+  // bound. Fixed by having `height` come in as a prop, measured off the *left* column instead
+  // (Master Control + the graphic row — genuinely content-independent, see `STGScreen`), and
+  // applied as an explicit inline height below. A flex item with a definite own height no
+  // longer participates in the row's content-based height computation at all, which is what
+  // actually breaks the circularity (not just "it's more explicit now").
+  // BUG (found live, 3+ bubbles): the width/height math below divided the container's raw
+  // measured size by column/row count, ignoring the `gap-2`/`gap-1.5` (8px/6px) actually
+  // rendered *between* columns/bubbles — so N columns/rows of the computed size plus their
+  // gaps summed to more than the container's real size, clipping the last column/row.
+  // Fixed by subtracting gap space first and sizing (and clamping) against what's actually
+  // left, so `columnCount` bubbles of `bubbleWidth` plus their gaps always sum to exactly
+  // the measured width (same for height/rows) — never more.
+  const [bubbleAreaRef, bubbleArea] = useElementSize<HTMLDivElement>();
+  const columnCount = bubbles.length <= 4 ? 1 : bubbles.length <= 8 ? 2 : 3;
+  const rowCount = Math.max(1, Math.ceil(bubbles.length / columnCount));
+  const COLUMN_GAP = 8; // gap-2 between columns
+  const ROW_GAP = 6; // gap-1.5 between bubbles within a column
+  const availableWidth = Math.max(0, bubbleArea.width - COLUMN_GAP * (columnCount - 1));
+  const availableHeight = Math.max(0, bubbleArea.height - ROW_GAP * (rowCount - 1));
+  const bubbleWidth = availableWidth > 0
+    ? Math.min(Math.max(availableWidth / columnCount, availableWidth / 3), availableWidth / 2)
+    : 112;
+  const bubbleHeight = availableHeight > 0
+    ? Math.min(Math.max(availableHeight / rowCount, availableHeight / 5), availableHeight / 3)
+    : 32;
+  // Text scales with the bubble itself (roughly the same 13px-at-32px-tall ratio the old
+  // fixed-size bubbles used), clamped so it never gets small enough to be unreadable or so
+  // large it overflows a narrow (1/3-width) bubble.
+  const bubbleFontSize = Math.min(18, Math.max(11, Math.round(bubbleHeight * 0.4)));
+  const bubbleStyle = { width: bubbleWidth, height: bubbleHeight, fontSize: bubbleFontSize };
+  const columns = chunkBy(bubbles, rowCount);
 
   return (
-    <div className="w-[340px] shrink-0 flex flex-col gap-1.5 p-2 bg-[#0A0A0A] border border-[#2A2A2A] rounded-[12px]">
+    <div
+      className="w-[378px] shrink-0 min-h-0 flex flex-col gap-1.5 p-2 bg-[#0A0A0A] border border-[#2A2A2A] rounded-[12px]"
+      style={height ? { height } : undefined}
+    >
       <span className="font-ui text-[12px] font-semibold text-[#9A9A9A] uppercase tracking-wider text-center shrink-0">
         Locations
       </span>
 
-      {/* Bubble height/gap sized so 5 (a full column, per issue #81) fit this row's fixed
-          270px height alongside the label and Stage button without scrolling; overflow-auto
-          remains as a safety net for a shortfall-padded column that runs longer. */}
-      <div data-testid="location-bubbles" className="flex-1 min-h-0 overflow-auto flex items-start justify-center gap-2 p-1">
+      {/* overflow-auto remains as a safety net — if a column ever needs more rows than fit
+          even at the minimum 1/5-height bubble, it scrolls rather than overflowing the panel. */}
+      <div ref={bubbleAreaRef} data-testid="location-bubbles" className="flex-1 min-h-0 overflow-auto flex items-start justify-center gap-2 p-1">
         {columns.length === 0 && (
           <span className="font-data text-[14px] text-[#444] text-center self-center">—</span>
         )}
@@ -418,22 +703,26 @@ function LocationsPanel() {
                 return (
                   <span
                     key={b.key}
-                    className="min-w-[112px] h-[32px] px-2 flex items-center justify-center rounded-full border-2 border-[#CC0000] bg-[#2A0D0D] font-ui text-[11px] font-bold text-[#FF6666] text-center whitespace-nowrap"
+                    style={bubbleStyle}
+                    className="px-2 flex items-center justify-center rounded-full border-2 border-[#CC0000] bg-[#2A0D0D] font-ui font-bold text-[#FF6666] text-center whitespace-nowrap"
                   >
                     No Location
                   </span>
                 );
               }
-              // The next suggestion (first overall) is a tap target — tapping it opens the
-              // reject/hold flow, not staging (per issue #77, unchanged by #81).
-              if (b.isNext) {
+              // The next suggestion (first overall) and the last (final location needed to
+              // fully satisfy the quantity, green per STG#03) are both tap targets — tapping
+              // either opens the reject/hold flow, not staging (per issue #77, unchanged by
+              // #81). A bubble that's both (Quantity = 1) renders as the green/last style.
+              if (b.isNext || b.isLast) {
                 return (
                   <button
                     key={b.key}
                     type="button"
                     onClick={() => setRejectTarget(b.loc)}
-                    className={`min-w-[112px] h-[32px] px-2 flex items-center justify-center rounded-full border-2 font-data text-[13px] font-bold text-center whitespace-nowrap transition-colors ${
-                      b.isLast ? 'border-[#FF4444] bg-[#2A0D0D] text-[#FF4444]' : 'border-[#3A6BB0] bg-[#132C4D] text-white hover:border-[#5A8BD0]'
+                    style={bubbleStyle}
+                    className={`px-2 flex items-center justify-center rounded-full border-2 font-data font-bold text-center whitespace-nowrap transition-colors ${
+                      b.isLast ? 'border-[#5FD18B] bg-[rgba(95,209,139,0.12)] text-[#5FD18B] hover:border-[#7FE0A8]' : 'border-[#3A6BB0] bg-[#132C4D] text-white hover:border-[#5A8BD0]'
                     }`}
                   >
                     {fmtLocation(b.loc)}
@@ -443,9 +732,8 @@ function LocationsPanel() {
               return (
                 <span
                   key={b.key}
-                  className={`min-w-[112px] h-[32px] px-2 flex items-center justify-center rounded-full border-2 font-data text-[13px] font-bold text-center whitespace-nowrap ${
-                    b.isLast ? 'border-[#FF4444] bg-[#2A0D0D] text-[#FF4444]' : 'border-[#3A6BB0] bg-[#132C4D] text-white'
-                  }`}
+                  style={bubbleStyle}
+                  className="px-2 flex items-center justify-center rounded-full border-2 border-[#3A6BB0] bg-[#132C4D] text-white font-data font-bold text-center whitespace-nowrap"
                 >
                   {fmtLocation(b.loc)}
                 </span>
@@ -473,54 +761,110 @@ function LocationsPanel() {
 
 // ── Fork graphic ─────────────────────────────────────────────────────────────
 
+// Triple.png's actual pixel content (measured directly from the asset, not estimated):
+// a long fork bar + 2 wheels spans x:[0,990] y:[341,422], a thin mast/"backrest" sits at
+// x≈990, and the operator cab (full image height) spans x:[990,1218] y:[0,429].
+//
+// v1.6.6 tried a single whole-image layout twice (see this file's design log) before
+// landing back here: getting the stack boxes to visually "sit on the forks" while leaving
+// the fork bar itself visible requires precise, independent control over the cab's and the
+// forks' own size/position — fighting that out of one `object-fill`-stretched image (whose
+// internal proportions distort non-uniformly once stretched) is real complexity for no
+// benefit over just cropping the two pieces independently, which is what SpriteCrop does.
+const TRIPLE_IMG_W = 1218;
+const TRIPLE_IMG_H = 429;
+const CAB_CROP = { x0: 990, x1: 1218, y0: 0, y1: 429 };
+const FORK_CROP = { x0: 0, x1: 990, y0: 341, y1: 422 };
+const CAB_HEIGHT = 240;
+const CAB_WIDTH = Math.round((CAB_CROP.x1 - CAB_CROP.x0) * (CAB_HEIGHT / (CAB_CROP.y1 - CAB_CROP.y0)));
+const FORK_HEIGHT = 28;
+
 /**
- * The Triple.png fork-truck graphic, flipped so the forks point right and shortened to
- * reclaim vertical space (issue #77), then narrowed to a fixed width (issue #81) to make
- * room for three stack boxes plus a separate, larger Locations panel — the issue's own
- * stated reason for shrinking the graphic in the first place. The image is mirrored via a
- * horizontal CSS transform rather than a second asset — the fork/mast span (originally the
- * left ~82%) now renders on the right, and the cab (originally the right ~18%) now renders
- * on the left, which is exactly where the Fill All / Unstage Aisle buttons belong per issue
- * #77 ("top-left of the triple graphic, over the operator's compartment").
+ * Crops an arbitrary rectangle of `src` (in source-image pixels) and stretches it to fill
+ * this element's own rendered box — the standard percentage-based CSS-sprite technique.
+ * `background-size`/`-position` percentages resolve against the *element's own* box, not
+ * the source image, so this works whether the caller sizes it with a fixed pixel style or
+ * lets it stretch fluidly (e.g. `w-full` in a flex row) — no JS measurement needed either way.
  */
-function TripleGraphic({ isIM, onFillAll, fillAllDisabled, onUnstage }: {
-  isIM: boolean;
-  onFillAll: () => void;
-  fillAllDisabled: boolean;
-  onUnstage: () => void;
+function SpriteCrop({ src, imgW, imgH, crop, className, style }: {
+  src: string;
+  imgW: number;
+  imgH: number;
+  crop: { x0: number; x1: number; y0: number; y1: number };
+  className?: string;
+  style?: React.CSSProperties;
 }) {
+  const cropW = crop.x1 - crop.x0;
+  const cropH = crop.y1 - crop.y0;
+  const sizeX = (imgW / cropW) * 100;
+  const sizeY = (imgH / cropH) * 100;
+  const posX = cropW === imgW ? 0 : (crop.x0 / (imgW - cropW)) * 100;
+  const posY = cropH === imgH ? 0 : (crop.y0 / (imgH - cropH)) * 100;
   return (
-    <div className="relative w-[200px] shrink-0 h-[270px] select-none">
-      {/* object-contain, not object-fill (unlike the pre-#81 flex-1 version) — at this
-          fixed 200px width the image's native ~2.8:1 aspect ratio would otherwise stretch
-          into an illegible sliver; contain keeps the truck recognizable, just smaller. */}
-      <img
+    <div
+      className={className}
+      style={{
+        ...style,
+        backgroundImage: `url(${src})`,
+        backgroundSize: `${sizeX}% ${sizeY}%`,
+        backgroundPosition: `${posX}% ${posY}%`,
+        backgroundRepeat: 'no-repeat',
+      }}
+    />
+  );
+}
+
+/**
+ * The operator compartment + backrest/mast, undistorted (v1.6.6) — anchored to the row's
+ * bottom edge (matching a vehicle sitting on the ground, and lining up with ForksStrip's
+ * own bottom edge below the stack boxes). Carries the Unstage Aisle button (moved off
+ * Master Control's row to make room there — Fill All stays in Master Control since it acts
+ * on the stacks, not the aisle as a whole).
+ */
+/** `onClearForks` clears all 3 stacks' Aisle/Storage/Size/Qty (never Master Control) —
+ *  available to every role, unlike Unstage Aisle (which is back in Master Control's row,
+ *  see MasterControl) since clearing local, not-yet-submitted entry fields isn't
+ *  destructive the way unstaging real locations is. */
+function Cab({ onClearForks }: { onClearForks: () => void }) {
+  return (
+    <div className="relative shrink-0 h-full select-none" style={{ width: CAB_WIDTH }}>
+      <SpriteCrop
         src={Triple}
-        alt=""
-        className="absolute inset-0 w-full h-full object-contain opacity-90 pointer-events-none [transform:scaleX(-1)]"
+        imgW={TRIPLE_IMG_W}
+        imgH={TRIPLE_IMG_H}
+        crop={CAB_CROP}
+        className="absolute bottom-0 left-0 opacity-90 pointer-events-none"
+        style={{ width: CAB_WIDTH, height: CAB_HEIGHT, transform: 'scaleX(-1)' }}
       />
-      <div className="absolute left-3 top-3 flex flex-col gap-2">
+      {/* Shifted ~40px (the button's own height) below vertical center, per direct
+          instruction — was flush at true center, now sits noticeably lower on the cab. */}
+      <div className="absolute left-2 -translate-y-1/2" style={{ top: 'calc(50% + 40px)' }}>
         <button
           type="button"
-          onClick={onFillAll}
-          disabled={fillAllDisabled}
-          className="h-[44px] px-5 rounded-[10px] font-ui text-[14px] font-semibold bg-[#003366] hover:bg-[#004488] text-white disabled:opacity-40 transition-colors"
+          onClick={onClearForks}
+          className="h-[40px] px-4 rounded-[10px] font-ui text-[13px] font-bold bg-[#CC0000] hover:bg-[#DD0000] text-white transition-colors shadow-[0_0_20px_4px_rgba(204,0,0,0.35)]"
         >
-          Fill All
+          Clear Forks
         </button>
-        {isIM && (
-          // Larger and red (issue #74) — its destructive nature (clears staged locations)
-          // should stand out, now doubly so since it lives right next to Fill All.
-          <button
-            type="button"
-            onClick={onUnstage}
-            className="h-[56px] px-6 rounded-[10px] font-ui text-[16px] font-bold bg-[#CC0000] hover:bg-[#DD0000] text-white transition-colors shadow-[0_0_20px_4px_rgba(204,0,0,0.35)]"
-          >
-            Unstage Aisle
-          </button>
-        )}
       </div>
     </div>
+  );
+}
+
+/** The fork bar, stretched to span whatever width its flex/fluid container gives it —
+ *  rendered directly below the stack-box row (in normal flex flow, not layered underneath
+ *  it) so the bar stays visible as a "shelf" the pallets read as sitting on, exactly
+ *  matching the space the stack boxes occupy above it. */
+function ForksStrip({ className }: { className?: string }) {
+  return (
+    <SpriteCrop
+      src={Triple}
+      imgW={TRIPLE_IMG_W}
+      imgH={TRIPLE_IMG_H}
+      crop={FORK_CROP}
+      className={`opacity-90 pointer-events-none shrink-0 ${className ?? ''}`}
+      style={{ height: FORK_HEIGHT, transform: 'scaleX(-1)' }}
+    />
   );
 }
 
@@ -532,98 +876,53 @@ function NoMatches({ text }: { text: string }) {
   return <p className="font-ui text-[14px] text-[#555] text-center py-4">{text}</p>;
 }
 
-/** ELZ-format read-only display: physical layout grid (left, unfiltered) + zone summary
- *  (right, narrowed by whichever of storageCode/size the caller supplied) — same JSX/
- *  formatting pattern as ELZPage.tsx's zone summary panel. Not interactive, per Feature 2's
- *  spec (this format is always a read-only display, matching ELZ itself). */
-function ElzFormat({ result, label }: { result: ZoneMapResult; label: string }) {
+/** ELZ-format read-only display: physical layout grid (left, unfiltered) + a "Displaying
+ *  Aisle {aisle}" header over a split right-hand column — zone summary (narrowed by
+ *  whichever of storageCode/size the caller supplied) on the left half, the session's
+ *  staging log (STG-only content, not part of ELZ itself) on the right half, filling what
+ *  was previously wasted empty space there (v1.6.6 — expanded to match ELZ's own grid
+ *  sizing/spacing exactly, `dense` dropped for the same reason). Grid + summary are
+ *  read-only, per Feature 2's spec (this format is always a read-only display, matching
+ *  ELZ itself) — the log half keeps its own normal tap-to-expand interaction. */
+function ElzFormat({ result, label, aisle }: { result: ZoneMapResult; label: string; aisle: string }) {
   return (
     <div className="flex-1 flex gap-4 overflow-hidden px-4 py-3">
       <div className="flex-[6] overflow-hidden">
-        <AisleGrid levels={result.levels} zoneBinRanges={result.zoneBinRanges} dense />
+        <AisleGrid levels={result.levels} zoneBinRanges={result.zoneBinRanges} />
       </div>
-      <div className="flex-[4] overflow-y-auto border-l border-[#2A2A2A] pl-4">
-        {result.zoneSummary.length === 0 ? (
-          <NoMatches text={`No open ${label} locations in this aisle`} />
-        ) : (
-          result.zoneSummary.map((z) => (
-            <div key={z.zone} className="mb-3">
-              <span className="font-ui text-[14px] font-semibold text-white">Zone {z.zone}</span>
-              <div className="flex flex-col gap-1 mt-1">
-                {z.breakdown.map((b) => (
-                  <div key={`${b.storageCode}-${b.size}`} className="flex items-center justify-between">
-                    <span className="font-data text-[13px] text-[#CFCFCF]">{b.storageCode}-{b.size}</span>
-                    <CellValue empty={b.empty} staged={b.staged} />
+      <div className="flex-[4] min-h-0 flex flex-col overflow-hidden border-l border-[#2A2A2A] pl-4">
+        <span className="font-ui text-[13px] font-semibold text-white uppercase tracking-wider shrink-0 mb-2">
+          Displaying Aisle {aisle}
+        </span>
+        <div className="flex-1 min-h-0 flex gap-3 overflow-hidden">
+          <div className="flex-1 overflow-y-auto">
+            {result.zoneSummary.length === 0 ? (
+              <NoMatches text={`No open ${label} locations in this aisle`} />
+            ) : (
+              result.zoneSummary.map((z) => (
+                <div key={z.zone} className="mb-3">
+                  <span className="font-ui text-[14px] font-semibold text-white">Zone {z.zone}</span>
+                  {/* Badges wrap horizontally (v1.6.6) rather than one type per line, so
+                      STG's narrower summary half stays compact — matching-color pill per
+                      Storage Code, same palette AisleGrid's own cells use. */}
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {z.breakdown.map((b) => (
+                      <ZoneCodeBadge key={`${b.storageCode}-${b.size}`} storageCode={b.storageCode} size={b.size} empty={b.empty} staged={b.staged} badgeSize="compact" />
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** ELA-format interactive list: aisle row headers, with size sub-rows nested beneath when
- *  not already narrowed to one exact size. Only the aisle-number / size-label text itself is
- *  a tap target — the counts/data area is a plain span, so a scroll swipe starting over the
- *  numbers never fires a selection, per Feature 2's spec. */
-function ElaFormat({
-  rows, size, storageCode, onSelectAisle, onSelectSize,
-}: { rows: AisleRow[]; size: string; storageCode: string; onSelectAisle: (aisle: number) => void; onSelectSize: (size: string) => void }) {
-  if (rows.length === 0) {
-    return <NoMatches text={`No open ${storageCode}${size ? `-${size}` : ''} locations`} />;
-  }
-
-  if (size) {
-    // Already narrowed to one exact freight type — no sub-rows needed; sort/display by
-    // that specific size's own empty count (a row's `sizes` still lists every size present
-    // in that aisle, not just the queried one).
-    const sorted = [...rows].sort((a, b) => {
-      const av = a.sizes.find((s) => s.size === size)?.empty ?? 0;
-      const bv = b.sizes.find((s) => s.size === size)?.empty ?? 0;
-      return bv - av;
-    });
-    return (
-      <div className="flex-1 overflow-y-auto px-4">
-        {sorted.map((r) => {
-          const cell = r.sizes.find((s) => s.size === size);
-          return (
-            <div key={r.aisle} className="flex items-center justify-between py-3 border-b border-[#1A1A1A] last:border-b-0">
-              <button type="button" onClick={() => onSelectAisle(r.aisle)} className="font-data text-[20px] font-semibold text-white">
-                Aisle {r.aisle}
-              </button>
-              <span>{cell && <CellValue empty={cell.empty} staged={cell.staged} large />}</span>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 overflow-y-auto px-4">
-      {rows.map((r) => (
-        <div key={r.aisle} className="py-3 border-b border-[#1A1A1A] last:border-b-0">
-          <button type="button" onClick={() => onSelectAisle(r.aisle)} className="font-data text-[20px] font-semibold text-white">
-            Aisle {r.aisle}
-          </button>
-          <div className="flex flex-col gap-1 mt-2 pl-3">
-            {r.sizes.filter((s) => s.empty > 0 || s.staged > 0).map((s) => (
-              <div key={s.size} className="flex items-center justify-between">
-                <button type="button" onClick={() => onSelectSize(s.size)} className="font-data text-[14px] text-[#CFCFCF]">
-                  {s.size}
-                </button>
-                <span><CellValue empty={s.empty} staged={s.staged} /></span>
-              </div>
-            ))}
+                </div>
+              ))
+            )}
+          </div>
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden border-l border-[#2A2A2A] pl-3">
+            <LogPanel variant="inline" />
           </div>
         </div>
-      ))}
+      </div>
     </div>
   );
 }
+
 
 /**
  * Live matching-aisle/zone info panel (DevNotes/DesignPrompts/Feature-2-STG-Live-Matching-
@@ -644,6 +943,9 @@ function InfoPanel({ aisle, storageCode, size }: { aisle: string; storageCode: s
   const [zoneResult, setZoneResult] = useState<ZoneMapResult | null>(null);
   const [aisleRows, setAisleRows] = useState<AisleRow[] | null>(null);
   const [notFound, setNotFound] = useState(false);
+  // ela-mode sort state — mirrors ELA's own page exactly (same default-sort logic below,
+  // same flip-on-repeat-tap handler), since this is meant to be the literal same table.
+  const [sort, setSort] = useState<AisleSizeSort>({ column: 'aisle', direction: 'asc' });
 
   const mode: 'none' | 'elz' | 'ela' = aisle ? 'elz' : storageCode ? 'ela' : 'none';
 
@@ -674,6 +976,9 @@ function InfoPanel({ aisle, storageCode, size }: { aisle: string; storageCode: s
           }
         });
     } else {
+      // Default sort matches what was actually searched for (same rule as ELA's own page):
+      // the queried size's own count when one was given, otherwise Aisle number.
+      setSort(size ? { column: size, direction: 'desc' } : { column: 'aisle', direction: 'asc' });
       const params = new URLSearchParams({ storageCode });
       if (size) params.set('size', size);
       apiFetch<AisleRow[]>(`/api/locations/empty-by-aisle?${params.toString()}`, token!)
@@ -701,84 +1006,164 @@ function InfoPanel({ aisle, storageCode, size }: { aisle: string; storageCode: s
         </div>
       );
     }
+    // Cannot stage XS aisles (STG's open Zone-Map checklist item) — checked against the
+    // grid's own cells (every location in the aisle, not the narrowed zoneSummary), since
+    // an aisle mixing sizes isn't expected to exist, but this only trips when *every*
+    // present location is XS rather than assuming from a single cell.
+    const allCells = zoneResult.levels.flatMap((l) => l.cells);
+    const isXsAisle = allCells.length > 0 && allCells.every((c) => c.size === 'XS');
+    if (isXsAisle) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="font-ui text-[18px] font-semibold text-[#CC4444]">Cannot stage XS aisles</p>
+        </div>
+      );
+    }
     const label = storageCode && size ? `${storageCode}-${size}` : storageCode || size || '';
     return (
-      <div className="shrink-0 max-h-[420px] overflow-hidden flex flex-col">
-        <ElzFormat result={zoneResult} label={label} />
+      <div className="flex-1 min-h-0 flex flex-col">
+        <ElzFormat result={zoneResult} label={label} aisle={aisle} />
       </div>
     );
   }
 
   if (!aisleRows) return null;
+  // Same "always show a header" rule as the ELZ-mode branch above (the open STG checklist
+  // item — "the bottom container should always maintain a header... to avoid confusion from
+  // multiple selections"), which this ELA-mode branch never carried before.
+  const elaLabel = storageCode && size ? `${storageCode}-${size}` : storageCode || size;
   return (
-    <div className="shrink-0 max-h-[420px] overflow-hidden flex flex-col">
-      <ElaFormat
-        rows={aisleRows}
-        size={size}
-        storageCode={storageCode}
-        onSelectAisle={(a) => setMaster({ aisle: String(a) })}
-        onSelectSize={(s) => setMaster({ size: s })}
-      />
+    <div className="flex-1 min-h-0 flex flex-col px-4 py-3 gap-2">
+      <span className="font-ui text-[13px] font-semibold text-white uppercase tracking-wider shrink-0">
+        Displaying {elaLabel}
+      </span>
+      {/* The literal same table ELA's own page uses (shared `AisleSizeTable` — sortable
+          Aisle/Size columns, tap a header to sort, tap a row to select), not a STG-specific
+          re-derivation — tapping a row commits straight to Master Control's Aisle instead
+          of ELA's own toggle-then-separate-button flow, since there's no second screen to
+          navigate to here. */}
+      {aisleRows.length === 0 ? (
+        <NoMatches text={`No empty or staged locations found for ${storageCode}${size ? ` — ${size}` : ''}`} />
+      ) : (
+        <div className="flex-1 min-h-0 flex flex-col border border-[#2A2A2A] rounded-[12px] overflow-hidden">
+          <AisleSizeTable
+            rows={aisleRows}
+            sort={sort}
+            onSortChange={(column) => setSort((prev) => (prev.column === column
+              ? { column, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+              : { column, direction: column === 'aisle' ? 'asc' : 'desc' }))}
+            onSelectAisle={(a) => setMaster({ aisle: String(a) })}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 // ── Log panel ────────────────────────────────────────────────────────────────
 
-/** Collapsed 2-line preview of the session's staging log; tap to expand into a full scrollable modal. */
-function LogPanel() {
-  const { log, logExpanded, setLogExpanded } = useStaging();
-  const preview = log.slice(0, 2);
+/** The full scrollable log history, shared by both LogPanel variants below — a tap on
+ *  either preview opens this same modal. */
+function LogExpandedModal({ onClose }: { onClose: () => void }) {
+  const { log } = useStaging();
+  return (
+    <div className="absolute inset-0 bg-black/90 z-40 flex flex-col" onClick={onClose}>
+      <div
+        className="mx-auto mt-6 w-[900px] max-h-[80%] bg-[#0D0D0D] border border-[#2A2A2A] rounded-[16px] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[#2A2A2A]">
+          <span className="font-ui text-[16px] font-semibold text-white">Staging Log</span>
+          <button type="button" onClick={onClose} className="font-ui text-[14px] text-[#9A9A9A] hover:text-white">
+            Close
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-3 flex flex-col gap-2">
+          {log.length === 0 ? (
+            <p className="font-ui text-[15px] text-[#555]">No staging activity this session</p>
+          ) : (
+            log.map((entry) => (
+              <div key={entry.id} className="flex items-center justify-between border-b border-[#1A1A1A] pb-2">
+                <span className={`font-ui text-[14px] ${entry.warning ? 'text-[#AA8800]' : 'text-[#CFCFCF]'}`}>
+                  {entry.text}
+                </span>
+                <span className="font-data text-[12px] text-[#555]">{entry.timestamp.toLocaleTimeString()}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
+/**
+ * Preview of the session's staging log; tap opens the full scrollable modal
+ * (`LogExpandedModal`) for anything beyond what's visible. Two variants (v1.6.6):
+ * - `bottom` (default) — fixed-height, 3-column-by-3-line strip pinned to the bottom of the
+ *   content slot; used whenever Master Control's Aisle is empty (nothing for `inline` to
+ *   sit beside).
+ * - `inline` — a single-column list filling whatever height its own flex slot gives it,
+ *   used inside `ElzFormat`'s zone-summary column once an Aisle is entered, so the log
+ *   moves into space that would otherwise sit empty next to the zone summary rather than
+ *   also rendering at the bottom.
+ */
+function LogPanel({ variant = 'bottom' }: { variant?: 'bottom' | 'inline' }) {
+  const { log, logExpanded, setLogExpanded } = useStaging();
+
+  if (variant === 'inline') {
+    const recent = log.slice(0, 9);
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setLogExpanded(!logExpanded)}
+          className="flex-1 min-h-0 flex flex-col gap-1 overflow-y-auto text-left hover:bg-[#0D0D0D] transition-colors rounded-[8px]"
+        >
+          {recent.length === 0 ? (
+            <span className="font-ui text-[13px] text-[#555]">No staging activity this session</span>
+          ) : (
+            recent.map((entry) => (
+              <span
+                key={entry.id}
+                className={`font-ui text-[13px] truncate ${entry.warning ? 'text-[#AA8800]' : 'text-[#9A9A9A]'}`}
+              >
+                {entry.text}
+              </span>
+            ))
+          )}
+        </button>
+        {logExpanded && <LogExpandedModal onClose={() => setLogExpanded(false)} />}
+      </>
+    );
+  }
+
+  const columns = chunkBy(log.slice(0, 9), 3);
   return (
     <div className="shrink-0 border-t border-[#1C1C1C]">
       <button
         type="button"
         onClick={() => setLogExpanded(!logExpanded)}
-        className="w-full flex flex-col gap-1 px-5 py-2 hover:bg-[#0D0D0D] transition-colors text-left"
+        className="w-full h-[76px] flex items-center gap-5 px-5 py-2 hover:bg-[#0D0D0D] transition-colors text-left overflow-hidden"
       >
         {log.length === 0 ? (
           <span className="font-ui text-[13px] text-[#555]">No staging activity this session — tap to expand</span>
         ) : (
-          preview.map((entry) => (
-            <span
-              key={entry.id}
-              className={`font-ui text-[13px] ${entry.warning ? 'text-[#AA8800]' : 'text-[#9A9A9A]'}`}
-            >
-              {entry.text}
-            </span>
+          columns.map((col, ci) => (
+            <div key={ci} className="flex-1 min-w-0 flex flex-col gap-1 leading-tight">
+              {col.map((entry) => (
+                <span
+                  key={entry.id}
+                  className={`font-ui text-[13px] truncate ${entry.warning ? 'text-[#AA8800]' : 'text-[#9A9A9A]'}`}
+                >
+                  {entry.text}
+                </span>
+              ))}
+            </div>
           ))
         )}
       </button>
-      {logExpanded && (
-        <div className="absolute inset-0 bg-black/90 z-40 flex flex-col" onClick={() => setLogExpanded(false)}>
-          <div
-            className="mx-auto mt-6 w-[900px] max-h-[80%] bg-[#0D0D0D] border border-[#2A2A2A] rounded-[16px] flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 py-3 border-b border-[#2A2A2A]">
-              <span className="font-ui text-[16px] font-semibold text-white">Staging Log</span>
-              <button type="button" onClick={() => setLogExpanded(false)} className="font-ui text-[14px] text-[#9A9A9A] hover:text-white">
-                Close
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-5 py-3 flex flex-col gap-2">
-              {log.length === 0 ? (
-                <p className="font-ui text-[15px] text-[#555]">No staging activity this session</p>
-              ) : (
-                log.map((entry) => (
-                  <div key={entry.id} className="flex items-center justify-between border-b border-[#1A1A1A] pb-2">
-                    <span className={`font-ui text-[14px] ${entry.warning ? 'text-[#AA8800]' : 'text-[#CFCFCF]'}`}>
-                      {entry.text}
-                    </span>
-                    <span className="font-data text-[12px] text-[#555]">{entry.timestamp.toLocaleTimeString()}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {logExpanded && <LogExpandedModal onClose={() => setLogExpanded(false)} />}
     </div>
   );
 }
@@ -849,11 +1234,15 @@ function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }
     setRows((prev) => ({ ...prev, [key]: { ...prev[key], active: !prev[key].active } }));
   }
 
+  /** Clamps a raw typed value to a row's max, defaulting to 0 for empty/invalid input. */
+  function clampQuantity(raw: string, max: number): number {
+    const n = parseInt(raw, 10);
+    return !raw || isNaN(n) ? 0 : Math.min(n, max);
+  }
+
   /** Sets a row's quantity, clamping to that row's max — used by the numpad submit, Max, and Clear Restage. */
   function setQuantity(key: string, raw: string, max: number) {
-    const n = parseInt(raw, 10);
-    const clamped = !raw || isNaN(n) ? '0' : String(Math.min(n, max));
-    setRows((prev) => ({ ...prev, [key]: { ...prev[key], quantity: clamped } }));
+    setRows((prev) => ({ ...prev, [key]: { ...prev[key], quantity: String(clampQuantity(raw, max)) } }));
   }
 
   /** Submits the active rows' quantities via POST /api/staging/restage and reports a per-type summary. */
@@ -862,16 +1251,21 @@ function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }
     setApplying(true);
     setTimeout(() => setApplying(false), 1000);
     const aisleNum = parseInt(aisle, 10);
-    const activeTypes = types.filter((t) => rows[typeKey(t)]?.active);
+    // Fix STG#02: read each row's *live* qtyField value (not just the already-committed
+    // `rows` state) — a typed-but-unconfirmed digit sequence (no Enter/OK pressed yet)
+    // only ever lands in the field itself, so relying on `rows` alone silently dropped it.
+    const activeTypes = types
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => rows[typeKey(t)]?.active);
     try {
       const { results } = await apiFetch<RestageResponse>('/api/staging/restage', token!, {
         method: 'POST',
         body: JSON.stringify({
           aisle: aisleNum,
-          types: activeTypes.map((t) => ({
+          types: activeTypes.map(({ t, i }) => ({
             storageCode: t.storageCode,
             size: t.size,
-            quantity: parseInt(rows[typeKey(t)].quantity, 10) || 0,
+            quantity: clampQuantity(qtyFields[i]?.value ?? rows[typeKey(t)]?.quantity ?? '0', t.max),
           })),
         }),
       });
@@ -923,14 +1317,24 @@ function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }
                   key={key}
                   className={`flex items-center gap-4 px-4 py-3 rounded-[12px] border ${row.active ? 'border-[#3A3A3A] bg-[#111111]' : 'border-[#2A2A2A] bg-[#0A0A0A]'}`}
                 >
+                  {/* STG#07 + the MASTER-CHECKLIST follow-up refining it: the type bubble
+                      itself is the active/inactive toggle — no separate checkbox — starting
+                      selected (red background, white text) and "clicking off" to a
+                      transparent background, not a separate dark-gray inactive fill. Kept
+                      outside the row's opacity/pointer-events wrapper below so it stays
+                      clickable even while the rest of the row dims/disables. */}
                   <button
                     type="button"
                     onClick={() => toggleActive(key)}
+                    aria-pressed={row.active}
                     aria-label={`${row.active ? 'Deactivate' : 'Activate'} ${key}`}
-                    className={`w-[40px] h-[40px] rounded-full border-2 shrink-0 transition-colors ${row.active ? 'bg-[#CC0000] border-[#CC0000]' : 'bg-[#0D0D0D] border-[#3A3A3A]'}`}
-                  />
+                    className={`shrink-0 w-[100px] h-[40px] rounded-full border-2 flex items-center justify-center font-data text-[16px] font-semibold transition-colors ${
+                      row.active ? 'border-[#CC0000] bg-[#CC0000] text-white' : 'border-[#3A3A3A] bg-transparent text-[#666] hover:border-[#555]'
+                    }`}
+                  >
+                    {key}
+                  </button>
                   <div className={`flex-1 flex items-center gap-4 transition-opacity ${row.active ? '' : 'opacity-60 pointer-events-none'}`}>
-                    <span className="font-data text-[20px] font-semibold text-white w-[100px]">{key}</span>
                     <div className="flex items-center gap-2">
                       <span className="font-ui text-[13px] text-[#9A9A9A] uppercase tracking-wider">Qty</span>
                       <button
@@ -987,11 +1391,29 @@ function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }
 
 // ── Master control bar ────────────────────────────────────────────────────────
 
-/** Top control bar: shared Aisle/StorageCode/Size and the manual Refresh button (issue
- *  #76). "Fill All" and "Unstage Aisle" moved onto the fork graphic itself (issue #77). */
-function MasterControl({ onRefresh }: { onRefresh: () => void }) {
+/**
+ * Top control bar, labeled "Master Control" (v1.6.6). Three elements spaced
+ * `justify-between` below the label — Fill All + (IM+) Unstage Aisle (moved back here after
+ * briefly living on the Cab graphic — Clear Forks took that spot instead, see Cab), the
+ * shared Aisle/StorageCode/Size fields, and Refresh. Refresh sits here (not in its own row
+ * above the Locations panel) specifically so it lands immediately left of the Locations
+ * column — Master Control's row ends exactly where that column begins, so the last
+ * `justify-between` element reads as "against the Locations box" without needing its own
+ * dedicated space that would otherwise eat into Locations' height. `justify-between` (not
+ * a `grid-cols-3`) per direct instruction — the field group's position now depends on the
+ * other two elements' actual widths rather than always centering against the row's own
+ * full width regardless of them.
+ */
+function MasterControl({ isIM, onFillAll, fillAllDisabled, onUnstage, onRefresh }: {
+  isIM: boolean;
+  onFillAll: () => void;
+  fillAllDisabled: boolean;
+  onUnstage: () => void;
+  onRefresh: () => void;
+}) {
   const { master, setMaster } = useStaging();
   const { hidePanel } = useNumpad();
+  const { setMessage } = useMessageBar();
   // Fixed 3-character field — auto-commits like every other screen's Aisle field (ELZ/SDP/
   // LocationEntryFields), which Feature 2's live info panel relies on for its "no explicit
   // submit step" behavior, same reasoning as the Storage Code field below. padOnSubmit:
@@ -1017,24 +1439,84 @@ function MasterControl({ onRefresh }: { onRefresh: () => void }) {
     ? aisleTypes.sizesFor(master.storageCode || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
     : undefined;
 
-  return (
-    <div className="flex items-end justify-between pt-3 pb-4 border-b border-[#1C1C1C] shrink-0 px-4">
-      <div className="flex items-end gap-4">
-        <StorageCodeField value={master.storageCode} onChange={(v) => setMaster({ storageCode: v })} options={storageCodeOptions} size="compact" />
-        <FieldDisplay label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} width="w-[120px]" />
-        <SizeField value={master.size} onChange={(v) => setMaster({ size: v })} options={sizeOptions} size="compact" ariaLabel="Master Size" />
-      </div>
+  /** A typed value that isn't in the field's own (narrowed-or-full) options list never
+   *  flagged an error before — it just silently never matched anything downstream. Mirrors
+   *  the Aisle field's own invalid-entry message format. */
+  const handleInvalidStorage = useCallback(() => {
+    playAlert('error');
+    setMessage({ type: 'error', text: 'Master Control - Storage Code - Invalid Entry' });
+  }, [setMessage]);
+  const handleInvalidSize = useCallback(() => {
+    playAlert('error');
+    setMessage({ type: 'error', text: 'Master Control - Size - Invalid Entry' });
+  }, [setMessage]);
 
-      {/* Manual Refresh (issue #76) — reloads the live info panel and the front stack's
-          suggested location, independent of the automatic refresh already triggered by
-          field commits (issue #75 tracks that automatic path being slow). */}
-      <button
-        type="button"
-        onClick={onRefresh}
-        className="h-[44px] px-5 rounded-[10px] font-ui text-[14px] font-semibold border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
-      >
-        Refresh
-      </button>
+  return (
+    <div className="pt-3 pb-4 border-b border-[#1C1C1C] shrink-0 px-4">
+      <div className="text-center">
+        <span className="font-ui text-[24px] font-bold text-[#9A9A9A] uppercase tracking-wider">
+          Master Control
+        </span>
+      </div>
+      {/* Three elements spaced space-between (v1.6.6) — Fill All/Unstage, the field group,
+          and Refresh — rather than a grid's guaranteed true-centering; the field group's
+          position now depends on the other two elements' widths, per direct instruction. */}
+      <div className="flex items-end justify-between mt-2">
+        <div className="flex items-end gap-2">
+          <button
+            type="button"
+            onClick={onFillAll}
+            disabled={fillAllDisabled}
+            className="h-[44px] px-5 rounded-[10px] font-ui text-[14px] font-semibold bg-[#003366] hover:bg-[#004488] text-white disabled:opacity-40 transition-colors"
+          >
+            Fill All
+          </button>
+          {isIM && (
+            // Red outline (v1.6.6 — swapped with Clear Forks' solid fill, see Cab) — its
+            // destructive nature (clears staged locations) should still stand out, sized to
+            // match Fill All rather than larger, per direct instruction.
+            <button
+              type="button"
+              onClick={onUnstage}
+              className="h-[44px] px-5 rounded-[10px] font-ui text-[14px] font-bold border border-[#CC0000] text-[#CC0000] hover:bg-[#CC0000] hover:text-white transition-colors"
+            >
+              Unstage Aisle
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-end gap-4">
+          <StorageCodeField
+            value={master.storageCode}
+            onChange={(v) => setMaster({ storageCode: v })}
+            options={storageCodeOptions}
+            size="compact"
+            strict
+            onInvalid={handleInvalidStorage}
+          />
+          <FieldDisplay label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} width="w-[120px]" />
+          <SizeField
+            value={master.size}
+            onChange={(v) => setMaster({ size: v })}
+            options={sizeOptions}
+            size="compact"
+            ariaLabel="Master Size"
+            strict
+            onInvalid={handleInvalidSize}
+          />
+        </div>
+
+        {/* Manual Refresh (issue #76) — reloads the live info panel and the front stack's
+            suggested location, independent of the automatic refresh already triggered by
+            field commits (issue #75 tracks that automatic path being slow). */}
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="h-[44px] px-5 rounded-[10px] font-ui text-[14px] font-semibold border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
+        >
+          Refresh
+        </button>
+      </div>
     </div>
   );
 }
@@ -1051,6 +1533,13 @@ function STGScreen() {
   const { stacks, updateStack, master, setMaster, bumpDataVersion } = useStaging();
   const [unstageOpen, setUnstageOpen] = useState(false);
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
+
+  // Left column's own measured height (Master Control + the graphic row) — genuinely
+  // content-independent (the graphic row is hard-pinned to 270px, Master Control's height
+  // never depends on the fork queue), so it's a safe, non-circular anchor for LocationsPanel's
+  // own height. See LocationsPanel's own comment for why measuring *its own* content instead
+  // caused a runaway bubble-growth loop.
+  const [leftColRef, leftColSize] = useElementSize<HTMLDivElement>();
 
   // Pre-population from ELA "Stage Aisle" / ELZ "Stage Aisle" — see STG.md's
   // Pre-population section. Only applies to Master Control, never the fork/stack slots
@@ -1082,6 +1571,15 @@ function STGScreen() {
   // Nothing left for Fill All to do once every slot already has its own Quantity.
   const allStacksHaveQuantity = stacks.every((s) => !!s.quantity);
 
+  /** Clears all 3 stacks' Aisle/Storage/Size/Qty (and any computed locations/shortfall) —
+   *  Master Control is untouched. Available to every role, unlike Unstage Aisle (which
+   *  acts on real, already-staged locations — this only clears local, unsubmitted entry). */
+  function clearForks() {
+    ([0, 1, 2] as const).forEach((i) => updateStack(i, {
+      aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0,
+    }));
+  }
+
   /** Manual Refresh (issue #76): reloads the live info panel and the front slot's suggestion without changing any field. */
   function handleRefresh() {
     bumpDataVersion();
@@ -1090,34 +1588,66 @@ function STGScreen() {
 
   return (
     <div className="absolute inset-0 flex flex-col select-none">
-      <MasterControl onRefresh={handleRefresh} />
+      {/* v1.6.6: Locations pulled out of the graphic row into its own right-hand column,
+          spanning the combined height of Master Control + the graphic row. Explicitly
+          measured (`leftColRef`/`leftColSize`) and passed down as `height` rather than left
+          to the row's default `items-stretch` — stretch alone let LocationsPanel's own
+          (bubble-count-dependent) content height feed back into the row's own height
+          computation, which caused a real runaway bubble-growth bug at 3+ pallets; see
+          LocationsPanel's own comment. Refresh renders inside Master Control's own row
+          (right-justified) rather than above Locations, so it lands immediately left of the
+          Locations column without eating into Locations' height. */}
+      <div className="flex gap-3 mx-4 mt-3">
+        <div ref={leftColRef} className="flex-1 min-w-0 flex flex-col">
+          <MasterControl
+            isIM={isIM}
+            onFillAll={fillAll}
+            fillAllDisabled={!master.aisle || !master.storageCode || allStacksHaveQuantity}
+            onUnstage={() => setUnstageOpen(true)}
+            onRefresh={handleRefresh}
+          />
 
-      {/* Explicit height (not just items-stretch) so each stack box's and the Locations
-          panel's internal flex-1/min-h-0 chains have a real bound to shrink against —
-          matching the old ForkGraphicArea's `top-0 bottom-[20%]` absolute-positioning
-          trick, which gave its StackPanel children the same kind of implicit bounded
-          height. Without this, content overflows past 270px and gets hidden under the
-          bottom-right Numpad panel. */}
-      <div className="flex items-stretch gap-3 mx-4 mt-3 h-[270px]">
-        <TripleGraphic
-          isIM={isIM}
-          onFillAll={fillAll}
-          fillAllDisabled={!master.aisle || !master.storageCode || !master.size || allStacksHaveQuantity}
-          onUnstage={() => setUnstageOpen(true)}
-        />
-        {/* Issue #81: three independent stack boxes ride the forks; index 2 (back, closest
-            to the mast) renders leftmost, index 0 (front, "the end of the forks") renders
-            rightmost, right next to the Locations panel that's wired to it exclusively. */}
-        <StackBox index={2} />
-        <StackBox index={1} />
-        <StackBox index={0} />
-        <LocationsPanel />
+          {/* Explicit height (not just items-stretch) so each stack box's internal
+              flex-1/min-h-0 chain has a real bound to shrink against — matching the old
+              ForkGraphicArea's `top-0 bottom-[20%]` absolute-positioning trick, which gave
+              its StackPanel children the same kind of implicit bounded height. Without
+              this, content overflows past 270px and gets hidden under the bottom-right
+              Numpad panel. */}
+          {/* No gap between Cab and the stacks/forks column (v1.6.6) — ForksStrip's left
+              edge butts directly against Cab's right edge so the two crops read as one
+              continuous graphic instead of two visibly separate pieces. */}
+          <div className="flex items-stretch mt-3 h-[270px]">
+            <Cab onClearForks={clearForks} />
+            {/* Stacks sit above ForksStrip, not layered over a stretched whole-image — see
+                this file's Fork graphic section for why. The strip's w-full spans exactly
+                this column's width, i.e. exactly the space the three stacks occupy above
+                it, so it reads as the shelf they're resting on. Issue #81's stack ordering
+                is unchanged: index 2 (back, closest to the mast) renders leftmost, index 0
+                (front, "the end of the forks") renders rightmost. */}
+            <div className="flex-1 min-w-0 flex flex-col gap-1">
+              <div className="flex-1 min-h-0 flex gap-2">
+                <StackBox index={2} />
+                <StackBox index={1} />
+                <StackBox index={0} />
+              </div>
+              <ForksStrip className="w-full" />
+            </div>
+          </div>
+        </div>
+
+        <LocationsPanel height={leftColSize.height || undefined} />
       </div>
 
       <div className="flex-1 flex flex-col overflow-y-auto border-t border-[#1C1C1C] mt-3">
         <InfoPanel aisle={master.aisle} storageCode={master.storageCode} size={master.size} />
-        <LogPanel />
       </div>
+
+      {/* Fixed-height, pinned to the bottom of the content slot (i.e. right above the
+          Footer) rather than sharing InfoPanel's scroll area — v1.6.6. Only rendered here
+          while Master Control's Aisle is empty; once an Aisle is entered, ElzFormat renders
+          an `inline` LogPanel of its own inside the zone-summary column instead, so the log
+          doesn't render twice. */}
+      {!master.aisle && <LogPanel />}
 
       {unstageOpen && (
         <UnstageModal aisle={master.aisle || stacks[0].aisle} onClose={() => setUnstageOpen(false)} />

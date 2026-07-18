@@ -19,6 +19,10 @@ interface StorageCodeFieldProps {
    *  explicit Enter/OK — see CodePickerField's own doc. Off by default; every existing
    *  call site (SDP/STG/LII/ELZ) keeps today's behavior unless it opts in. */
   closeOnAutoSubmit?: boolean;
+  /** See CodePickerField's own doc — rejects a typed value not present in `options`
+   *  (or the full reference list, if `options` is omitted) instead of committing it. */
+  strict?: boolean;
+  onInvalid?: (code: string) => void;
 }
 
 /**
@@ -29,7 +33,7 @@ interface StorageCodeFieldProps {
  * what's actually present when the caller knows enough context to narrow, or the full
  * `GET /api/storage-codes` reference list otherwise.
  */
-export function StorageCodeField({ value, onChange, options, size = 'default', width, label = 'Storage Code', disabled = false, closeOnAutoSubmit = false }: StorageCodeFieldProps) {
+export function StorageCodeField({ value, onChange, options, size = 'default', width, label = 'Storage Code', disabled = false, closeOnAutoSubmit = false, strict = false, onInvalid }: StorageCodeFieldProps) {
   // Always called (Rules of Hooks) — its cached result is simply unused once the caller
   // supplies a narrowed `options` list.
   const fullList = useStorageCodes();
@@ -49,6 +53,8 @@ export function StorageCodeField({ value, onChange, options, size = 'default', w
       ariaLabel={label}
       disabled={disabled}
       closeOnAutoSubmit={closeOnAutoSubmit}
+      strict={strict}
+      onInvalid={onInvalid}
     />
   );
 }
