@@ -18,9 +18,12 @@ test.describe('IID — Item ID Lookup', () => {
     await expect(page.getByText('Short Description', { exact: true })).toBeVisible();
   });
 
-  test('an unknown DPCI shows a not-found error and clears the DPCI field', async ({ page }) => {
+  test('an unknown DPCI shows a not-found error and leaves the bad DPCI visible', async ({ page }) => {
     await page.getByRole('button', { name: '✗ Bad DPCI' }).click();
     await expect(page.getByText('Item not found')).toBeVisible();
+    // v1.6.8 — the bad DPCI stays in the boxes (not cleared) so the worker can see what
+    // didn't resolve, rather than the boxes reverting to "—".
+    await expect(page.getByRole('button', { name: 'Dept' })).toHaveText('999');
   });
 
   test('entering a UPC clears the DPCI fields', async ({ page }) => {

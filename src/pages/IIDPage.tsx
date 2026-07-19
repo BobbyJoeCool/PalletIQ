@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
@@ -25,6 +25,7 @@ interface ItemData {
   descShort: string;
   retailPrice: number;
   cost: number;
+  unitWeight: number | null;
   packingZoneCode: number;
   storageCode: string;
   conveyable: boolean;
@@ -36,10 +37,15 @@ interface ItemData {
  * See DevNotes/Screen-Specs/IID.md.
  */
 export function IIDPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { setMessage } = useMessageBar();
   const { hidePanel } = useNumpad();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  // PAR (Pallet Reinstate) is IM+ only — same role check as PARPage.tsx itself. Gates the
+  // "Reinstate Pallet" hot button below; PARPage independently re-enforces this on its own
+  // side (Access Denied for sub-IM), so this is a UX convenience, not the actual gate.
+  const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
 
   // DPCI entry is three separate fields (issue #16) instead of one combined field —
   // Dept auto-advances to Class, Class to Item, and Item auto-resolves the lookup once
@@ -59,7 +65,7 @@ export function IIDPage() {
   const deptValueRef = useRef('');
   const classValueRef = useRef('');
 
-  /** Looks up an item by DPCI via the API, clearing the UPC field on success (or the DPCI fields on failure). */
+  /** Looks up an item by DPCI via the API, clearing the UPC field on success. On failure, the bad DPCI stays visible in the three boxes (not cleared) so the worker can see what didn't resolve. */
   const loadByDpci = useCallback(async (v: string) => {
     const trimmed = v.trim();
     if (!trimmed) return;
@@ -81,9 +87,6 @@ export function IIDPage() {
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: 'Item not found' });
-      deptField.clear();
-      classField.clear();
-      itemField.clear();
       setItem(null);
     } finally {
       setLoading(false);
@@ -91,7 +94,7 @@ export function IIDPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, hidePanel]);
 
-  /** Looks up an item by UPC via the API, clearing the DPCI fields on success (or the UPC field on failure). */
+  /** Looks up an item by UPC via the API, clearing the DPCI fields on success. On failure, the bad UPC stays visible (not cleared) so the worker can see what didn't resolve. */
   const loadByUpc = useCallback(async (v: string) => {
     const trimmed = v.trim();
     if (!trimmed) return;
@@ -107,7 +110,6 @@ export function IIDPage() {
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: 'Item not found' });
-      upcField.clear();
       setItem(null);
     } finally {
       setLoading(false);
@@ -174,31 +176,35 @@ export function IIDPage() {
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
-  /** Fetches a random real DPCI from the API and looks it up, simulating a successful scan. */
+  /** Fetches a random real DPCI/UPC from the API and looks it up, simulating a successful scan — targets whichever entry method (DPCI or UPC) currently has focus. */
   const demoScan = useCallback(async () => {
     try {
-      const { dpci } = await apiFetch<{ dpci: string }>('/api/items/sample', token!);
-      void loadByDpci(dpci);
+      const data = await apiFetch<{ dpci: string; upc: string }>('/api/items/sample', token!);
+      if (upcField.isActive) void loadByUpc(data.upc);
+      else void loadByDpci(data.dpci);
     } catch {
       setMessage({ type: 'error', text: 'Demo scan unavailable' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, upcField.isActive]);
 
-  /** Looks up a DPCI that doesn't exist, simulating a not-found scan. */
-  const demoBad = useCallback(() => void loadByDpci('999-99-9999'), [loadByDpci]);
+  /** Looks up a DPCI/UPC that doesn't exist, simulating a not-found scan — targets whichever entry method currently has focus. */
+  const demoBad = useCallback(
+    () => (upcField.isActive ? void loadByUpc('999999999999') : void loadByDpci('999-99-9999')),
+    [upcField.isActive, loadByDpci, loadByUpc],
+  );
 
-  /** Footer demo-button slot content: a good scan and a bad scan trigger. */
+  /** Footer demo-button slot content: a good scan and a bad scan trigger. Labels switch to "...UPC" whenever the UPC field has focus, matching demoScan/demoBad's own targeting. */
   const demoSlot = useMemo(() => (
     <>
       <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">
-        ✓ Scan DPCI
+        {upcField.isActive ? '✓ Scan UPC' : '✓ Scan DPCI'}
       </button>
       <button type="button" onClick={demoBad} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#660000] hover:bg-[#770000] text-white transition-colors">
-        ✗ Bad DPCI
+        {upcField.isActive ? '✗ Bad UPC' : '✗ Bad DPCI'}
       </button>
     </>
-  ), [demoScan, demoBad]);
+  ), [demoScan, demoBad, upcField.isActive]);
 
   useDemoSlot(demoSlot);
 
@@ -265,16 +271,37 @@ export function IIDPage() {
       {loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
 
       {item && !loading && (
-        <div className="flex-1 flex flex-col overflow-y-auto max-w-[720px]">
-          <DataRow label="DPCI">{item.dpci}</DataRow>
-          <DataRow label="UPC">{item.upc}</DataRow>
-          <DataRow label="Name">{item.name}</DataRow>
-          <DataRow label="Short Description">{item.descShort}</DataRow>
-          <DataRow label="Description">{item.desc}</DataRow>
-          <DataRow label="Retail Price">${item.retailPrice.toFixed(2)}</DataRow>
-          <DataRow label="Cost">${item.cost.toFixed(2)}</DataRow>
-          <DataRow label="Storage Code">{item.storageCode}</DataRow>
-          <DataRow label="Conveyable">{item.conveyable ? 'Yes' : 'No'}</DataRow>
+        <div className="flex-1 flex flex-col overflow-y-auto max-w-[720px] gap-4">
+          <div className="flex flex-col">
+            <DataRow label="DPCI">{item.dpci}</DataRow>
+            <DataRow label="UPC">{item.upc}</DataRow>
+            <DataRow label="Name">{item.name}</DataRow>
+            <DataRow label="Short Description">{item.descShort}</DataRow>
+            <DataRow label="Description">{item.desc}</DataRow>
+            <DataRow label="Retail Price">${item.retailPrice.toFixed(2)}</DataRow>
+            <DataRow label="Cost">${item.cost.toFixed(2)}</DataRow>
+            <DataRow label="Unit Weight">{item.unitWeight != null ? `${item.unitWeight.toFixed(2)} lbs` : '—'}</DataRow>
+            <DataRow label="Storage Code">{item.storageCode}</DataRow>
+            <DataRow label="Conveyable">{item.conveyable ? 'Yes' : 'No'}</DataRow>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate(`/storage-inquiry?dpci=${item.dpci}`)}
+              className="self-start h-[56px] px-6 rounded-[12px] font-ui text-[16px] font-semibold bg-[#003366] hover:bg-[#004488] text-white transition-colors"
+            >
+              View Storage Locations
+            </button>
+            {isIM && (
+              <button
+                type="button"
+                onClick={() => navigate(`/pallet/reinstate?dpci=${item.dpci}`)}
+                className="self-start h-[56px] px-6 rounded-[12px] font-ui text-[16px] font-semibold bg-[#003366] hover:bg-[#004488] text-white transition-colors"
+              >
+                Reinstate Pallet
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

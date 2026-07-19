@@ -23,6 +23,11 @@ function randomDate(daysBack: number): Date {
   return new Date(Date.now() - randomInt(0, daysBack) * 86_400_000)
 }
 
+/** Returns a random unit weight in lbs (0.10–25.00), 2 decimal places, as a string for Decimal insertion. */
+function randomUnitWeight(): string {
+  return (randomInt(10, 2500) / 100).toFixed(2)
+}
+
 /** Converts a Date to a Julian-style date int (YYYY + zero-padded day-of-year), e.g. 2026175. */
 function julianDate(d: Date): number {
   const start = new Date(d.getFullYear(), 0, 0)
@@ -733,6 +738,7 @@ async function main() {
     retailPrice: String(retailPrice),
     cost: String(cost),
     requiresExpirationDate: FOOD_STORAGE_CODES.includes(rest.storageCode),
+    unitWeight: randomUnitWeight(),
   })), 100, (chunk) => prisma.item.createMany({ data: chunk as Parameters<typeof prisma.item.createMany>[0]['data'] }))
 
   // 4. Locations + Pallets

@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.6.8 — 2026-07-19](#168--2026-07-19)
 - [1.6.7 — 2026-07-18](#167--2026-07-18)
 - [1.6.6 — 2026-07-17](#166--2026-07-17)
 - [1.6.5 — 2026-07-16](#165--2026-07-16)
@@ -109,6 +110,42 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.6.8] — 2026-07-19
+
+IID and ISI's combined fix-and-polish pass, run together as one version rather than the
+usual one-screen-per-version cadence (direct instruction) — IID's single open item, ISI's
+3-item fix list, a new Item field, and an IM+ hot button into Pallet Reinstate.
+
+### 1.6.8 — Added
+
+- **IID: Unit Weight.** New nullable `Item.unitWeight` field (pounds, 2 decimals) —
+  read-only, "—" if the item hasn't been weighed.
+- **IID: "View Storage Locations" hot button**, navigating to ISI pre-populated with the
+  loaded item's DPCI — required actually building ISI's `?dpci=`/`?upc=` deep-link support
+  (previously described in ISI's own spec but never implemented).
+- **IID: "Reinstate Pallet" hot button, IM+ only**, navigating to PAR pre-populated with
+  the loaded item's DPCI — PAR gained matching `?dpci=` pre-population to receive it. A
+  Worker never sees this button; PAR independently re-enforces the same role gate itself.
+- **ISI: UPC search**, alongside the existing DPCI entry — new `GET
+  /api/items/upc/:upc/locations` endpoint mirroring the DPCI-keyed one.
+- **ISI: each result row now shows Pallets/Cartons/SSPs, VCP/SSP, and the pallet's
+  inherited Storage Code-Size**, plus the item's Short Description shown once above the
+  list — laid out as a labeled table with a sticky header row that stays visible while the
+  list scrolls.
+
+### 1.6.8 — Changed
+
+- **ISI: search results now survive navigating away and back**, via a new `ISIContext`
+  (mirrors `PIIContext`'s own per-screen pattern from v1.6.7, not a shared context).
+- **IID/ISI: a bad DPCI/UPC scan no longer clears the entry field(s)** — the bad value
+  stays visible so the worker can see what didn't resolve, instead of the fields reverting
+  to empty.
+- **IID/ISI: the "Scan"/"Bad" footer demo buttons now target UPC** whenever the UPC field
+  has focus, relabeling to "Scan UPC"/"Bad UPC" and exercising the UPC lookup path instead
+  of always testing DPCI.
 
 ---
 

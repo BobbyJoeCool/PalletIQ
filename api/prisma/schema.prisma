@@ -52,20 +52,23 @@ model Item {
   dept                   Int
   class                  Int
   item                   Int
-  upc                    String  @unique @db.NVarChar(12)
-  name                   String  @db.NVarChar(50)
-  desc                   String  @db.NVarChar(Max)
-  descShort              String  @db.NVarChar(155)
-  retailPrice            Decimal @db.Decimal(10, 2)
-  cost                   Decimal @db.Decimal(10, 2)
+  upc                    String   @unique @db.NVarChar(12)
+  name                   String   @db.NVarChar(50)
+  desc                   String   @db.NVarChar(Max)
+  descShort              String   @db.NVarChar(155)
+  retailPrice            Decimal  @db.Decimal(10, 2)
+  cost                   Decimal  @db.Decimal(10, 2)
   packingZoneCode        Int
-  storageCode            String  @db.NVarChar(2)
-  conveyable             Boolean @default(true)
+  storageCode            String   @db.NVarChar(2)
+  conveyable             Boolean  @default(true)
   // Per-DPCI setting (not derived from Storage Code) — food items are seeded true, but this
   // is meant to be configurable per item rather than a blanket category rule. Drives PII's
   // Expiration Date requirement messaging on pallets of this item; the pallet's own
   // `expirationDate` stays nullable at the DB level regardless (see Pallet.expirationDate).
-  requiresExpirationDate Boolean @default(false)
+  requiresExpirationDate Boolean  @default(false)
+  // v1.6.8 — displayed on IID; nullable since not every item has been weighed yet. Pounds,
+  // 2 decimal places.
+  unitWeight             Decimal? @db.Decimal(10, 2)
 
   packingZone PackingZone @relation(fields: [packingZoneCode], references: [id])
   storageRef  StorageCode @relation(fields: [storageCode], references: [id])

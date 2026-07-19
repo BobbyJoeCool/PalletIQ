@@ -7,7 +7,7 @@ import { requireAuth } from '../lib/permissions.js';
 interface ItemRecord {
   dept: number; class: number; item: number;
   upc: string; name: string; desc: string; descShort: string;
-  retailPrice: unknown; cost: unknown;
+  retailPrice: unknown; cost: unknown; unitWeight: unknown;
   packingZoneCode: number; storageCode: string; conveyable: boolean;
 }
 
@@ -24,6 +24,7 @@ function serializeItem(item: ItemRecord) {
     descShort: item.descShort,
     retailPrice: Number(item.retailPrice),
     cost: Number(item.cost),
+    unitWeight: item.unitWeight == null ? null : Number(item.unitWeight),
     packingZoneCode: item.packingZoneCode,
     storageCode: item.storageCode,
     conveyable: item.conveyable,
@@ -74,14 +75,52 @@ async function getItemByUpc(req: HttpRequest): Promise<unknown> {
 }
 
 /**
- * Item Storage Inquiry (ISI, issue #13) — every location currently storing a pallet of
- * the given DPCI, ordered by location ID (aisle, then bin, then level). Only stored
- * pallets are included (locationAisle non-null); a pallet pending put has no location
- * yet and isn't "stored" anywhere for this purpose.
+ * Shared by `getItemLocations`/`getItemLocationsByUpc` (ISI) — every location currently
+ * storing a pallet of the given item, ordered by location ID (aisle, then bin, then
+ * level). Only stored pallets are included (locationAisle non-null); a pallet pending
+ * put has no location yet and isn't "stored" anywhere for this purpose. Each row carries
+ * the pallet's own quantity/VCP-SSP/inherited-Storage-Code-Size fields (v1.6.8 — ISI
+ * fix-list item 03 plus the direct instruction to show Storage Code/Size and VCP/SSP per
+ * row) alongside the item's Short Description (returned once, not per row, since every
+ * row shares the same item).
+ *
+ * @param item - The resolved Item row (dept/class/item/descShort)
+ * @returns `{ descShort, locations: [...] }`
+ */
+async function buildItemLocations(item: { dept: number; class: number; item: number; descShort: string }) {
+  const pallets = await prisma.pallet.findMany({
+    where: { dept: item.dept, class: item.class, item: item.item, locationAisle: { not: null } },
+    select: {
+      pid: true, locationAisle: true, locationBin: true, locationLevel: true,
+      storageCode: true, size: true, currentPallets: true, currentCartons: true, currentSSPs: true,
+      vcp: true, ssp: true,
+    },
+    orderBy: [{ locationAisle: 'asc' }, { locationBin: 'asc' }, { locationLevel: 'asc' }],
+  });
+
+  return {
+    descShort: item.descShort,
+    locations: pallets.map((p) => ({
+      locationId:
+        String(p.locationAisle).padStart(3, '0') +
+        String(p.locationBin).padStart(3, '0') +
+        String(p.locationLevel).padStart(2, '0'),
+      palletId: p.pid,
+      storageCode: p.storageCode!,
+      size: p.size!,
+      currentPallets: p.currentPallets,
+      currentCartons: p.currentCartons,
+      currentSSPs: p.currentSSPs,
+      vcp: p.vcp,
+      ssp: p.ssp,
+    })),
+  };
+}
+
+/**
+ * Item Storage Inquiry (ISI, issue #13) — DPCI-keyed variant. See `buildItemLocations`.
  *
  * @param req - HTTP request with URL param `dpci` (9-digit, dash-separated or concatenated)
- * @returns `{ locations: { locationId: string, palletId: number }[] }` — locationId is the
- *   canonical 8-digit id (Aisle+Bin+Level), sorted ascending by aisle/bin/level
  * @throws 400 INVALID_INPUT if dpci is not a 9-digit value; 404 NOT_FOUND if no Item matches
  */
 async function getItemLocations(req: HttpRequest): Promise<unknown> {
@@ -94,30 +133,38 @@ async function getItemLocations(req: HttpRequest): Promise<unknown> {
   const cls  = parseInt(digits.slice(3, 5), 10);
   const itm  = parseInt(digits.slice(5, 9), 10);
 
-  const item = await prisma.item.findUnique({ where: { DPCI: { dept, class: cls, item: itm } } });
+  const item = await prisma.item.findUnique({ where: { DPCI: { dept, class: cls, item: itm } }, select: { dept: true, class: true, item: true, descShort: true } });
   if (!item) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
-  const pallets = await prisma.pallet.findMany({
-    where: { dept, class: cls, item: itm, locationAisle: { not: null } },
-    select: { pid: true, locationAisle: true, locationBin: true, locationLevel: true },
-    orderBy: [{ locationAisle: 'asc' }, { locationBin: 'asc' }, { locationLevel: 'asc' }],
-  });
-
-  return {
-    locations: pallets.map((p) => ({
-      locationId:
-        String(p.locationAisle).padStart(3, '0') +
-        String(p.locationBin).padStart(3, '0') +
-        String(p.locationLevel).padStart(2, '0'),
-      palletId: p.pid,
-    })),
-  };
+  return buildItemLocations(item);
 }
 
 /**
- * Demo helper for IID's "Scan DPCI" footer button — returns a random item's DPCI.
+ * Item Storage Inquiry (ISI) — UPC-keyed variant, added v1.6.8 alongside ISI's DPCI-only
+ * entry (fix-list item 02) so a worker with only a UPC can search directly instead of
+ * needing to resolve UPC → DPCI first. See `buildItemLocations`.
  *
- * @returns `{ dpci: string }`
+ * @param req - HTTP request with URL param `upc`
+ * @throws 400 INVALID_INPUT if upc is missing; 404 NOT_FOUND if no Item matches
+ */
+async function getItemLocationsByUpc(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+
+  const upc = req.params.upc ?? '';
+  if (!upc) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
+  const item = await prisma.item.findUnique({ where: { upc }, select: { dept: true, class: true, item: true, descShort: true } });
+  if (!item) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+  return buildItemLocations(item);
+}
+
+/**
+ * Demo helper for IID/ISI's "Scan DPCI"/"Scan UPC" footer buttons — returns a random
+ * item's DPCI and UPC (v1.6.8 added `upc` so the same sample can back either demo button,
+ * whichever entry method currently has focus).
+ *
+ * @returns `{ dpci: string, upc: string }`
  * @throws 404 NOT_FOUND if the Item table is empty
  */
 async function sampleItem(req: HttpRequest): Promise<unknown> {
@@ -127,9 +174,12 @@ async function sampleItem(req: HttpRequest): Promise<unknown> {
   if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
   const skip = Math.floor(Math.random() * count);
-  const item = await prisma.item.findFirst({ skip, select: { dept: true, class: true, item: true } });
+  const item = await prisma.item.findFirst({ skip, select: { dept: true, class: true, item: true, upc: true } });
 
-  return { dpci: `${String(item!.dept).padStart(3, '0')}-${String(item!.class).padStart(2, '0')}-${String(item!.item).padStart(4, '0')}` };
+  return {
+    dpci: `${String(item!.dept).padStart(3, '0')}-${String(item!.class).padStart(2, '0')}-${String(item!.item).padStart(4, '0')}`,
+    upc: item!.upc,
+  };
 }
 
 app.http('getItemByDpci', {
@@ -151,6 +201,13 @@ app.http('getItemLocations', {
   authLevel: 'anonymous',
   route: 'items/dpci/{dpci}/locations',
   handler: withHandler(getItemLocations),
+});
+
+app.http('getItemLocationsByUpc', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'items/upc/{upc}/locations',
+  handler: withHandler(getItemLocationsByUpc),
 });
 
 app.http('sampleItem', {

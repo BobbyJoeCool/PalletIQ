@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { DpciField, type DpciValue } from '../components/shared/DpciField';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { useAuth } from '../context/AuthContext';
@@ -52,6 +53,7 @@ export function PARPage() {
   const { token, user } = useAuth();
   const { setMessage } = useMessageBar();
   const { hidePanel } = useNumpad();
+  const [searchParams] = useSearchParams();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
 
   const [dpci, setDpci] = useState<DpciValue>({ dept: '', class: '', item: '' });
@@ -66,6 +68,14 @@ export function PARPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const dpciDigits = `${dpci.dept}${dpci.class}${dpci.item}`;
+
+  // Pre-population via ?dpci= (v1.6.8 — IID's new "Reinstate Pallet" hot button navigates
+  // here with the currently-loaded item's DPCI, same ?dpci= convention ISI already uses).
+  const dpciParam = searchParams.get('dpci');
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch/set-on-mount effect (URL ?dpci= pre-population), same pattern as IIDPage/ISIPage
+    if (dpciParam) setDpci(parseDpciString(dpciParam));
+  }, [dpciParam]);
 
   // DPCI-exists check (issue #68): DpciField is a plain controlled 3-box input with no
   // explicit "confirm" step (unlike the old single on-screen-keyboard field), so the

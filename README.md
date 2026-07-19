@@ -128,7 +128,7 @@ palletiq/
 - [`Documentation/Flowcharts-ERDs/uiFlow.mmd`](Documentation/Flowcharts-ERDs/uiFlow.mmd) — top-level screen-to-screen navigation map
 - [`Documentation/Flowcharts-ERDs/auth-flow.mmd`](Documentation/Flowcharts-ERDs/auth-flow.mmd), [`mnp-flow.mmd`](Documentation/Flowcharts-ERDs/mnp-flow.mmd), [`sdp-flow.mmd`](Documentation/Flowcharts-ERDs/sdp-flow.mmd), [`pip-flow.mmd`](Documentation/Flowcharts-ERDs/pip-flow.mmd) — task-lifecycle flow diagrams for login, manual put, directed put, and pull
 - [`Documentation/Flowcharts-ERDs/enums.mmd`](Documentation/Flowcharts-ERDs/enums.mmd) — enum/status value reference
-- [`DevNotes/Screen-Specs/`](DevNotes/Screen-Specs/) — one functional design doc per screen (ELA, ELZ, IID, ISI, LII, MNP, PAR, PII, PIP, SAR, SDP, STG, WLH built; ARP/IRP reserved codes not yet built — see each doc's own status note)
+- [`Documentation/ScreenSpecs/`](Documentation/ScreenSpecs/) — one functional design doc per screen (ELA, ELZ, IID, ISI, LII, MNP, PAR, PII, PIP, SAR, SDP, STG, WLH built; ARP/IRP reserved codes not yet built — see each doc's own status note). This superseded the older `DevNotes/Screen-Specs/` as of v1.6.7 — that location is retired/historical, kept only as a record of the pre-v1.6.7 format
 - [`Documentation/seed-reference.md`](Documentation/seed-reference.md) — demo seed data reference
 - [`Documentation/UI_Wireframes/UI_Design_Guide.md`](Documentation/UI_Wireframes/UI_Design_Guide.md) — UI design conventions
 

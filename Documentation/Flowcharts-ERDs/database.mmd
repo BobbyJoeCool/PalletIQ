@@ -44,6 +44,7 @@ erDiagram
         string storageCode FK "NVarChar(2) → StorageCode"
         boolean conveyable "default: true"
         boolean requiresExpirationDate "default: false, v1.6.7 — per-DPCI setting, seeded true for food Storage Codes (FD/NF/RF); not derived from storageCode at runtime"
+        decimal unitWeight "nullable, Decimal(10,2), v1.6.8 — pounds, displayed on IID"
     }
 
     PackingZone {

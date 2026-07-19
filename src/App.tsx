@@ -1,5 +1,6 @@
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { ISIProvider } from './context/ISIContext';
 import { PIIProvider } from './context/PIIContext';
 import { StagingProvider } from './context/StagingContext';
 import { AppShell } from './components/shell/AppShell';
@@ -45,12 +46,13 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/pin"   element={<PinPage />} />
 
-      {/* All authenticated function screens share the app shell. StagingProvider/PIIProvider
-          are mounted here (not inside STGPage/PIIPage) so STG's fork state and PII's
-          last-loaded pallet both survive navigating away and back, and are naturally cleared
-          on logout when ProtectedRoute unmounts this whole subtree. */}
+      {/* All authenticated function screens share the app shell. StagingProvider/PIIProvider/
+          ISIProvider are mounted here (not inside STGPage/PIIPage/ISIPage) so STG's fork
+          state, PII's last-loaded pallet, and ISI's last search all survive navigating away
+          and back, and are naturally cleared on logout when ProtectedRoute unmounts this
+          whole subtree. */}
       <Route element={<ProtectedRoute />}>
-        <Route element={<StagingProvider><PIIProvider><AppShell /></PIIProvider></StagingProvider>}>
+        <Route element={<StagingProvider><PIIProvider><ISIProvider><AppShell /></ISIProvider></PIIProvider></StagingProvider>}>
           <Route path="/"                        element={<HomePage />} />
           {/* Phase 6 screens */}
           <Route path="/pull"                    element={<PIPPage />} />

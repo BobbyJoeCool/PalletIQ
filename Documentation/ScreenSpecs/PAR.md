@@ -6,7 +6,7 @@
 
 ## Flow
 
-1. Worker (IM+) opens PAR (from the Inventory Management menu, or HotJump "PAR"). A sub-IM role sees a centered "Access Denied — Pallet Reinstate requires Inventory Manager or higher" message and nothing else — the form never mounts, and no footer demo buttons render either.
+1. Worker (IM+) opens PAR (from the Inventory Management menu, HotJump "PAR", or IID's "Reinstate Pallet" hot button — v1.6.8, IM+ only, pre-fills the DPCI via `?dpci=`). A sub-IM role sees a centered "Access Denied — Pallet Reinstate requires Inventory Manager or higher" message and nothing else — the form never mounts, and no footer demo buttons render either.
 2. For IM+, the full form renders as a single scrollable view — all fields visible at once, no multi-step wizard:
    - **DPCI** — 3-box numeric entry (`DpciField`: Dept/3, Class/2, Item/4), required.
    - **VCP** — numeric field (Numpad), required.
@@ -122,6 +122,8 @@ flowchart TD
 
 **Demo button fixups (v1.4.3/v1.4.4) are both still live.** "Cartons" is labeled "Cartons per Pallet" (v1.4.3, issue #71) to avoid ambiguity with a lone cartons total; "✓ To Location" and "✗ Bad Location" append the demo location endpoint's separately-returned `level` (zero-padded to 2 digits) onto the 6-digit aisle+bin it also returns (v1.4.4, issue #70) — omitting this previously left the Location field holding an unparseable 6-digit value that `parseFullLocationBarcode` rejected outright.
 
+**`?dpci=` pre-population (v1.6.8) only fills the DpciField state — it doesn't trigger a submit or bypass the existence check.** A mount effect calls `setDpci(parseDpciString(dpciParam))` if the param is present, reusing the same `parseDpciString` helper the sample-reinstate demo button already used to parse its own dash-joined DPCI response. This still flows through the normal `dpciDigits` derivation, so the existing DPCI-exists `useEffect` (see above) fires exactly as if the worker had typed it — a bad DPCI arriving via the link still shows "DPCI not found" rather than silently accepting it. The five quantity fields and Location are never pre-filled from a link; IID has no VCP/SSP/quantity data to offer (see IID.md's own note on this), so only DPCI transfers.
+
 ## Open items still remaining
 
 - [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) — Reason codes as a hard-coded list (not directly used on PAR's own form, but the broader reason-code-as-DB-table redesign, if it happens, could eventually touch how a reinstate's activity-log `details` are structured/validated app-wide).
@@ -131,6 +133,7 @@ flowchart TD
 
 | Date | Change |
 |---|---|
+| 2026-07-18 (v1.6.8) | Added `?dpci=` pre-population — IID's new "Reinstate Pallet" hot button (IM+ only) navigates here with the currently-loaded item's DPCI already filled in. Only DPCI transfers; the form's other fields are untouched. |
 | 2026-07-17 | Rebuilt onto the new screen-spec template from the legacy `DevNotes/Screen-Specs/PAR.md`, reconciled against current code: corrected the old doc's DPCI auto-fill description (it stated VCP/SSP are pre-filled from the DPCI lookup — current code's `DpciField`/existence-check design does **not** pre-fill anything, since `Item` has no VCP/SSP fields to pull from; the check is existence-only). Added the v1.4.3/v1.4.4 demo-button and label fixes the old doc only partially documented as an inline note. |
 | 2026-07-11 (v1.4.4) | Fixed "✓ To Location"/"✗ Bad Location" demo buttons writing only a 6-digit aisle+bin into the Location field (issue #70) — now appends the separately-returned `level`. |
 | 2026-07-11 (v1.4.3) | Relabeled "Cartons" to "Cartons per Pallet" for clarity (issue #71). |

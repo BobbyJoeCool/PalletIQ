@@ -13,9 +13,12 @@ test.describe('ISI — Item Storage Inquiry', () => {
     await page.goto('/storage-inquiry');
   });
 
-  test('an unknown DPCI shows a not-found error', async ({ page }) => {
+  test('an unknown DPCI shows a not-found error and leaves the bad DPCI visible', async ({ page }) => {
     await page.getByRole('button', { name: '✗ Bad DPCI' }).click();
     await expect(page.getByText('Item not found')).toBeVisible();
+    // v1.6.8 — the bad DPCI stays in the boxes (not cleared) so the worker can see what
+    // didn't resolve, rather than the boxes reverting to "—".
+    await expect(page.getByRole('button', { name: 'Dept' })).toHaveText('999');
   });
 
   test('a valid DPCI (via the demo button) shows either results or the empty-state message', async ({ page }) => {

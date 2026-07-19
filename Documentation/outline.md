@@ -104,6 +104,7 @@ All buttons are visible to all roles. Restricted functionality within a screen i
 - **Pallet ID** — Uniquely tied to exactly one location in the warehouse at any given time. Scanning a pallet ID is how the system finds where it currently lives.
 - **Location ID** — Composed of Aisle, Bin, and Level. The physical barcode encodes all three (see Location Barcode Handling below).
 - **Quantity granularity** — Inventory at any location/pallet is tracked in three units simultaneously: **Pallets**, **Cartons**, and **SSPs**. In most cases Pallets and SSPs will be zero (most locations hold partial cartons of a single pallet), but Bulk locations can have multiple full pallets, and Breakpack locations can have loose SSPs, so all three must always be present in the data model.
+- **Unit Weight** — Fixed at the item level (unlike VCP/SSP), in pounds. Nullable — not every item in the catalogue has been weighed. Read-only, displayed on IID (Item ID Lookup); set outside this app.
 
 ### Location Barcode Handling
 
