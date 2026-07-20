@@ -20,6 +20,8 @@ const KNOWN_VARIANTS: Record<string, StatusVariant> = {
   PULLED: 'neutral',
   RESERVED: 'warning',
   PULL_PENDING: 'warning',
+  CA_PULL_PEND: 'warning',
+  FP_PULL_PEND: 'warning',
   PUT_PENDING: 'warning',
   DIVERTED: 'warning',
   CANCELED: 'danger',
@@ -53,7 +55,7 @@ export function StatusBadge({ status, variant }: StatusBadgeProps) {
     <span
       className={`inline-flex items-center px-2.5 py-1 rounded-[6px] border font-ui text-[13px] font-semibold uppercase tracking-wider ${VARIANT_STYLES[resolved]}`}
     >
-      {status}
+      {status.replace(/_/g, ' ')}
     </span>
   );
 }

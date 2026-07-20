@@ -18,6 +18,16 @@ function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
+/** Fisher-Yates shuffle, returning a new array (doesn't mutate the input). */
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
 /** Returns a random Date within the last `daysBack` days (inclusive of today). */
 function randomDate(daysBack: number): Date {
   return new Date(Date.now() - randomInt(0, daysBack) * 86_400_000)
@@ -443,6 +453,36 @@ for (const item of ITEMS) {
 type LocationRow = {
   aisle: number; bin: number; level: number; zone: number
   status: string; holdTypeCode: null; storageCode: string; size: string
+  contraction: boolean
+}
+
+/**
+ * Contraction rules for seeded locations, per direct instruction:
+ *   1. Every Level 1 location that isn't XS-size and isn't in a BS/RF/RS-storage-code
+ *      aisle gets contracted. (XS is hand-put, always Carton Air regardless of level —
+ *      same carve-out `assignPullFunction` and the pull-function table elsewhere in this
+ *      app already use for that reason. BS/RF/RS only ever occur on aisles 303/701/702/
+ *      801/802/803, none of which are part of the standard repeating-pattern range rules
+ *      2/3 below apply to.)
+ *   2. "Small" aisles — the repeating-pattern 'S' type (8 physical levels), standard
+ *      304-338 range only — get their Level 8, odd-bin side contracted.
+ *   3. "HS" aisles — the repeating-pattern 'HS' type (10 physical levels), standard
+ *      304-338 range only — get Levels 7-10, even-bin side contracted.
+ * Rules 2/3 are deliberately scoped to the 304-338 repeating-pattern range, where
+ * `getAisleType`'s L/M/S/HS classification is actually meaningful (it isn't defined
+ * outside that range) — 801/802/803 also have 10 physical levels but are a different,
+ * always-XS special case already excluded by rule 1's XS carve-out.
+ */
+function isContractedLocation(aisle: number, bin: number, level: number, size: string, storageCode: string): boolean {
+  if (level === 1 && size !== 'XS' && !['BS', 'RF', 'RS'].includes(storageCode)) return true
+
+  if (aisle >= 304 && aisle <= 338) {
+    const type = getAisleType(aisle)
+    if (type === 'S' && level === 8 && bin % 2 === 1) return true
+    if (type === 'HS' && level >= 7 && level <= 10 && bin % 2 === 0) return true
+  }
+
+  return false
 }
 
 type PalletRow = {
@@ -487,7 +527,8 @@ function buildLocationsAndPallets() {
         const storageCode = scOf(bin, level)
         const stored = Math.random() < 0.9
 
-        locations.push({ aisle, bin, level, zone, status: stored ? 'STORED' : 'EMPTY', holdTypeCode: null, storageCode, size })
+        const contraction = isContractedLocation(aisle, bin, level, size, storageCode)
+        locations.push({ aisle, bin, level, zone, status: stored ? 'STORED' : 'EMPTY', holdTypeCode: null, storageCode, size, contraction })
 
         if (stored) {
           const itemPool = itemsByStorageCode[storageCode]
@@ -580,6 +621,76 @@ function buildLocationsAndPallets() {
   const staged = applyStaging(locations)
 
   return { locations, pallets, staged }
+}
+
+/**
+ * Multi-occupant demo data (issue #87 / LII v1.6.9's "Multiple Pallet IDs" status
+ * picker). Normal seeding above gives each STORED location at most one occupant pallet —
+ * a second pallet legitimately sharing a location only happens via MNP's dual-occupancy
+ * "Proceed Anyway" override (v1.6.3), which never runs during seeding, so nothing above
+ * ever produces one. This generates it explicitly: 10 already-STORED locations get one
+ * extra occupant (2 total), 10 get three extra (4 total). Each occupant at a given
+ * location always carries a distinct DPCI — never the same item twice in one location —
+ * so LII's pallet-paging UI has something meaningfully different to page through, not
+ * duplicate rows. Extra pallets copy their base location's storageCode/size/zone (same
+ * "pallet always inherits from wherever it's STORED" rule every other pallet follows)
+ * and get fresh unique pids via genPid().
+ *
+ * @param pallets - every already-generated STORED pallet (each still the sole occupant
+ *   of its own location at this point) — used both as the pool of candidate locations to
+ *   double/quadruple up and as the source of each location's already-used DPCI to avoid
+ *   colliding with.
+ * @returns Additional PalletRow entries only — callers append these to the main `pallets`
+ *   array before insertion; the base occupant pallets themselves are untouched.
+ */
+function addMultiOccupancyPallets(pallets: PalletRow[]): PalletRow[] {
+  const extra: PalletRow[] = []
+  const TARGET_COUNTS = [...Array<number>(10).fill(2), ...Array<number>(10).fill(4)]
+
+  // Only locations whose storage code stocks enough distinct items to give every
+  // occupant (up to 4) a unique DPCI — avoids ever reusing an item at one location.
+  const eligible = shuffle(pallets.filter((p) => (itemsByStorageCode[p.storageCode]?.length ?? 0) >= 4))
+
+  TARGET_COUNTS.forEach((targetCount, i) => {
+    const base = eligible[i]
+    if (!base) return // fewer eligible locations than requested — dataset too small, skip the rest
+
+    const usedItems = new Set([`${base.dept}-${base.class}-${base.item}`])
+    const candidatePool = shuffle(itemsByStorageCode[base.storageCode])
+
+    let added = 0
+    for (const itm of candidatePool) {
+      if (added >= targetCount - 1) break
+      const key = `${itm.dept}-${itm.class}-${itm.item}`
+      if (usedItems.has(key)) continue
+      usedItems.add(key)
+      added++
+
+      const vcp = randomFrom(VCP_OPTIONS)
+      const ssp = Math.random() < 0.5 ? vcp : vcp / 2
+      const cartons = randomInt(1, 20)
+      const hasFullPallet = Math.random() < 0.4 ? 1 : 0
+      const receivedAt = randomDate(365)
+      const putAt = new Date(receivedAt.getTime() + randomInt(1, 8) * 3_600_000)
+
+      extra.push({
+        pid: genPid(),
+        dept: itm.dept, class: itm.class, item: itm.item,
+        receivedPallets: hasFullPallet, currentPallets: hasFullPallet,
+        receivedCartons: cartons, currentCartons: cartons,
+        receivedSSPs: 0, currentSSPs: 0,
+        vcp, ssp, status: 'STORED',
+        locationAisle: base.locationAisle, locationBin: base.locationBin, locationLevel: base.locationLevel,
+        storageCode: base.storageCode, size: base.size, zone: base.zone,
+        receivedByZ: 'z002p21', receivedAt,
+        putByZ: 'z002p22', putAt,
+        lastPulledByZ: null, lastPulledAt: null,
+        poNumber: 'DEMO1234', apptNumber: 'DEMO1234',
+      })
+    }
+  })
+
+  return extra
 }
 
 /** One location staged by `applyStaging`, carried forward so a matching ActivityLog
@@ -753,6 +864,13 @@ async function main() {
   await insertInChunks('staging activity log entries', buildStagingActivityLog(staged), 500,
     (chunk) => prisma.activityLog.createMany({ data: chunk })
   )
+
+  // 4c. Multi-occupant locations (issue #87 / LII v1.6.9) — 10 locations get a 2nd
+  // pallet, 10 get 3 more (4 total), each with a distinct DPCI. See that function's doc
+  // comment for the full rationale.
+  const multiOccupancyPallets = addMultiOccupancyPallets(pallets)
+  pallets.push(...multiOccupancyPallets)
+  console.log(`  Multi-occupant locations: ${multiOccupancyPallets.length} extra pallets across 20 locations`)
 
   await insertInChunks('pallets', pallets, 500,
     (chunk) => prisma.pallet.createMany({ data: chunk })

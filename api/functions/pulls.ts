@@ -211,13 +211,24 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
 
   const loc = pallet.location;
 
-  // Mark the label as PULLED and update pallet quantities in one atomic transaction.
-  await prisma.$transaction([
-    prisma.label.update({
+  // Mark the label as PULLED and update pallet quantities in one atomic transaction. A
+  // pallet can have more than one label outstanding at once (e.g. a CA pull and an FP
+  // pull, or multiple CA pulls, against the same location) — only clear its
+  // CA_PULL_PEND/FP_PULL_PEND status back to STORED once every one of its labels has
+  // actually been pulled, not just this one. Uses the interactive transaction form (not
+  // the array form) since the pallet update depends on a read that must happen after this
+  // label's own status write.
+  await prisma.$transaction(async (tx) => {
+    await tx.label.update({
       where: { lid: label.lid },
       data: { status: 'PULLED' },
-    }),
-    prisma.pallet.update({
+    });
+
+    const remainingPending = await tx.label.count({
+      where: { pid: pallet.pid, status: { in: ['AVAILABLE', 'PRINTED'] } },
+    });
+
+    await tx.pallet.update({
       where: { pid: pallet.pid },
       data: {
         currentPallets: newPallets,
@@ -225,9 +236,10 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
         currentSSPs:    newSSPs,
         lastPulledByZ:  auth.zNumber,
         lastPulledAt:   new Date(),
+        ...(remainingPending === 0 && { status: 'STORED' }),
       },
-    }),
-  ]);
+    });
+  });
 
   await writeLog({
     userId: auth.zNumber,

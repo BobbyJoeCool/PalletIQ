@@ -136,14 +136,34 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
 /**
  * Returns a random location ID for MNP's (and LII/WLH's) demo location buttons.
  * Query param `status` controls which locations are eligible:
+ *   - "any" — a genuinely random location regardless of status/occupancy, for LII's
+ *     "✓ Scan Location" button (a physical barcode scan could land on anything; the old
+ *     default behavior below only ever surfaced EMPTY locations, which undersold what a
+ *     real scan does)
  *   - "empty" (default) — returns an EMPTY location for the "Scan Empty Location" demo
  *   - "occupied" — returns a STORED location for the "Scan Occupied Location" demo
+ *   - "staged" — returns a STAGED location (LII's status picker)
+ *   - "reserved" — returns a RESERVED location (LII's status picker)
+ *   - "pullPending" — returns a location whose occupant pallet is CA_PULL_PEND or
+ *     FP_PULL_PEND (LII's status picker) — Pull Pending is a Pallet-only status (v1.6.9),
+ *     not a Location.status value, so this queries via the `pallets` relation instead of
+ *     a flat scalar match like every other branch below
+ *   - "held" — returns any location with a non-null `holdCategory`, regardless of
+ *     occupancy status (LII's status picker; same `where` shape as
+ *     `getRandomHeldLocation` in locations.ts, but that endpoint is kept separate since
+ *     it also serves WLH's own dedicated "Find Held Location" button)
  *   - "contracted" — returns any location with `contraction: true`, regardless of
  *     occupancy status, for MNP's "Scan Contraction" demo (exercises manualConfirm's
- *     contraction gate)
+ *     contraction gate) and LII's status picker
  *   - "consolidate" — requires an additional `palletId` query param; finds a *different*
  *     pallet currently `STORED` with the same DPCI as `palletId` and returns its location,
  *     for MNP's "Scan Consolidate" demo (exercises manualConfirm's combine popup)
+ *   - "multiOccupant" — returns a location with more than one occupant pallet (LII's
+ *     status picker; issue #87 — MNP's v1.6.3 dual-occupancy "Proceed Anyway" override can
+ *     produce these live, and ~20 are seeded explicitly — see `addMultiOccupancyPallets`
+ *     in seed.ts). Grouped via `Pallet.groupBy` on the location key with a `having` count
+ *     filter, since Prisma has no direct "related-record count" filter on `Location`'s own
+ *     `where`.
  *
  * `locationId` is a 6-digit zero-padded string (AAABBB format) since only aisle+bin is
  * needed to simulate a destination scan. `level` is also returned — it's the exact level
@@ -153,7 +173,8 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
  * ignore the extra field.
  *
  * @param req - HTTP request with query param `status`
- *   ("empty" | "occupied" | "contracted" | "consolidate", default "empty") and, for
+ *   ("any" | "empty" | "occupied" | "staged" | "reserved" | "pullPending" | "held" |
+ *   "contracted" | "multiOccupant" | "consolidate", default "empty") and, for
  *   "consolidate" only, a required `palletId` query param
  * @returns `{ locationId: string, level: number }` — locationId is a 6-digit zero-padded string
  * @throws 400 INVALID_INPUT if `status=consolidate` is missing/non-numeric `palletId`;
@@ -190,10 +211,65 @@ async function sampleLocation(req: HttpRequest, _ctx: InvocationContext): Promis
     return { locationId: id, level: match.locationLevel };
   }
 
+  if (statusParam === 'pullPending') {
+    // Pull Pending (v1.6.9) is a Pallet-only status (CA_PULL_PEND/FP_PULL_PEND), not a
+    // Location.status value — Location.status keeps its own independent, currently-unused
+    // PULL_PENDING value by direct product decision. So this can't be a flat scalar
+    // `where`; find a location via its occupant pallet's status instead.
+    const where = { pallets: { some: { status: { in: ['CA_PULL_PEND', 'FP_PULL_PEND'] } } } };
+    const count = await prisma.location.count({ where });
+    if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+    const skip = Math.floor(Math.random() * count);
+    const location = await prisma.location.findFirst({
+      where, skip, select: { aisle: true, bin: true, level: true },
+    });
+    if (!location) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+    const id = String(location.aisle).padStart(3, '0') + String(location.bin).padStart(3, '0');
+    return { locationId: id, level: location.level };
+  }
+
+  if (statusParam === 'any') {
+    // No status/occupancy filter at all — a genuinely random location regardless of what
+    // it currently is, for LII's "✓ Scan Location" button (issue: that button previously
+    // relied on this endpoint's 'empty' default, which meant it only ever surfaced EMPTY
+    // locations instead of "any real location," which is what a physical barcode scan
+    // would actually land on).
+    const count = await prisma.location.count();
+    if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+    const skip = Math.floor(Math.random() * count);
+    const location = await prisma.location.findFirst({ skip, select: { aisle: true, bin: true, level: true } });
+    if (!location) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+    const id = String(location.aisle).padStart(3, '0') + String(location.bin).padStart(3, '0');
+    return { locationId: id, level: location.level };
+  }
+
+  if (statusParam === 'multiOccupant') {
+    // No direct "related-record count" filter exists on Location's own `where` — group
+    // pallets by their location key instead and filter groups with more than one member.
+    const groups = await prisma.pallet.groupBy({
+      by: ['locationAisle', 'locationBin', 'locationLevel'],
+      where: { locationAisle: { not: null } },
+      _count: { pid: true },
+      having: { pid: { _count: { gt: 1 } } },
+    });
+    if (groups.length === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+    const pick = groups[Math.floor(Math.random() * groups.length)];
+    const id = String(pick.locationAisle).padStart(3, '0') + String(pick.locationBin).padStart(3, '0');
+    return { locationId: id, level: pick.locationLevel };
+  }
+
   const where =
-    statusParam === 'empty'      ? { status: 'EMPTY' }
-    : statusParam === 'occupied' ? { status: 'STORED' }
-    : /* contracted */            { contraction: true };
+    statusParam === 'empty'       ? { status: 'EMPTY' }
+    : statusParam === 'occupied'  ? { status: 'STORED' }
+    : statusParam === 'staged'    ? { status: 'STAGED' }
+    : statusParam === 'reserved'  ? { status: 'RESERVED' }
+    : statusParam === 'held'      ? { holdCategory: { not: null } }
+    : /* contracted */              { contraction: true };
 
   const count = await prisma.location.count({ where });
   if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });

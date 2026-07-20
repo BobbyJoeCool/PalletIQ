@@ -33,10 +33,19 @@ export type LocationSize = 'XS' | 'HS' | 'S' | 'M' | 'L';
 
 export type HoldCategory = 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM';
 
+// CA_PULL_PEND/FP_PULL_PEND (v1.6.9) replace the never-implemented generic 'PULL_PENDING'
+// pallet value — CA_PULL_PEND covers both CA (Carton Air) and CF (Carton Floor) pull
+// functions (carton-granularity), FP_PULL_PEND covers FP (Full Pallet). Set when a Label
+// is created against a pallet (currently: only the seed/reseed data generators, since
+// there's no live label-creation workflow yet — PRQ is a placeholder screen), cleared back
+// to STORED once every one of a pallet's outstanding labels has been pulled (see
+// verifyPull in api/functions/pulls.ts). Location.status keeps its own independent
+// PULL_PENDING value, unused by this rule by direct product decision.
 export type PalletStatus =
   | 'PUT_PENDING'
   | 'STORED'
-  | 'PULL_PENDING'
+  | 'CA_PULL_PEND'
+  | 'FP_PULL_PEND'
   | 'PULLED'
   | 'CANCELED'
   | 'CONSOLIDATED';

@@ -30,6 +30,7 @@ const HOLD_REMOVE_MIN_ROLE: Record<string, Role> = {
 const PALLET_SUMMARY_SELECT = {
   pid: true, dept: true, class: true, item: true,
   currentCartons: true, currentPallets: true, currentSSPs: true, status: true,
+  itemRef: { select: { descShort: true } },
 } as const;
 
 /**
@@ -44,7 +45,9 @@ const PALLET_SUMMARY_SELECT = {
  *
  * @param req - HTTP request with URL param `id` (6 or 8-digit location barcode string)
  * @returns Full location detail: aisle, bin, level, zone, storageCode, size, status,
- *   holdCategory, and a pallet summary (or null) if occupied
+ *   holdCategory, contraction, and the full `pallets` array (LII issue #87 — a location
+ *   can legitimately hold more than one pallet since MNP's v1.6.3 "Proceed Anyway" path,
+ *   so this no longer truncates to `pallets[0]`; empty locations return `pallets: []`)
  * @throws 400 INVALID_INPUT if the barcode format is not exactly 6 or 8 digits;
  *   404 NOT_FOUND if no matching location record exists
  */
@@ -57,20 +60,18 @@ async function getLocation(req: HttpRequest, _ctx: InvocationContext): Promise<u
   const location = full
     ? await prisma.location.findUnique({
         where: { LocationID: { aisle: full.aisle, bin: full.bin, level: full.level } },
-        include: { pallets: { select: PALLET_SUMMARY_SELECT } },
+        include: { pallets: { select: PALLET_SUMMARY_SELECT, orderBy: { pid: 'asc' } } },
       })
     : await (() => {
         const parsed = parseLocationBarcode(raw);
         if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
         return prisma.location.findFirst({
           where: { aisle: parsed.aisle, bin: parsed.bin },
-          include: { pallets: { select: PALLET_SUMMARY_SELECT } },
+          include: { pallets: { select: PALLET_SUMMARY_SELECT, orderBy: { pid: 'asc' } } },
         });
       })();
 
   if (!location) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  const pallet = location.pallets[0] ?? null;
 
   return {
     aisle:       location.aisle,
@@ -81,16 +82,16 @@ async function getLocation(req: HttpRequest, _ctx: InvocationContext): Promise<u
     size:        location.size,
     status:       location.status,
     holdCategory: location.holdCategory,
-    pallet: pallet
-      ? {
-          id: pallet.pid,
-          dpci: `${String(pallet.dept).padStart(3, '0')}-${String(pallet.class).padStart(2, '0')}-${String(pallet.item).padStart(4, '0')}`,
-          cartons: pallet.currentCartons,
-          pallets: pallet.currentPallets,
-          ssps:    pallet.currentSSPs,
-          status:  pallet.status,
-        }
-      : null,
+    contraction:  location.contraction,
+    pallets: location.pallets.map((pallet) => ({
+      id: pallet.pid,
+      dpci: `${String(pallet.dept).padStart(3, '0')}-${String(pallet.class).padStart(2, '0')}-${String(pallet.item).padStart(4, '0')}`,
+      cartons: pallet.currentCartons,
+      pallets: pallet.currentPallets,
+      ssps:    pallet.currentSSPs,
+      status:  pallet.status,
+      descShort: pallet.itemRef.descShort,
+    })),
   };
 }
 

@@ -116,12 +116,31 @@ async function main() {
 
   await prisma.label.createMany({ data: labels })
 
+  // v1.6.9: creating a label against a pallet moves it to CA_PULL_PEND (CA/CF) or
+  // FP_PULL_PEND (FP) — see demo-reseed.ts's identical rule for the full rationale. This
+  // script always creates one non-emptying and one emptying label per pallet, so every
+  // touched pallet ends up FP_PULL_PEND (FP wins the tie) unless its location is XS
+  // (always CA regardless of emptying).
+  const pullPendingByPid = new Map<number, 'CA_PULL_PEND' | 'FP_PULL_PEND'>()
+  for (const l of labels) {
+    const target = l.pullFunction === 'FP' ? 'FP_PULL_PEND' : 'CA_PULL_PEND'
+    if (pullPendingByPid.get(l.pid) !== 'FP_PULL_PEND') pullPendingByPid.set(l.pid, target)
+  }
+  const caPids: number[] = []
+  const fpPids: number[] = []
+  for (const [pid, status] of pullPendingByPid) {
+    ;(status === 'FP_PULL_PEND' ? fpPids : caPids).push(pid)
+  }
+  if (caPids.length > 0) await prisma.pallet.updateMany({ where: { pid: { in: caPids } }, data: { status: 'CA_PULL_PEND' } })
+  if (fpPids.length > 0) await prisma.pallet.updateMany({ where: { pid: { in: fpPids } }, data: { status: 'FP_PULL_PEND' } })
+
   const byFn = labels.reduce<Record<string, number>>((acc, l) => {
     acc[l.pullFunction] = (acc[l.pullFunction] ?? 0) + 1
     return acc
   }, {})
   console.log(`Created ${labels.length} PRINTED labels across ${pallets.length} pallets.`)
   console.log('  By function:', byFn)
+  console.log(`  Pallets set CA_PULL_PEND: ${caPids.length}, FP_PULL_PEND: ${fpPids.length}`)
 }
 
 main()
