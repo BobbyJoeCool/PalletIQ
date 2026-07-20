@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.6.10 — 2026-07-20](#1610--2026-07-20)
 - [1.6.9 — 2026-07-20](#169--2026-07-20)
 - [1.6.8 — 2026-07-19](#168--2026-07-19)
 - [1.6.7 — 2026-07-18](#167--2026-07-18)
@@ -110,6 +111,56 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.6.10] — 2026-07-20
+
+WLH's fix-and-polish pass — the screen's 4-item fix list (Range mode reachability, a
+retested hold hierarchy, a new Level range, and footer-slotted Find buttons), plus a
+substantial direct-instruction round on top: Single Location's placement UI redesigned,
+both modes' Hold Type pickers changed to a 2×2 grid, a new session Hold Log panel, and
+persistent/always-visible Single Location entry.
+
+### 1.6.10 — Added
+
+- **WLH: Level range in Range mode.** Optional Start/End Level fields alongside the
+  existing Aisle/Bin range and Bin Side, e.g. "Aisle 318, Bins 1–32, Levels 4–5" — blank
+  on both ends still means every level, matching the prior behavior. Threaded through all
+  three range endpoints (`range-count`, `range-hold` PATCH/DELETE).
+- **WLH: session Hold Log panel**, always visible on the right side of the screen from
+  first navigation, in both modes. Range Place/Release's Message Bar text is now a short
+  total-count summary; the full per-bucket breakdown (what got upgraded from what to
+  what, what got blocked and why) moved to the Log, backed by a new `breakdown` array
+  both range-hold endpoints now return.
+
+### 1.6.10 — Changed
+
+- **WLH: Single Location's hold-placement UI redesigned.** Hold Type, Reason Code, and
+  Confirm Hold all render together at all times now, instead of Reason Code/Confirm only
+  appearing after a Hold Type tap — Hold Type is also now a 2×2 grid (matching Range
+  mode's own picker, also changed to a grid this round). The "Replace existing hold?"
+  warning now fires at Confirm time instead of on the Hold Type tap itself. Since this
+  lives in the shared `HoldPanel` component, it also affects PIP/MNP's inline quick-hold
+  panels.
+- **WLH: the full Single Location layout is now visible immediately on navigating to the
+  screen** — Location indicator, Current Hold, Hold Type grid, Reason Code, and Confirm
+  Hold no longer wait for a location to be scanned; before one loads they show a "—"/
+  disabled state instead of being hidden entirely.
+- **WLH: Aisle/Bin/Level entry no longer clears on a failed lookup** — the boxes keep
+  whatever was typed so the worker can see and correct it, instead of resetting to blank.
+- **WLH: "Find Held Location"/"Find Available Location" moved into the shared footer
+  demo-slot**, alongside the existing Load/Bad Location buttons, replacing the old
+  in-content helper bar.
+- **WLH: Range mode's form no longer risks pushing "Review Hold" off-screen** — the panel
+  now scrolls internally instead.
+
+### 1.6.10 — Fixed
+
+- **WLH: Range Place hierarchy and Range Release retested live** against a real database
+  and confirmed correct across every documented outcome (stacking, upgrade-to-Hold-Both,
+  Permanent overriding everything, role-gated Release) — previously untested due to the
+  Range submit flow reading as unclear.
 
 ---
 

@@ -375,10 +375,19 @@ async function getRandomUnheldLocation(req: HttpRequest): Promise<unknown> {
  *  separate requireRole calls in placeRangeHold/releaseRangeHold, not by computing a max). */
 const RANGE_FLOOR_ROLE: Role = 'IM';
 
-interface RangeParams { aisle: number; startBin: number; endBin: number; binSide: 'ALL' | 'ODD' | 'EVEN' }
+interface RangeParams {
+  aisle: number; startBin: number; endBin: number; binSide: 'ALL' | 'ODD' | 'EVEN';
+  // Optional Level range (both present or both absent) — absent means every level in the
+  // matching bins, the original single-aisle-and-bins-only design. See WLH fix item 03:
+  // added after the original design doc explicitly excluded Level entry for simplicity.
+  startLevel?: number; endLevel?: number;
+}
 
 /** Parses and validates the range-request fields shared by all three range endpoints. */
-function parseRangeParams(raw: { aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown }): RangeParams {
+function parseRangeParams(raw: {
+  aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown;
+  startLevel?: unknown; endLevel?: unknown;
+}): RangeParams {
   const aisle = typeof raw.aisle === 'number' ? raw.aisle : NaN;
   const startBin = typeof raw.startBin === 'number' ? raw.startBin : NaN;
   const endBin = typeof raw.endBin === 'number' ? raw.endBin : NaN;
@@ -386,7 +395,24 @@ function parseRangeParams(raw: { aisle?: unknown; startBin?: unknown; endBin?: u
   if (!Number.isInteger(aisle) || !Number.isInteger(startBin) || !Number.isInteger(endBin) || startBin > endBin) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
-  return { aisle, startBin, endBin, binSide };
+
+  const hasStartLevel = raw.startLevel !== undefined && raw.startLevel !== null;
+  const hasEndLevel = raw.endLevel !== undefined && raw.endLevel !== null;
+  if (!hasStartLevel && !hasEndLevel) {
+    return { aisle, startBin, endBin, binSide };
+  }
+  const startLevel = typeof raw.startLevel === 'number' ? raw.startLevel : NaN;
+  const endLevel = typeof raw.endLevel === 'number' ? raw.endLevel : NaN;
+  if (!hasStartLevel || !hasEndLevel || !Number.isInteger(startLevel) || !Number.isInteger(endLevel) || startLevel > endLevel) {
+    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  }
+  return { aisle, startBin, endBin, binSide, startLevel, endLevel };
+}
+
+/** Builds the Prisma `level` where-clause fragment for a range's optional Level filter —
+ *  `{}` (no filter, every level) when Level wasn't specified. */
+function levelFilter({ startLevel, endLevel }: RangeParams): { level?: { gte: number; lte: number } } {
+  return startLevel !== undefined && endLevel !== undefined ? { level: { gte: startLevel, lte: endLevel } } : {};
 }
 
 /** Builds the explicit list of bin numbers in [startBin, endBin] matching the side filter —
@@ -422,9 +448,11 @@ async function getRangeLocationCount(req: HttpRequest): Promise<unknown> {
     startBin: params.has('startBin') ? Number(params.get('startBin')) : undefined,
     endBin: params.has('endBin') ? Number(params.get('endBin')) : undefined,
     binSide: params.get('binSide') ?? undefined,
+    startLevel: params.has('startLevel') ? Number(params.get('startLevel')) : undefined,
+    endLevel: params.has('endLevel') ? Number(params.get('endLevel')) : undefined,
   });
 
-  const total = await prisma.location.count({ where: { aisle: range.aisle, bin: { in: binsInRange(range) } } });
+  const total = await prisma.location.count({ where: { aisle: range.aisle, bin: { in: binsInRange(range) }, ...levelFilter(range) } });
   return { total };
 }
 
@@ -456,8 +484,11 @@ function resolveRangePlace(requested: string, existing: string | null): { next: 
  * a single range action can produce a mix of placed/upgraded/blocked outcomes across it.
  *
  * @param req - HTTP request with body
- *   `{ aisle, startBin, endBin, binSide?, holdType, reasonCode }`
- * @returns `{ total, placed, upgraded, blocked }`
+ *   `{ aisle, startBin, endBin, binSide?, startLevel?, endLevel?, holdType, reasonCode }`
+ * @returns `{ total, placed, upgraded, blocked, breakdown }` — `breakdown` is one entry per
+ *   distinct existing-hold bucket found in the range (`{ existing, next, outcome, count }`),
+ *   letting a caller report e.g. "8 upgraded HOLD_IN → HOLD_BOTH" instead of just an
+ *   aggregate count (WLH's session Log panel, added alongside the Level range feature).
  * @throws 400 INVALID_INPUT for a bad range or missing/invalid holdType or reasonCode;
  *   403 FORBIDDEN if the caller doesn't meet both the Range-mode IM+ floor and the hold
  *   type's own single-location role requirement
@@ -468,7 +499,7 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
 
   const body = await req.json() as {
     aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown;
-    holdType?: string; reasonCode?: string;
+    startLevel?: unknown; endLevel?: unknown; holdType?: string; reasonCode?: string;
   };
   const range = parseRangeParams(body);
   if (!body.holdType || !(body.holdType in HOLD_PLACE_MIN_ROLE) || !body.reasonCode) {
@@ -477,6 +508,7 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
   requireRole(auth, HOLD_PLACE_MIN_ROLE[body.holdType]);
 
   const bins = binsInRange(range);
+  const levels = levelFilter(range);
 
   // Snapshot every bucket's count BEFORE any writes — updating bucket-by-bucket in a single
   // pass would let an earlier write (e.g. null → HOLD_IN) get counted *again* by a later
@@ -485,18 +517,20 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
   // the pre-write state, then applying writes from that frozen snapshot, avoids it.
   const buckets: { existing: string | null; count: number }[] = [];
   for (const existing of [null, 'HOLD_IN', 'HOLD_OUT', 'HOLD_BOTH', 'HOLD_PERM'] as const) {
-    const count = await prisma.location.count({ where: { aisle: range.aisle, bin: { in: bins }, holdCategory: existing } });
+    const count = await prisma.location.count({ where: { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing } });
     if (count > 0) buckets.push({ existing, count });
   }
 
   let placed = 0, upgraded = 0, blocked = 0;
+  const breakdown: { existing: string | null; next: string; outcome: PlaceOutcome; count: number }[] = [];
   for (const { existing, count } of buckets) {
     const { next, outcome } = resolveRangePlace(body.holdType, existing);
+    breakdown.push({ existing, next, outcome, count });
     if (outcome === 'blocked') {
       blocked += count;
       continue;
     }
-    await prisma.location.updateMany({ where: { aisle: range.aisle, bin: { in: bins }, holdCategory: existing }, data: { holdCategory: next } });
+    await prisma.location.updateMany({ where: { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing }, data: { holdCategory: next } });
     if (outcome === 'upgraded') upgraded += count; else placed += count;
   }
   const total = placed + upgraded + blocked;
@@ -507,11 +541,12 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
     locationAisle: range.aisle,
     details: {
       startBin: range.startBin, endBin: range.endBin, binSide: range.binSide,
+      startLevel: range.startLevel, endLevel: range.endLevel,
       holdType: body.holdType, reasonCode: body.reasonCode, placed, upgraded, blocked,
     },
   });
 
-  return { total, placed, upgraded, blocked };
+  return { total, placed, upgraded, blocked, breakdown };
 }
 
 /**
@@ -522,30 +557,39 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
  * skips any Permanent-held locations it encounters (reported as blocked) rather than
  * failing the whole action outright.
  *
- * @param req - HTTP request with body `{ aisle, startBin, endBin, binSide? }`
- * @returns `{ total, released, blocked }`
+ * @param req - HTTP request with body `{ aisle, startBin, endBin, binSide?, startLevel?, endLevel? }`
+ * @returns `{ total, released, blocked, breakdown }` — `breakdown` is one entry per existing
+ *   hold type found in the range (`{ existing, released, count }`), same purpose as
+ *   placeRangeHold's own breakdown (WLH's session Log panel).
  * @throws 400 INVALID_INPUT for a bad range; 403 FORBIDDEN if caller is below IM
  */
 async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
   const auth = await requireAuth(req);
   requireRole(auth, RANGE_FLOOR_ROLE);
 
-  const body = await req.json() as { aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown };
+  const body = await req.json() as {
+    aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown;
+    startLevel?: unknown; endLevel?: unknown;
+  };
   const range = parseRangeParams(body);
   const bins = binsInRange(range);
+  const levels = levelFilter(range);
 
   let released = 0, blocked = 0;
+  const breakdown: { existing: string; released: boolean; count: number }[] = [];
   for (const existing of ['HOLD_IN', 'HOLD_OUT', 'HOLD_BOTH', 'HOLD_PERM'] as const) {
-    const where = { aisle: range.aisle, bin: { in: bins }, holdCategory: existing };
+    const where = { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing };
     const count = await prisma.location.count({ where });
     if (count === 0) continue;
 
     if (!hasMinRole(auth.role, HOLD_REMOVE_MIN_ROLE[existing])) {
       blocked += count;
+      breakdown.push({ existing, released: false, count });
       continue;
     }
     await prisma.location.updateMany({ where, data: { holdCategory: null } });
     released += count;
+    breakdown.push({ existing, released: true, count });
   }
   const total = released + blocked;
 
@@ -553,10 +597,13 @@ async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
     userId: auth.zNumber,
     actionType: 'RANGE_REL',
     locationAisle: range.aisle,
-    details: { startBin: range.startBin, endBin: range.endBin, binSide: range.binSide, released, blocked },
+    details: {
+      startBin: range.startBin, endBin: range.endBin, binSide: range.binSide,
+      startLevel: range.startLevel, endLevel: range.endLevel, released, blocked,
+    },
   });
 
-  return { total, released, blocked };
+  return { total, released, blocked, breakdown };
 }
 
 // ── PATCH /api/locations/:id/hold ─────────────────────────────────────────────

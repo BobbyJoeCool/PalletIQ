@@ -15,6 +15,9 @@ interface ReasonCodeFieldProps {
    *  (issue #78). */
   size?: 'compact' | 'default';
   label?: string;
+  /** Disables the field — e.g. WLH's Single Location panel, before a location is loaded
+   *  (v1.6.10). Default false; every other caller is unaffected. */
+  disabled?: boolean;
 }
 
 /**
@@ -28,7 +31,7 @@ interface ReasonCodeFieldProps {
  * native `<select>` + conditional custom-field design entirely — free-text entry already
  * covers the old "Type a code…" escape hatch, so there's no separate OTHER state anymore.
  */
-export function ReasonCodeField({ codes, value, onChange, size = 'default', label = 'Reason Code' }: ReasonCodeFieldProps) {
+export function ReasonCodeField({ codes, value, onChange, size = 'default', label = 'Reason Code', disabled = false }: ReasonCodeFieldProps) {
   return (
     <CodePickerField
       value={value}
@@ -41,6 +44,7 @@ export function ReasonCodeField({ codes, value, onChange, size = 'default', labe
       label={label}
       ariaLabel={label || 'Reason Code'}
       closeOnAutoSubmit
+      disabled={disabled}
     />
   );
 }
