@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.6.9 — 2026-07-20](#169--2026-07-20)
 - [1.6.8 — 2026-07-19](#168--2026-07-19)
 - [1.6.7 — 2026-07-18](#167--2026-07-18)
 - [1.6.6 — 2026-07-17](#166--2026-07-17)
@@ -91,7 +92,7 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Minor
 
-No issues currently open in this category.
+- [#95](https://github.com/BobbyJoeCool/PalletIQ/issues/95) — Status bar: error message persists after a subsequent successful scan
 
 ### Nice-to-have/Cosmetic
 
@@ -99,7 +100,6 @@ No issues currently open in this category.
 
 ### Needs Triage
 
-- [#87](https://github.com/BobbyJoeCool/PalletIQ/issues/87) — LII: show and let the worker switch between multiple pallets at a location
 - [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — Bad Contraction data: every RS/RF/BS location, plus some HS locations on Levels 2-9, incorrectly flagged as contracted
 - [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) — PII Edit Mode will need per-pallet-vs-partial quantity editing once Bulk Pull ships (post-v1.7.0)
 - [#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90) — Add per-record audit trail to PII, LII, and a future Container ID screen (post-v1.7.0)
@@ -110,6 +110,52 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.6.9] — 2026-07-20
+
+LII's fix-and-polish pass — the screen's 5-item fix list, plus
+[#87](https://github.com/BobbyJoeCool/PalletIQ/issues/87)'s multi-pallet-location support,
+and a new `CA_PULL_PEND`/`FP_PULL_PEND` pallet-status rule found and built along the way.
+
+### 1.6.9 — Added
+
+- **LII: state persists across navigation away and back**, via a new `LIIContext`,
+  matching PII/ISI's own per-screen pattern.
+- **LII: "Find by Status" demo picker** — a footer button opens a popup covering all 8
+  location states (Empty, Stored, Staged, Reserved, Pull Pending, Held, Contraction,
+  Multiple Pallet IDs), instead of no coverage for most of them.
+- **LII: pallet summary now shows the item's short description.**
+- **LII: Contraction gets its own inline badge**, next to Status, separate from Hold —
+  `getLocation` previously didn't even return `contraction` at all.
+- **LII/pull flow: `CA_PULL_PEND`/`FP_PULL_PEND` pallet statuses**, replacing a
+  never-actually-set generic `PULL_PENDING` value. Set by the label-creation paths
+  (`reseedTestData`, the standalone label top-up script) and cleared by `verifyPull` only
+  once every outstanding label on a pallet is pulled — a pallet with both a CA and an FP
+  pull outstanding correctly stays pending until both clear.
+- **Data: ~20 seeded multi-occupancy locations** (10 with 2 pallets, 10 with 4, each with
+  a distinct DPCI), built into `seed.ts` itself so they survive a full database rebuild.
+- **Data: a real Contraction seeding rule** in `seed.ts` (Level 1 non-XS excluding
+  BS/RF/RS; Small-aisle Level 8 odd-bin side; HS-aisle Levels 7-10 even-bin side) — the
+  local dev database previously had no Contraction data generation at all.
+
+### 1.6.9 — Changed
+
+- **LII/[#87](https://github.com/BobbyJoeCool/PalletIQ/issues/87): every pallet at a
+  location is now shown, not just the first.** `getLocation` returns the full `pallets`
+  array (ordered by pid) instead of truncating to a single nullable `pallet`; LII pages
+  through occupants with a "PALLET x/y" header ("0/0", every field `—`, when empty).
+- **App-wide: status text no longer shows raw underscores** — `StatusBadge` renders
+  `CA_PULL_PEND` as "CA PULL PEND", etc.
+
+### 1.6.9 — Fixed
+
+- **LII: "Find by Status" picks now return the exact status requested** — Empty/Staged
+  picks previously discarded the sampled Level, landing on an ambiguous Aisle+Bin lookup
+  that could resolve to a different level's (different-status) location.
+- **LII: "✓ Scan Location" demo button now returns any random location**, not always an
+  Empty one — it was hardcoded to the `empty` status branch regardless of intent.
 
 ---
 
