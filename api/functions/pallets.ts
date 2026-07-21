@@ -216,7 +216,6 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
 
   if (quantityChanging) {
     // Sum up quantities already committed to open labels so we can enforce a floor.
-    // Uses receivedCartons as a cartonsPerPallet proxy (production would use a dedicated field).
     const pending = await prisma.label.aggregate({
       where: { pid, status: { notIn: ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'] } },
       _sum: { quantity: true, sspQuantity: true },
@@ -224,7 +223,9 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
     const pendingCartons = pending._sum.quantity    ?? 0;
     const pendingSSPs    = pending._sum.sspQuantity ?? 0;
 
-    const totalCartons = newPallets * pallet.receivedCartons + newCartons;
+    // cartonsPerPallet (v1.6.11) replaces the old receivedCartons-as-proxy approximation
+    // this check used previously.
+    const totalCartons = newPallets * pallet.cartonsPerPallet + newCartons;
     if (totalCartons < pendingCartons || newSSPs < pendingSSPs) {
       throw Object.assign(new Error('INSUFFICIENT_QUANTITY'), { status: 409 });
     }
@@ -320,60 +321,183 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
 
 // ── POST /api/pallets/reinstate ───────────────────────────────────────────────
 
+/** SSP must evenly divide VCP (vcp/ssp = SSPs-per-carton, an integer) — same rule
+ *  editPallet enforces (v1.6.11 — PAR now validates this too instead of not at all). */
+function validateVcpRatio(vcp: number, ssp: number): void {
+  if (ssp <= 0 || vcp % ssp !== 0) {
+    throw Object.assign(new Error('INVALID_VCP_SSP_RATIO'), { status: 400 });
+  }
+}
+
+/** A row's own loose SSPs must stay below one full carton's worth (vcp/ssp) — a full
+ *  carton's worth of loose SSPs should just be another carton. Same rule editPallet
+ *  enforces on `currentSSPs`. */
+function validateSspCap(vcp: number, ssp: number, looseSSPs: number): void {
+  if (looseSSPs >= vcp / ssp) {
+    throw Object.assign(new Error('SSPS_EXCEED_CARTON'), { status: 400 });
+  }
+}
+
+/** Identical thresholds to editPallet's own Expiration Date rule (< 1 month blocked,
+ *  1-3 months needs `confirmNearExpiration`, 3+ months or omitted is fine), plus a new
+ *  requirement gate: blocks outright if the item flags `requiresExpirationDate` and no
+ *  date was given at all (editPallet has no such gate — an edit's expirationDate is
+ *  always optional regardless of the item, since PII only ever *prompts*, never blocks;
+ *  PAR's creation-time gate is a deliberate, stricter departure from that, direct
+ *  instruction for this redesign). */
+function validateExpirationDate(
+  raw: string | null | undefined, confirmNearExpiration: boolean | undefined, requiresExpirationDate: boolean,
+): Date | null {
+  if (raw == null) {
+    if (requiresExpirationDate) throw Object.assign(new Error('EXPIRATION_REQUIRED'), { status: 400 });
+    return null;
+  }
+  const parsed = new Date(raw);
+  if (isNaN(parsed.getTime())) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  const oneMonthOut = new Date();
+  oneMonthOut.setMonth(oneMonthOut.getMonth() + 1);
+  const threeMonthsOut = new Date();
+  threeMonthsOut.setMonth(threeMonthsOut.getMonth() + 3);
+  if (parsed < oneMonthOut) throw Object.assign(new Error('EXPIRATION_TOO_SOON'), { status: 400 });
+  if (parsed < threeMonthsOut && !confirmNearExpiration) {
+    throw Object.assign(new Error('EXPIRATION_NEEDS_CONFIRM'), { status: 409 });
+  }
+  return parsed;
+}
+
+interface ReinstateRow { cartons: number; ssps: number; cartonsPerPallet: number }
+
 /**
- * Creates a new pallet record from scratch for a pallet that exists physically but has
- * no system record. IM+ only. Sets status to PUT_PENDING (no location) or STORED (with
- * a location) — a provided location must be EMPTY; staged, reserved, and occupied
- * locations are all rejected. See DevNotes/Screen-Specs/PAR.md.
+ * Creates one or more new pallet records from scratch for physical inventory with no
+ * system record — PAR's v1.6.11 redesign (`DevNotes/DesignPrompts/Feature-7-PAR-Redesign.md`).
+ * IM+ only. Resolves the item by DPCI or UPC, whichever is given. **Single** mode creates
+ * exactly one row, optionally landing it at a location (must be EMPTY). **Multiple** mode
+ * creates one row per full pallet plus one more for the partial (only if the partial has
+ * any cartons/SSPs) — always PUT_PENDING, since Multiple mode can never target a location
+ * (Bulk locations, where that would become possible, don't exist yet). Every created row
+ * gets one `ActivityLog` entry each — never one entry summarizing a whole batch — since a
+ * pid is always one row/one physical pallet, and Bulk locations should find the audit
+ * trail already structured that way.
  *
  * @param req - HTTP request with body:
- *   `{ dpci: string; vcp: number; ssp: number; pallets: number; cartons: number;
- *      ssps: number; locationId?: string | null }` — dpci is a 9-digit value
- *   (dash-separated or concatenated); locationId, if given, is an 8-digit location barcode
- * @returns `{ palletId: number; status: 'PUT_PENDING' | 'STORED'; locationId: string | null }`
- * @throws 400 INVALID_INPUT for missing/malformed fields;
+ *   `{ dpci?: string; upc?: string; vcp: number; ssp: number;
+ *      expirationDate?: string | null; confirmNearExpiration?: boolean;
+ *      mode: 'single' | 'multiple';
+ *      cartons?: number; ssps?: number; locationId?: string | null; // single mode
+ *      fullPallets?: number; cartonsPerPallet?: number;
+ *      partialCartons?: number; partialSsps?: number }` // multiple mode
+ *   Exactly one of `dpci`/`upc` must be given; `dpci` is a 9-digit value (dash-separated
+ *   or concatenated); `locationId`, if given, is an 8-digit location barcode.
+ * @returns `{ pallets: { palletId: number; cartons: number; ssps: number;
+ *   cartonsPerPallet: number; status: 'PUT_PENDING' | 'STORED';
+ *   locationId: string | null }[] }` — one entry per row created, in creation order
+ *   (full pallets first, partial last, when Multiple mode created more than one)
+ * @throws 400 INVALID_INPUT for missing/malformed/contradictory fields (including a
+ *   `locationId` supplied in Multiple mode, or a Multiple-mode request with nothing to
+ *   create — zero full pallets and an empty partial);
+ *   400 INVALID_VCP_SSP_RATIO if SSP doesn't evenly divide VCP;
+ *   400 SSPS_EXCEED_CARTON if a row's own loose SSPs reach a full carton's worth;
+ *   400 EXPIRATION_TOO_SOON if the expiration date is under 1 month out;
+ *   400 EXPIRATION_REQUIRED if the item requires one and none was given;
  *   403 FORBIDDEN if caller is below IM;
- *   404 DPCI_NOT_FOUND if the DPCI doesn't exist in the Item catalogue;
+ *   404 DPCI_NOT_FOUND / UPC_NOT_FOUND if the item doesn't exist;
  *   404 LOCATION_NOT_FOUND if locationId doesn't resolve to a real location;
- *   409 LOCATION_NOT_EMPTY if the location exists but isn't EMPTY
+ *   409 LOCATION_NEEDS_CONFIRM if the location isn't EMPTY, or is on hold, or is
+ *     contracted, and `confirmLocationStatus` wasn't set — the pallet is very likely
+ *     physically sitting there already, so this is a warn-then-allow gate, not a hard
+ *     reject (unlike a normal put) — the frontend already knows exactly which condition(s)
+ *     apply from its own live location lookup, so this code alone is enough context;
+ *   409 EXPIRATION_NEEDS_CONFIRM if the date is 1-3 months out and not yet confirmed
  */
 async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   const auth = await requireAuth(req);
   requireRole(auth, 'IM');
 
   const body = await req.json() as {
-    dpci: string;
-    vcp: number;
-    ssp: number;
-    pallets: number;
-    cartons: number;
-    ssps: number;
-    locationId?: string | null;
+    dpci?: string; upc?: string;
+    vcp?: number; ssp?: number;
+    expirationDate?: string | null;
+    confirmNearExpiration?: boolean;
+    mode?: 'single' | 'multiple';
+    cartons?: number; ssps?: number; locationId?: string | null; confirmLocationStatus?: boolean;
+    fullPallets?: number; cartonsPerPallet?: number;
+    partialCartons?: number; partialSsps?: number;
   };
 
-  const digits = (body.dpci ?? '').replace(/-/g, '');
-  if (
-    !/^\d{9}$/.test(digits) ||
-    body.vcp == null || body.ssp == null ||
-    body.pallets == null || body.cartons == null || body.ssps == null ||
-    body.pallets < 0 || body.cartons < 0 || body.ssps < 0
-  ) {
+  if (body.vcp == null || body.ssp == null || (body.mode !== 'single' && body.mode !== 'multiple')) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
 
-  const dept = parseInt(digits.slice(0, 3), 10);
-  const cls  = parseInt(digits.slice(3, 5), 10);
-  const itm  = parseInt(digits.slice(5, 9), 10);
+  // Resolve the item by whichever identifier was given — DPCI is the anchor everywhere
+  // else in the app (frontend never populates UPC back from a DPCI search, only the
+  // reverse), but either one is enough to key the new row(s) off dept/class/item.
+  let dept: number, cls: number, itm: number, requiresExpirationDate: boolean;
+  if (body.dpci) {
+    const digits = body.dpci.replace(/-/g, '');
+    if (!/^\d{9}$/.test(digits)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    dept = parseInt(digits.slice(0, 3), 10);
+    cls  = parseInt(digits.slice(3, 5), 10);
+    itm  = parseInt(digits.slice(5, 9), 10);
+    const item = await prisma.item.findUnique({ where: { DPCI: { dept, class: cls, item: itm } } });
+    if (!item) throw Object.assign(new Error('DPCI_NOT_FOUND'), { status: 404 });
+    requiresExpirationDate = item.requiresExpirationDate;
+  } else if (body.upc) {
+    const item = await prisma.item.findUnique({ where: { upc: body.upc } });
+    if (!item) throw Object.assign(new Error('UPC_NOT_FOUND'), { status: 404 });
+    dept = item.dept; cls = item.class; itm = item.item;
+    requiresExpirationDate = item.requiresExpirationDate;
+  } else {
+    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  }
 
-  const item = await prisma.item.findUnique({ where: { DPCI: { dept, class: cls, item: itm } } });
-  if (!item) throw Object.assign(new Error('DPCI_NOT_FOUND'), { status: 404 });
+  validateVcpRatio(body.vcp, body.ssp);
+  const expirationDate = validateExpirationDate(body.expirationDate, body.confirmNearExpiration, requiresExpirationDate);
 
+  // Build the list of rows to create, mode-specific.
+  const rows: ReinstateRow[] = [];
+  if (body.mode === 'single') {
+    if (body.cartons == null || body.ssps == null || body.cartons < 0 || body.ssps < 0) {
+      throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    }
+    validateSspCap(body.vcp, body.ssp, body.ssps);
+    rows.push({ cartons: body.cartons, ssps: body.ssps, cartonsPerPallet: body.cartons + (body.ssps > 0 ? 1 : 0) });
+  } else {
+    if (body.locationId) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    const fullPallets = body.fullPallets ?? 0;
+    const cartonsPerPalletIn = body.cartonsPerPallet ?? 0;
+    const partialCartons = body.partialCartons ?? 0;
+    const partialSsps = body.partialSsps ?? 0;
+    if (fullPallets < 0 || cartonsPerPalletIn < 0 || partialCartons < 0 || partialSsps < 0) {
+      throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    }
+    if (fullPallets > 0 && cartonsPerPalletIn <= 0) {
+      throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    }
+    const hasPartial = partialCartons > 0 || partialSsps > 0;
+    if (fullPallets === 0 && !hasPartial) {
+      throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    }
+    for (let i = 0; i < fullPallets; i++) {
+      rows.push({ cartons: cartonsPerPalletIn, ssps: 0, cartonsPerPallet: cartonsPerPalletIn });
+    }
+    if (hasPartial) {
+      validateSspCap(body.vcp, body.ssp, partialSsps);
+      rows.push({ cartons: partialCartons, ssps: partialSsps, cartonsPerPallet: partialCartons + (partialSsps > 0 ? 1 : 0) });
+    }
+  }
+
+  // Location — Single mode only (Multiple mode already rejected a locationId above).
   let locationAisle: number | null = null;
   let locationBin: number | null = null;
   let locationLevel: number | null = null;
   let locationRow: { storageCode: string; size: string; zone: number } | null = null;
+  // Only flip Location.status to STORED when it was actually EMPTY beforehand — an
+  // override onto an already-occupied/staged/reserved location leaves Location's own row
+  // completely untouched (see the warn-then-allow block below for why), so this only ever
+  // needs to be true in the one case that already worked before this override existed.
+  let locationWasEmpty = false;
 
-  if (body.locationId) {
+  if (body.mode === 'single' && body.locationId) {
     const parsed = parseFullLocationBarcode(body.locationId);
     if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
@@ -381,33 +505,45 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
       where: { LocationID: { aisle: parsed.aisle, bin: parsed.bin, level: parsed.level } },
     });
     if (!location) throw Object.assign(new Error('LOCATION_NOT_FOUND'), { status: 404 });
-    // PAR.md's contract wants the location's current status in the error body
-    // ({ error: "LOCATION_NOT_EMPTY", status: "..." }), but withHandler's error envelope
-    // (api/lib/response.ts) only ever returns { error: code } — no room for extra fields
-    // without changing shared infra other endpoints depend on. The frontend shows a
-    // generic "not empty" message instead of the specific blocking status.
-    if (location.status !== 'EMPTY') {
-      throw Object.assign(new Error('LOCATION_NOT_EMPTY'), { status: 409 });
+
+    // Warn-then-allow, not a hard reject (direct instruction, a deliberate departure from
+    // a normal put's rules): the pallet being reinstated is very likely physically sitting
+    // in this exact location already and needs to be assigned there regardless of its
+    // current status/hold/contraction — occupied, on hold, and contracted all raise the
+    // same confirmation gate. The frontend already knows exactly which condition(s) apply
+    // from its own live `GET /api/locations/:id` lookup (used for the live validation as
+    // the worker types), so this endpoint doesn't need to communicate specifics back —
+    // `confirmLocationStatus: true` alone is enough once the frontend has already shown
+    // the worker why.
+    const needsConfirm = location.status !== 'EMPTY' || location.holdCategory != null || location.contraction;
+    if (needsConfirm && !body.confirmLocationStatus) {
+      throw Object.assign(new Error('LOCATION_NEEDS_CONFIRM'), { status: 409 });
     }
 
     locationAisle = parsed.aisle;
     locationBin   = parsed.bin;
     locationLevel = parsed.level;
     locationRow   = location;
+    locationWasEmpty = location.status === 'EMPTY';
   }
 
-  const pid = await generateUniquePid();
   const now = new Date();
   const status = locationAisle != null ? 'STORED' : 'PUT_PENDING';
 
-  const ops: Array<ReturnType<typeof prisma.pallet.create> | ReturnType<typeof prisma.location.update>> = [
+  // Reserve one pid per row up front — generateUniquePid checks the DB each call, so
+  // sequential awaits (not Promise.all) avoid two rows in the same request colliding.
+  const pids: number[] = [];
+  for (let i = 0; i < rows.length; i++) pids.push(await generateUniquePid());
+
+  const ops: Array<ReturnType<typeof prisma.pallet.create> | ReturnType<typeof prisma.location.update>> = rows.map((row, i) =>
     prisma.pallet.create({
       data: {
-        pid, dept, class: cls, item: itm,
-        receivedPallets: body.pallets, currentPallets: body.pallets,
-        receivedCartons: body.cartons, currentCartons: body.cartons,
-        receivedSSPs:    body.ssps,    currentSSPs:    body.ssps,
-        vcp: body.vcp, ssp: body.ssp,
+        pid: pids[i], dept, class: cls, item: itm,
+        receivedPallets: 1, currentPallets: 1,
+        receivedCartons: row.cartons, currentCartons: row.cartons,
+        receivedSSPs: row.ssps, currentSSPs: row.ssps,
+        cartonsPerPallet: row.cartonsPerPallet,
+        vcp: body.vcp!, ssp: body.ssp!,
         status,
         locationAisle, locationBin, locationLevel,
         // Inherited from the reinstated location, same as any other put (placePallet) —
@@ -419,15 +555,16 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
         receivedAt:  now,
         putByZ: locationAisle != null ? auth.zNumber : null,
         putAt:  locationAisle != null ? now : null,
-        // A PAR-reinstated pallet was never actually received through inbound — no real PO/
-        // Appointment exists for it, and no expiration date is known yet either.
+        // A PAR-reinstated pallet was never actually received through inbound — no real
+        // PO/Appointment exists for it. Expiration Date, unlike those two, is now
+        // worker-entered on this screen (v1.6.11) rather than permanently null.
         poNumber: null,
         apptNumber: null,
-        expirationDate: null,
+        expirationDate,
       },
     }),
-  ];
-  if (locationAisle != null) {
+  );
+  if (locationAisle != null && locationWasEmpty) {
     ops.push(
       prisma.location.update({
         where: { LocationID: { aisle: locationAisle, bin: locationBin!, level: locationLevel! } },
@@ -437,47 +574,70 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   }
   await prisma.$transaction(ops);
 
-  await writeLog({
-    userId: auth.zNumber,
-    actionType: 'REINSTATE',
-    palletId: pid,
-    locationAisle: locationAisle ?? undefined,
-    locationBin:   locationBin ?? undefined,
-    locationLevel: locationLevel ?? undefined,
-    dept, class: cls, item: itm,
-    details: { vcp: body.vcp, ssp: body.ssp, pallets: body.pallets, cartons: body.cartons, ssps: body.ssps, status },
-  });
+  for (let i = 0; i < rows.length; i++) {
+    await writeLog({
+      userId: auth.zNumber,
+      actionType: 'REINSTATE',
+      palletId: pids[i],
+      locationAisle: locationAisle ?? undefined,
+      locationBin:   locationBin ?? undefined,
+      locationLevel: locationLevel ?? undefined,
+      dept, class: cls, item: itm,
+      details: {
+        vcp: body.vcp, ssp: body.ssp, mode: body.mode,
+        cartons: rows[i].cartons, ssps: rows[i].ssps, cartonsPerPallet: rows[i].cartonsPerPallet,
+        expirationDate: expirationDate ? expirationDate.toISOString() : null, status,
+        // Audit trail for the warn-then-allow location override, when it happened —
+        // absent entirely for a normal EMPTY-location or no-location reinstate.
+        ...(locationAisle != null && !locationWasEmpty ? { locationOverride: true } : {}),
+      },
+    });
+  }
 
   return {
-    palletId: pid,
-    status,
-    locationId: locationAisle != null ? formatLocationId(locationAisle, locationBin!, locationLevel!) : null,
+    pallets: rows.map((row, i) => ({
+      palletId: pids[i],
+      cartons: row.cartons,
+      ssps: row.ssps,
+      cartonsPerPallet: row.cartonsPerPallet,
+      status,
+      locationId: locationAisle != null ? formatLocationId(locationAisle, locationBin!, locationLevel!) : null,
+    })),
   };
 }
 
 // ── GET /api/pallets/sample-reinstate ─────────────────────────────────────────
 
 /**
- * Demo helper for PAR's fill buttons — returns a valid DPCI plus a plausible
- * VCP/SSP/quantity set the worker can submit as-is for a valid reinstate.
+ * Demo helper for PAR's DPCI/UPC picker options — returns a valid DPCI+UPC pair plus a
+ * plausible VCP/SSP/Single-mode quantity set the worker can submit as-is for a valid
+ * reinstate.
  *
- * @returns `{ dpci: string; vcp: number; ssp: number; pallets: number; cartons: number; ssps: number }`
- * @throws 404 NOT_FOUND if the Item table is empty
+ * @param requiresExpirationDate - Optional `?requiresExpirationDate=true|false` filter
+ *   (v1.6.11, new) — lets PAR's demo picker deliberately land on an item that does or
+ *   doesn't require an Expiration Date, instead of only ever getting a random one, so the
+ *   worker can exercise the required-Expiration-Date gate on demand rather than re-rolling
+ *   the plain "Valid" option until one happens to land.
+ * @returns `{ dpci: string; upc: string; vcp: number; ssp: number; cartons: number; ssps: number }`
+ * @throws 404 NOT_FOUND if no Item row matches (the table is empty, or the filter has no matches)
  */
 async function sampleReinstate(req: HttpRequest): Promise<unknown> {
   await requireAuth(req);
 
-  const count = await prisma.item.count();
+  const requiresExpirationDateParam = new URL(req.url).searchParams.get('requiresExpirationDate');
+  const where = requiresExpirationDateParam != null ? { requiresExpirationDate: requiresExpirationDateParam === 'true' } : {};
+
+  const count = await prisma.item.count({ where });
   if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
   const skip = Math.floor(Math.random() * count);
-  const item = await prisma.item.findFirst({ skip, select: { dept: true, class: true, item: true } });
+  const item = await prisma.item.findFirst({ where, skip, select: { dept: true, class: true, item: true, upc: true } });
 
   return {
     dpci: `${String(item!.dept).padStart(3, '0')}-${String(item!.class).padStart(2, '0')}-${String(item!.item).padStart(4, '0')}`,
+    upc: item!.upc,
     vcp: 12,
     ssp: 12,
-    pallets: 1,
     cartons: 12,
     ssps: 0,
   };

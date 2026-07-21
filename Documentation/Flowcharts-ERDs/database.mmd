@@ -86,6 +86,7 @@ erDiagram
         int currentCartons
         int receivedSSPs
         int currentSSPs
+        int cartonsPerPallet "v1.6.11 — cartons making up ONE full pallet, fixed snapshot at creation (not live like currentCartons); every pallet gets this, not just PAR-created; rounding rule wholeCartons+(looseSSPs>0?1:0)"
         int vcp "Vendor Case Pack, eaches per carton"
         int ssp "Store Ship Pack, must be factor of vcp"
         string status "NVarChar(15), PalletStatus values"

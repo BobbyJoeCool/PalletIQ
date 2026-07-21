@@ -708,6 +708,28 @@ async function removeHold(req: HttpRequest): Promise<unknown> {
   return { locationId: formatLocationId(full.aisle, full.bin, full.level), clearedHoldType };
 }
 
+/**
+ * Existence check for an Aisle on its own (no Bin/Level yet) — PAR's progressive
+ * Aisle/Bin/Level entry validation (v1.6.11, new): the Bin and Level boxes' own existence
+ * are already coverable by `getLocation`'s existing 6-digit (Aisle+Bin) and 8-digit
+ * (Aisle+Bin+Level) lookups respectively, but nothing previously answered "does this Aisle
+ * alone have any locations at all," which a 3-digit-only value can't express as either of
+ * those formats.
+ *
+ * @param req - HTTP request with query param `aisle` (1+ digits)
+ * @returns `{ exists: boolean }`
+ * @throws 400 INVALID_INPUT if `aisle` is missing or not numeric
+ */
+async function checkAisleExists(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+
+  const aisleParam = new URL(req.url).searchParams.get('aisle');
+  if (!aisleParam || !/^\d+$/.test(aisleParam)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
+  const count = await prisma.location.count({ where: { aisle: Number(aisleParam) } });
+  return { exists: count > 0 };
+}
+
 app.http('getLocation', {
   methods: ['GET'],
   authLevel: 'anonymous',
@@ -716,6 +738,13 @@ app.http('getLocation', {
   // always digit strings (see parseLocationBarcode), so this is a non-breaking constraint.
   route: 'locations/{id:int}',
   handler: withHandler(getLocation),
+});
+
+app.http('checkAisleExists', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'locations/aisle-exists',
+  handler: withHandler(checkAisleExists),
 });
 
 app.http('getStorageCodes', {

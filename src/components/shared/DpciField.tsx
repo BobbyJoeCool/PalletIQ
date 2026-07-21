@@ -7,6 +7,12 @@ interface DpciFieldProps {
    *  Styling is variant-based, not free className passthrough (issue #78). */
   size?: 'compact' | 'default';
   label?: string;
+  /** Overrides the box height class entirely (e.g. `"h-[54px]"`) instead of the
+   *  `size`-based preset — lets a caller match an exact pixel height from its own
+   *  surrounding fields (PAR's redesign, v1.6.11, where DPCI sits beside numpad-driven
+   *  boxes that don't share either preset height) without adding a third fixed-size
+   *  variant. Optional; `size` still controls height as before when omitted. */
+  boxHeight?: string;
 }
 
 /**
@@ -19,8 +25,8 @@ interface DpciFieldProps {
  * Read-only DPCI display is not part of this component — that's already handled by
  * `<LiveId type="dpci">` (see PII/MNP), which this is not a replacement for.
  */
-export function DpciField({ value, onChange, size = 'default', label = 'DPCI' }: DpciFieldProps) {
-  const boxHeight = size === 'compact' ? 'h-[40px]' : 'h-[44px]';
+export function DpciField({ value, onChange, size = 'default', label = 'DPCI', boxHeight: boxHeightOverride }: DpciFieldProps) {
+  const boxHeight = boxHeightOverride ?? (size === 'compact' ? 'h-[40px]' : 'h-[44px]');
   const textSize = size === 'compact' ? 'text-[16px]' : 'text-[20px]';
   const inputClass = `font-data ${textSize} text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 ${boxHeight} text-center focus:outline-none focus:border-[#CC0000]`;
 

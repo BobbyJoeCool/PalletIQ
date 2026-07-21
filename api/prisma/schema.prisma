@@ -143,6 +143,16 @@ model Pallet {
   currentCartons  Int
   receivedSSPs    Int
   currentSSPs     Int
+  // How many cartons make up ONE full pallet of this quantity — a fixed snapshot taken at
+  // creation (receiving or PAR reinstate), never updated afterward as currentCartons
+  // depletes. Added for PAR's v1.6.11 redesign as groundwork for Bulk locations (multiple
+  // full pallets + a partial sharing one location) — every pallet gets this now, not just
+  // PAR-created ones, backfilled onto pre-existing rows. Rounding rule when derived from a
+  // cartons+loose-SSPs pair: wholeCartons + (looseSSPs > 0 ? 1 : 0) — a flat +1 if there's
+  // any loose-SSP remainder, not a fractional/ratio-based calculation. `editPallet`'s
+  // INSUFFICIENT_QUANTITY check previously used receivedCartons as a stand-in for this
+  // exact concept (see that handler's own comment) — now reads this field directly instead.
+  cartonsPerPallet Int      @default(0)
   vcp             Int
   ssp             Int
   status          String    @db.NVarChar(15)

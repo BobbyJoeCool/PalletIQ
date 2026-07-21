@@ -38,6 +38,13 @@ function randomUnitWeight(): string {
   return (randomInt(10, 2500) / 100).toFixed(2)
 }
 
+/** How many cartons make up one full pallet of this quantity (Pallet.cartonsPerPallet,
+ *  v1.6.11) — a flat +1 if there's any loose-SSP remainder at all, not a ratio-based
+ *  calculation. Shared by every pallet-creation code path so the rule stays identical. */
+function cartonsPerPalletFor(cartons: number, looseSSPs: number): number {
+  return cartons + (looseSSPs > 0 ? 1 : 0)
+}
+
 /** Converts a Date to a Julian-style date int (YYYY + zero-padded day-of-year), e.g. 2026175. */
 function julianDate(d: Date): number {
   const start = new Date(d.getFullYear(), 0, 0)
@@ -490,6 +497,7 @@ type PalletRow = {
   receivedPallets: number; currentPallets: number
   receivedCartons: number; currentCartons: number
   receivedSSPs: number; currentSSPs: number
+  cartonsPerPallet: number
   vcp: number; ssp: number; status: string
   locationAisle: number; locationBin: number; locationLevel: number
   storageCode: string; size: string; zone: number
@@ -549,6 +557,7 @@ function buildLocationsAndPallets() {
             receivedPallets: hasFullPallet, currentPallets: hasFullPallet,
             receivedCartons: cartons, currentCartons: cartons,
             receivedSSPs: 0, currentSSPs: 0,
+            cartonsPerPallet: cartonsPerPalletFor(cartons, 0),
             vcp, ssp, status: 'STORED',
             locationAisle: aisle, locationBin: bin, locationLevel: level,
             storageCode, size, zone,
@@ -679,6 +688,7 @@ function addMultiOccupancyPallets(pallets: PalletRow[]): PalletRow[] {
         receivedPallets: hasFullPallet, currentPallets: hasFullPallet,
         receivedCartons: cartons, currentCartons: cartons,
         receivedSSPs: 0, currentSSPs: 0,
+        cartonsPerPallet: cartonsPerPalletFor(cartons, 0),
         vcp, ssp, status: 'STORED',
         locationAisle: base.locationAisle, locationBin: base.locationBin, locationLevel: base.locationLevel,
         storageCode: base.storageCode, size: base.size, zone: base.zone,

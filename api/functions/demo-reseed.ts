@@ -642,6 +642,13 @@ function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/** How many cartons make up one full pallet of this quantity (Pallet.cartonsPerPallet,
+ *  v1.6.11) — a flat +1 if there's any loose-SSP remainder, matching seed.ts's own copy
+ *  of this rule. */
+function cartonsPerPalletFor(cartons: number, looseSSPs: number): number {
+  return cartons + (looseSSPs > 0 ? 1 : 0);
+}
+
 /** Fisher-Yates shuffle, returning a new array (doesn't mutate the input). */
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -798,6 +805,10 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
         const vcp = randomFrom(VCP_OPTIONS);
         const ssp = Math.random() < 0.5 ? vcp : vcp / 2;
         const receivedCartons = randomInt(6, 20);
+        // NOTE (found while adding cartonsPerPallet, not fixed here — pre-existing and out
+        // of scope): this doesn't match the loose-SSPs-below-one-carton's-worth rule
+        // PII/editPallet enforce elsewhere (currentSSPs should be < vcp/ssp); same
+        // pre-existing pattern as seed-pending-pallets.ts.
         const receivedSSPs = receivedCartons * ssp;
 
         // A small fraction seeded CANCELED instead of PUT_PENDING — a voided/canceled
@@ -817,6 +828,7 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
           currentCartons: receivedCartons,
           receivedSSPs,
           currentSSPs: receivedSSPs,
+          cartonsPerPallet: cartonsPerPalletFor(receivedCartons, receivedSSPs),
           vcp,
           ssp,
           status,

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useNumpad } from '../../context/NumpadContext';
+import { INVALID_WASH } from '../../lib/invalidWash';
 import { useNumpadField } from '../../lib/useNumpadField';
 
 interface LocationEntryFieldsProps {
@@ -67,6 +68,24 @@ interface LocationEntryFieldsProps {
    *  separately via its own Level Confirmation modal rather than typed here. Default
    *  false — LII/WLH/PAR require the full three-box resolution and are unaffected. */
   levelOptional?: boolean;
+  /** Fires the moment the Aisle box completes (3 manually-typed digits — not a full-value
+   *  scan override, which resolves the whole thing via `onResolved` instead), before
+   *  advancing to Bin. Lets a caller progressively validate Aisle on its own (v1.6.11, PAR)
+   *  without waiting for the whole 3-box chain to resolve. Optional — LII/WLH/MNP/PIP/SDP
+   *  don't pass it and are unaffected. */
+  onAisleEntered?: (aisle: string) => void;
+  /** Fires the moment the Bin box completes (3 manually-typed digits), before advancing to
+   *  Level (or resolving immediately, if Level is locked/optional) — same progressive-
+   *  validation use as `onAisleEntered`, one box further in. */
+  onBinEntered?: (aisle: string, bin: string) => void;
+  /** Per-box invalid-wash flags (v1.6.11, PAR) — independent of `highlight` (which washes
+   *  all 3 boxes as a single group). Use these when a caller can attribute a specific
+   *  failure to one box specifically (e.g. "this Aisle doesn't exist" vs. "this Bin doesn't
+   *  exist within that Aisle" vs. "this Level doesn't exist within that Aisle+Bin") rather
+   *  than the whole three-box value being generically wrong. All default false. */
+  aisleInvalid?: boolean;
+  binInvalid?: boolean;
+  levelInvalid?: boolean;
 }
 
 /**
@@ -85,7 +104,7 @@ interface LocationEntryFieldsProps {
  */
 export function LocationEntryFields({
   onResolved, autoFocus = true, value, highlight = false, onActiveChange, lockedAisle, lockedLevel, size = 'default',
-  levelOptional = false,
+  levelOptional = false, onAisleEntered, onBinEntered, aisleInvalid = false, binInvalid = false, levelInvalid = false,
 }: LocationEntryFieldsProps) {
   const { hidePanel } = useNumpad();
   // maxLength auto-advances once the fixed-length manual entry is complete (3/3/2 digits);
@@ -144,6 +163,7 @@ export function LocationEntryFields({
     }
     if (v.length !== 3) return;
     aisleValueRef.current = v;
+    onAisleEntered?.(v);
     setTimeout(() => focusBinField(), 50);
   }
 
@@ -164,6 +184,7 @@ export function LocationEntryFields({
     }
     if (v.length !== 3) return;
     binValueRef.current = v;
+    onBinEntered?.(lockedAisle ?? aisleValueRef.current, v);
     if (lockedLevel != null) {
       hidePanel();
       onResolved((lockedAisle ?? aisleValueRef.current) + v + lockedLevel, false);
@@ -227,8 +248,13 @@ export function LocationEntryFields({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  const boxBorder = (active: boolean) =>
-    highlight ? 'border-[#CC0000]' : active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]';
+  // `invalid` (per-box, v1.6.11) takes precedence over both `highlight` (whole-group,
+  // border-only, pre-v1.6.11) and the plain active-focus border — same invalid-over-active
+  // precedence every other numpad field in the app uses (see FieldBox in PARPage.tsx).
+  const boxClasses = (active: boolean, invalid: boolean) =>
+    invalid ? INVALID_WASH
+      : (highlight || active) ? 'border-[#CC0000] bg-[#0D0D0D]'
+      : 'border-[#3A3A3A] hover:border-[#555] bg-[#0D0D0D]';
 
   const boxHeight  = size === 'large' ? 'h-[68px]' : 'h-[56px]';
   const textSize   = size === 'large' ? 'text-[26px]' : 'text-[22px]';
@@ -246,7 +272,7 @@ export function LocationEntryFields({
             <span className={`font-data ${textSize} font-medium text-[#9A9A9A]`}>{lockedAisle}</span>
           </div>
         ) : (
-          <button type="button" onClick={focusAisleField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${boxBorder(aisleField.isActive)}`}>
+          <button type="button" onClick={focusAisleField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors ${boxClasses(aisleField.isActive, aisleInvalid)}`}>
             <span className={`font-data ${textSize} font-medium text-white`}>{aisleField.value || <span className="text-[#444]">—</span>}</span>
             {aisleField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
           </button>
@@ -254,7 +280,7 @@ export function LocationEntryFields({
       </div>
       <div className={`flex flex-col gap-1 ${binWidth}`}>
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Bin</span>
-        <button type="button" onClick={focusBinField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${boxBorder(binField.isActive)}`}>
+        <button type="button" onClick={focusBinField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors ${boxClasses(binField.isActive, binInvalid)}`}>
           <span className={`font-data ${textSize} font-medium text-white`}>{binField.value || <span className="text-[#444]">—</span>}</span>
           {binField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
         </button>
@@ -266,7 +292,7 @@ export function LocationEntryFields({
             <span className={`font-data ${textSize} font-medium text-[#9A9A9A]`}>{lockedLevel}</span>
           </div>
         ) : (
-          <button type="button" onClick={focusLevelField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${boxBorder(levelField.isActive)}`}>
+          <button type="button" onClick={focusLevelField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors ${boxClasses(levelField.isActive, levelInvalid)}`}>
             <span className={`font-data ${textSize} font-medium text-white`}>{levelField.value || <span className="text-[#444]">—</span>}</span>
             {levelField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
           </button>

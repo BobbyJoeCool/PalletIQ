@@ -9,6 +9,7 @@ interface ItemRecord {
   upc: string; name: string; desc: string; descShort: string;
   retailPrice: unknown; cost: unknown; unitWeight: unknown;
   packingZoneCode: number; storageCode: string; conveyable: boolean;
+  requiresExpirationDate: boolean;
 }
 
 /** Serializes a full Item row, converting Prisma's Decimal fields to plain numbers. */
@@ -28,6 +29,9 @@ function serializeItem(item: ItemRecord) {
     packingZoneCode: item.packingZoneCode,
     storageCode: item.storageCode,
     conveyable: item.conveyable,
+    // Surfaced (v1.6.11) for PAR's redesign — requiring Expiration Date entry when this
+    // item flags it, same as PII's existing read-only "Required for this item" prompt.
+    requiresExpirationDate: item.requiresExpirationDate,
   };
 }
 

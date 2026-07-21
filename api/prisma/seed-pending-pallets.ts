@@ -26,6 +26,14 @@ function randomFrom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
+/** How many cartons make up one full pallet of this quantity (Pallet.cartonsPerPallet,
+ *  v1.6.11) — a flat +1 if there's any loose-SSP remainder, matching seed.ts's own copy
+ *  of this rule (kept duplicated rather than shared, since this file already duplicates
+ *  its other seed helpers instead of importing from seed.ts). */
+function cartonsPerPalletFor(cartons: number, looseSSPs: number): number {
+  return cartons + (looseSSPs > 0 ? 1 : 0)
+}
+
 /** Entry point: creates PALLETS_PER_COMBO PUT_PENDING pallets for every distinct (storageCode, size) pair. */
 async function main() {
   // All distinct (storageCode, size) pairs that exist in the warehouse.
@@ -72,6 +80,7 @@ async function main() {
     receivedPallets: number; currentPallets: number;
     receivedCartons: number; currentCartons: number;
     receivedSSPs: number; currentSSPs: number;
+    cartonsPerPallet: number;
     vcp: number; ssp: number;
     status: string;
     locationAisle: null; locationBin: null; locationLevel: null;
@@ -93,6 +102,10 @@ async function main() {
       const vcp = randomFrom(VCP_OPTIONS)
       const ssp = Math.random() < 0.5 ? vcp : vcp / 2
       const receivedCartons = randomInt(6, 20)
+      // NOTE (found while adding cartonsPerPallet, not fixed here — pre-existing and out
+      // of scope for that task): this `receivedCartons * ssp` doesn't match the
+      // loose-SSPs-are-below-one-carton's-worth rule PII/editPallet enforce elsewhere
+      // (currentSSPs should be < vcp/ssp) — flagging for a separate look, not touched now.
       const receivedSSPs    = receivedCartons * ssp
 
       pallets.push({
@@ -103,6 +116,7 @@ async function main() {
         receivedPallets: 0, currentPallets: 0,
         receivedCartons, currentCartons: receivedCartons,
         receivedSSPs,    currentSSPs:    receivedSSPs,
+        cartonsPerPallet: cartonsPerPalletFor(receivedCartons, receivedSSPs),
         vcp,
         ssp,
         status: 'PUT_PENDING',

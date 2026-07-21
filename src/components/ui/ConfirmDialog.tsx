@@ -33,7 +33,12 @@ export function ConfirmDialog({
         <h2 className="font-ui text-[24px] font-semibold text-white text-center mb-3">
           {title}
         </h2>
-        <p className="font-ui text-[17px] text-[#9A9A9A] text-center mb-7">
+        {/* whitespace-pre-line: a caller can build a multi-line message with literal `\n`
+            separators (e.g. PAR's create-summary dialog) and have each line render on its
+            own row instead of collapsing to a single space, HTML's own default whitespace
+            behavior. A no-`\n` message (every other current caller) renders identically to
+            before. */}
+        <p className="font-ui text-[17px] text-[#9A9A9A] text-center mb-7 whitespace-pre-line">
           {message}
         </p>
         <div className="flex gap-3">
