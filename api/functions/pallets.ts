@@ -8,11 +8,11 @@ import { generateUniquePid } from '../lib/palletId.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 
 /**
- * Retrieves all fields of a pallet, including item UPC, current location,
+ * Retrieves all fields of a pallet, including item UPC/description, current location,
  * and the full name + zNumber of the worker who received, put, and last-pulled it.
  *
  * @param req - HTTP request with URL param `id` (numeric pallet ID)
- * @returns Full pallet record including item UPC, quantities, status, location, and user stamps
+ * @returns Full pallet record including item UPC/description, quantities, status, location, and user stamps
  * @throws 400 INVALID_INPUT if id is not a number; 404 NOT_FOUND if pallet does not exist
  */
 async function getPallet(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
@@ -24,7 +24,7 @@ async function getPallet(req: HttpRequest, _ctx: InvocationContext): Promise<unk
   const pallet = await prisma.pallet.findUnique({
     where: { pid },
     include: {
-      itemRef: { select: { upc: true, requiresExpirationDate: true } },
+      itemRef: { select: { upc: true, requiresExpirationDate: true, descShort: true } },
       receivedBy: { select: { zNumber: true, firstName: true, lastName: true } },
       putBy: { select: { zNumber: true, firstName: true, lastName: true } },
       lastPulledBy: { select: { zNumber: true, firstName: true, lastName: true } },
@@ -37,6 +37,7 @@ async function getPallet(req: HttpRequest, _ctx: InvocationContext): Promise<unk
     pid: pallet.pid,
     dpci: { dept: pallet.dept, class: pallet.class, item: pallet.item },
     upc: pallet.itemRef.upc,
+    descShort: pallet.itemRef.descShort,
     vcp: pallet.vcp,
     ssp: pallet.ssp,
     receivedPallets: pallet.receivedPallets,
@@ -416,6 +417,7 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   const body = await req.json() as {
     dpci?: string; upc?: string;
     vcp?: number; ssp?: number;
+    size?: string;
     expirationDate?: string | null;
     confirmNearExpiration?: boolean;
     mode?: 'single' | 'multiple';
@@ -548,8 +550,12 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
         locationAisle, locationBin, locationLevel,
         // Inherited from the reinstated location, same as any other put (placePallet) —
         // null (nothing to inherit) when reinstated without a location, i.e. PUT_PENDING.
+        // Size falls back to the worker-entered `body.size` when no location was given —
+        // unlike Storage Code, Item has no intrinsic Size to fall back on (see the Item
+        // model's own comment), so without this a PUT_PENDING pallet would have nothing at
+        // all for SDP's default location search to match on until its first put.
         storageCode: locationRow?.storageCode ?? null,
-        size:        locationRow?.size ?? null,
+        size:        locationRow?.size ?? body.size ?? null,
         zone:        locationRow?.zone ?? null,
         receivedByZ: auth.zNumber,
         receivedAt:  now,

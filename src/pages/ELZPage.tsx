@@ -4,10 +4,12 @@ import { AisleGrid, type GridLevel, type ZoneBinRange } from '../components/shar
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { ZoneCodeBadge } from '../components/shared/ZoneCodeBadge';
 import { useAuth } from '../context/AuthContext';
+import { useELZ } from '../context/ELZContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
+import { INVALID_WASH } from '../lib/invalidWash';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useStorageCodes } from '../lib/useStorageCodes';
 
@@ -47,7 +49,7 @@ interface NavState {
  */
 export function ELZPage() {
   const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const { hidePanel } = useNumpad();
   const navigate = useNavigate();
   const routerLocation = useLocation();
@@ -55,8 +57,10 @@ export function ELZPage() {
 
   // padOnSubmit: typing "5" and hitting OK is accepted as "005" (see LocationEntryFields).
   const aisleField = useNumpadField('numpad', 3, true);
-  const [aisle, setAisle] = useState<number | null>(prefill?.aisle ?? null);
-  const [storageCode, setStorageCode] = useState(prefill?.storageCode ?? '');
+  // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
+  // ELZContext.tsx's own doc comment. Router-state prefill (below) still wins over the
+  // persisted value on a fresh navigation with explicit state attached.
+  const { aisle, setAisle, storageCode, setStorageCode } = useELZ();
   const [result, setResult] = useState<EmptyByZoneResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -78,9 +82,16 @@ export function ELZPage() {
     && !fullStorageCodes.some((c) => c.code === storageCode);
 
   // Pre-populate the Aisle field display from router state (ELA "View Zone Map" / STG) on
-  // mount — Storage Code's pre-population is handled by StorageCodeField's own value-sync effect.
+  // mount — Storage Code's pre-population is handled by StorageCodeField's own value-sync
+  // effect. Explicit router-state prefill wins over whatever ELZContext persisted from a
+  // prior visit (v1.7.0) — a caller navigating here with a specific aisle in mind should
+  // always land on that aisle, not whatever was last viewed.
   useEffect(() => {
-    if (prefill?.aisle != null) aisleField.set(String(prefill.aisle));
+    if (prefill?.aisle != null) {
+      aisleField.set(String(prefill.aisle));
+      setAisle(prefill.aisle);
+    }
+    if (prefill?.storageCode != null) setStorageCode(prefill.storageCode);
     // Field setters are stable across the lifetime of the hook — only run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -94,7 +105,7 @@ export function ELZPage() {
       setAisle(isNaN(n) ? null : n);
       hidePanel();
     });
-  }, [aisleField, hidePanel]);
+  }, [aisleField, hidePanel, setAisle]);
 
   // Query trigger: grid loads from Aisle alone (issue #60 — Storage Code is no longer
   // required); re-runs on either field's change. When Storage Code is present the zone
@@ -105,6 +116,12 @@ export function ELZPage() {
     if (aisle == null) return;
     if (isInvalidStorageCode) {
       setMessage({ type: 'error', text: `Invalid Storage Code — ${storageCode}` });
+    } else {
+      // Clears any stale message from a prior attempt (e.g. a previous "Invalid Aisle")
+      // before this run's own fetch settles — issue #95. Not cleared in the
+      // isInvalidStorageCode branch above: that message should keep showing through a
+      // successful (Aisle-only) grid load, since Storage Code really is still invalid.
+      clearMessage();
     }
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetch-on-filter-change effect
@@ -133,7 +150,7 @@ export function ELZPage() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [aisle, storageCode, isInvalidStorageCode, token, setMessage]);
+  }, [aisle, storageCode, isInvalidStorageCode, token, setMessage, clearMessage]);
 
   /** Navigates to STG, pre-populated with the currently queried aisle and Storage Code. */
   function stageAisle() {
@@ -152,7 +169,9 @@ export function ELZPage() {
           <button
             type="button"
             onClick={focusAisleField}
-            className={`flex items-center h-[64px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${aisleField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+            className={`flex items-center h-[64px] px-5 rounded-[12px] border-2 transition-colors ${
+              notFound ? INVALID_WASH : aisleField.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+            }`}
           >
             <span className="font-data text-[26px] font-medium text-white">
               {aisleField.value || <span className="text-[#444]">—</span>}
@@ -160,7 +179,7 @@ export function ELZPage() {
             {aisleField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
           </button>
         </div>
-        <StorageCodeField value={storageCode} onChange={setStorageCode} options={storageCodeOptions} closeOnAutoSubmit />
+        <StorageCodeField value={storageCode} onChange={setStorageCode} options={storageCodeOptions} closeOnAutoSubmit invalid={isInvalidStorageCode} />
       </div>
 
       {/* Main area: grid + zone summary */}

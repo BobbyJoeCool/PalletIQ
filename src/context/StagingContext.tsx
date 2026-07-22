@@ -99,13 +99,39 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  /** Clears the front stack after a successful stage and compacts the queue forward (see compactStacks above). */
+  /** Clears the front stack after a successful stage and compacts the queue forward (see
+   *  compactStacks above). Direct instruction: whichever of Aisle/StorageCode/Size was
+   *  *identical across all three stacks* before staging carries forward into whatever new
+   *  empty slot opens up as a result — independently per field (e.g. all three the same
+   *  Storage Code but different Sizes persists only the Storage Code, not the Size).
+   *  Distinct from the pre-existing "queue goes fully empty" case just below, which persists
+   *  the staged stack's *own* values regardless of whether the other two even had anything
+   *  to compare against — that only ever fires when both other stacks were already unused,
+   *  never overlapping with this per-field carry-forward. */
   const resetStackAfterStage = useCallback(() => {
     setStacks((prev) => {
       const staged = prev[0];
+      const sharedField = (field: 'aisle' | 'storageCode' | 'size') =>
+        prev[0][field] !== '' && prev[0][field] === prev[1][field] && prev[1][field] === prev[2][field]
+          ? prev[0][field]
+          : null;
+      const sharedAisle = sharedField('aisle');
+      const sharedStorageCode = sharedField('storageCode');
+      const sharedSize = sharedField('size');
+
       const compacted = compactStacks([emptyStack(), prev[1], prev[2]]);
       if (isEmptyStack(compacted[0])) {
         compacted[0] = { ...compacted[0], aisle: staged.aisle, storageCode: staged.storageCode, size: staged.size };
+      } else if (sharedAisle != null || sharedStorageCode != null || sharedSize != null) {
+        for (let i = 0; i < 3; i++) {
+          if (!isEmptyStack(compacted[i])) continue;
+          compacted[i] = {
+            ...compacted[i],
+            ...(sharedAisle != null && { aisle: sharedAisle }),
+            ...(sharedStorageCode != null && { storageCode: sharedStorageCode }),
+            ...(sharedSize != null && { size: sharedSize }),
+          };
+        }
       }
       return compacted;
     });

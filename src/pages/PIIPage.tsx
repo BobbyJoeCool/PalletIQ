@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
+import { DemoPicker } from '../components/shared/DemoPicker';
 import { type DpciValue } from '../components/shared/DpciField';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -14,7 +15,21 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { EDIT_REASON_CODES } from '../lib/editReasonCodes';
 import { fmtDpci } from '../lib/fmt';
+import { INVALID_WASH } from '../lib/invalidWash';
 import { useNumpadField } from '../lib/useNumpadField';
+import type { PalletStatus } from '@shared/index';
+
+/** Every `PalletStatus` value (see `shared/index.ts`), with a human-readable label, for
+ *  PII's "Find by Status" demo picker (v1.7.0, direct instruction). */
+const STATUS_PICKER_OPTIONS: { key: PalletStatus; label: string }[] = [
+  { key: 'PUT_PENDING', label: 'Put Pending' },
+  { key: 'STORED', label: 'Stored' },
+  { key: 'CA_PULL_PEND', label: 'CA Pull Pending' },
+  { key: 'FP_PULL_PEND', label: 'FP Pull Pending' },
+  { key: 'PULLED', label: 'Pulled' },
+  { key: 'CANCELED', label: 'Canceled' },
+  { key: 'CONSOLIDATED', label: 'Consolidated' },
+];
 
 /** Formats a location object as its canonical 8-digit id (Aisle+Bin+Level). */
 function location8(loc: { aisle: number; bin: number; level: number }): string {
@@ -90,13 +105,17 @@ function useEditField(
 }
 
 /** A numpad-driven Edit-mode entry box — tap to open the numpad, active state gets the red
- *  border/caret treatment matching every other numpad field in this app. */
-function EditBox({ value, active, onFocus, width = 'w-[140px]' }: { value: string; active: boolean; onFocus: () => void; width?: string }) {
+ *  border/caret treatment matching every other numpad field in this app. `invalid` applies
+ *  the app-wide red-wash treatment (v1.7.0) — invalid wins over active, same precedence as
+ *  every other washed field. */
+function EditBox({ value, active, onFocus, width = 'w-[140px]', invalid = false }: { value: string; active: boolean; onFocus: () => void; width?: string; invalid?: boolean }) {
   return (
     <button
       type="button"
       onClick={onFocus}
-      className={`flex items-center justify-center h-[44px] ${width} px-3 rounded-[8px] bg-[#0D0D0D] border-2 transition-colors ${active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+      className={`flex items-center justify-center h-[44px] ${width} px-3 rounded-[8px] border-2 transition-colors ${
+        invalid ? INVALID_WASH : active ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+      }`}
     >
       <span className="font-data text-[20px] text-white">{value || <span className="text-[#444]">—</span>}</span>
       {active && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
@@ -119,7 +138,7 @@ type ScreenState = 'ready' | 'loaded' | 'edit';
  */
 export function PIIPage() {
   const { token, user } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const { hidePanel } = useNumpad();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -132,6 +151,10 @@ export function PIIPage() {
   const { pallet, setPallet } = usePII();
   const [screenState, setScreenState] = useState<ScreenState>(() => (pallet ? 'loaded' : 'ready'));
   const [loading, setLoading] = useState(false);
+  // Red-wash invalid state (App-Wide item 9, v1.7.0) — Pallet ID stays visible as-typed on a
+  // not-found error (issue PII#01), so it's a genuine individual-wash candidate like PAR's
+  // UPC/ISI's UPC.
+  const [palletInvalid, setPalletInvalid] = useState(false);
 
   const palletField = useNumpadField();
   // Seeds the Pallet ID field's displayed value from a persisted pallet on mount (a fresh
@@ -153,22 +176,28 @@ export function PIIPage() {
   const [editExpirationDate, setEditExpirationDate] = useState('');
   const [reasonCode, setReasonCode] = useState('');
   const [saving, setSaving] = useState(false);
+  // Red-wash invalid state (App-Wide item 9, v1.7.0) — VCP/SSP is a cross-validated pair,
+  // same group-wash treatment as PAR's own VCP/SSP (a rule that needs both values at once,
+  // not attributable to either field alone).
+  const [vcpSspInvalid, setVcpSspInvalid] = useState(false);
 
   /** Runs `vcpSspWarning` against whatever the three fields currently hold and, if it finds
    *  a problem, warns immediately (non-blocking — Save's own server-side check is still the
-   *  one that actually blocks, per direct instruction). */
+   *  one that actually blocks, per direct instruction) and washes VCP/SSP red. */
   const checkVcpSspWarning = useCallback((vcp: string, ssp: string, ssps: string) => {
     const warning = vcpSspWarning(vcp, ssp, ssps);
+    setVcpSspInvalid(!!warning);
     if (warning) {
       playAlert('warning');
       setMessage({ type: 'warning', text: warning });
     }
   }, [setMessage]);
 
-  // Every Edit-mode box is numpad-driven (direct instruction — no native inputs left in
-  // Edit mode besides Expiration Date, which has no numpad equivalent). VCP/SSP/SSPs on
-  // Pallet each re-check the trio on their own commit, using the other two's current state
-  // — whichever one the worker just defocused is always included via its own fresh value.
+  // Every Edit-mode box is numpad-driven, including Expiration Date (v1.7.0 — rebuilt as
+  // the same Month/Day/Year chain PAR uses, replacing the native `<input type="date">` this
+  // screen used before). VCP/SSP/SSPs on Pallet each re-check the trio on their own commit,
+  // using the other two's current state — whichever one the worker just defocused is
+  // always included via its own fresh value.
   const deptEdit = useEditField(editDpci.dept, (v) => setEditDpci((p) => ({ ...p, dept: v })), { maxLength: 3, padOnSubmit: true });
   const classEdit = useEditField(editDpci.class, (v) => setEditDpci((p) => ({ ...p, class: v })), { maxLength: 2, padOnSubmit: true });
   const itemEdit = useEditField(editDpci.item, (v) => setEditDpci((p) => ({ ...p, item: v })), { maxLength: 4, padOnSubmit: true });
@@ -182,15 +211,80 @@ export function PIIPage() {
   // body with confirmNearExpiration added.
   const [expirationConfirmPending, setExpirationConfirmPending] = useState(false);
 
+  // Expiration Date — numpad-driven Month/Day/Year chain (v1.7.0, matching PAR's exact
+  // format — direct instruction). Month/Day use padOnSubmit (typing "5" and confirming
+  // becomes "05"); Year has no padOnSubmit, same reasoning as PAR's own chain (a partial
+  // year has no sensible padded meaning). Only the entry-format-level checks (Month 1-12,
+  // Day exists in the entered month) are mirrored here — PAR's additional whole-date
+  // "too soon" group wash is a business-rule check, not a format one, and PII already
+  // surfaces that separately via the server's EXPIRATION_NEEDS_CONFIRM confirm popup below.
+  const monthField = useNumpadField('numpad', 2, true);
+  const dayField = useNumpadField('numpad', 2, true);
+  const yearField = useNumpadField('numpad', 4);
+  const [monthInvalid, setMonthInvalid] = useState(false);
+  const [dayInvalid, setDayInvalid] = useState(false);
+
+  /** Days in a given month, 1-indexed — see PARPage.tsx's identical helper for the leap-year reasoning. */
+  function daysInMonth(month: number, year?: number): number {
+    if (month === 2) {
+      if (year == null) return 29;
+      const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+      return isLeap ? 29 : 28;
+    }
+    const table = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return table[month - 1] ?? 31;
+  }
+
+  function focusMonthField() { monthField.focus(handleMonthConfirm); }
+  function focusDayField() { dayField.focus(handleDayConfirm); }
+  function focusYearField() { yearField.focus(handleYearConfirm); }
+
+  /** Month field submit: validates the 1-12 range and advances to Day, same as PAR's chain. */
+  function handleMonthConfirm(value: string) {
+    const v = value.trim();
+    if (v.length !== 2) return;
+    const n = parseInt(v, 10);
+    setMonthInvalid(n < 1 || n > 12);
+    setTimeout(() => focusDayField(), 50);
+  }
+  /** Day field submit: validates the day exists in the entered month, skipped if Month is
+   *  already out of range. Advances to Year regardless, same as PAR's chain. */
+  function handleDayConfirm(value: string) {
+    const v = value.trim();
+    if (v.length !== 2) return;
+    const monthNum = parseInt(monthField.value, 10);
+    const dayNum = parseInt(v, 10);
+    const monthOk = monthNum >= 1 && monthNum <= 12;
+    setDayInvalid(monthOk && (dayNum < 1 || dayNum > daysInMonth(monthNum)));
+    setTimeout(() => focusYearField(), 50);
+  }
+  /** Year field submit: once exactly 4 digits are entered, re-checks Day against the real
+   *  year (leap-year precision), composes Month+Day+Year into the ISO value this screen's
+   *  own Save already expects, and hides the panel (chain's terminal step). */
+  function handleYearConfirm(value: string) {
+    const v = value.trim();
+    if (v.length !== 4) return;
+    hidePanel();
+    const monthNum = parseInt(monthField.value, 10);
+    const dayNum = parseInt(dayField.value, 10);
+    const yearNum = parseInt(v, 10);
+    const monthOk = monthNum >= 1 && monthNum <= 12;
+    const dayOk = monthOk && dayNum >= 1 && dayNum <= daysInMonth(monthNum, yearNum);
+    setDayInvalid(monthOk && !dayOk);
+    setEditExpirationDate(`${v}-${monthField.value}-${dayField.value}`);
+  }
+
   /** Looks up a pallet by id via the API and transitions to the loaded state; resets to ready on failure. */
   const loadPallet = useCallback(async (idStr: string) => {
     hidePanel();
+    clearMessage();
     const pid = parseInt(idStr, 10);
     if (isNaN(pid)) {
       playAlert('error');
       setMessage({ type: 'error', text: 'Pallet not found' });
       // Field intentionally left as-typed (issue PII#01) — the worker should be able to
       // see and correct what they actually entered, not have it silently wiped.
+      setPalletInvalid(true);
       return;
     }
     setLoading(true);
@@ -199,17 +293,19 @@ export function PIIPage() {
       setPallet(data);
       setScreenState('loaded');
       palletField.set(String(pid));
+      setPalletInvalid(false);
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: 'Pallet not found' });
       // Same as above — left as-typed rather than cleared (issue PII#01).
       setPallet(null);
       setScreenState('ready');
+      setPalletInvalid(true);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, hidePanel]);
+  }, [token, hidePanel, clearMessage]);
 
   /** Registers the Pallet ID field's numpad handler; a scan while editing discards unsaved changes and re-loads. */
   const focusPalletField = useCallback(() => {
@@ -262,8 +358,15 @@ export function PIIPage() {
     setEditSSPs(String(pallet.currentSSPs));
     setEditPallets(String(pallet.currentPallets));
     setEditExpirationDate(toDateInputValue(pallet.expirationDate));
+    const [y, m, d] = toDateInputValue(pallet.expirationDate).split('-');
+    monthField.set(m ?? '');
+    dayField.set(d ?? '');
+    yearField.set(y ?? '');
+    setMonthInvalid(false);
+    setDayInvalid(false);
     setReasonCode('');
     setExpirationConfirmPending(false);
+    setVcpSspInvalid(false);
     setScreenState('edit');
   }
 
@@ -385,11 +488,30 @@ export function PIIPage() {
   /** Looks up a pallet id that doesn't exist, simulating a not-found scan. */
   const demoBad = useCallback(() => void loadPallet('999999999'), [loadPallet]);
 
-  /** Footer demo-button slot content: a good scan and a bad scan trigger. */
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+
+  /** Dispatches the shared DemoPicker's choice — fetches a random pallet with the chosen
+   *  literal `status` value (v1.7.0, direct instruction: "a helper button that finds pallet
+   *  ID on PII by status, with each of those statuses"). */
+  const pickStatus = useCallback(async (status: PalletStatus) => {
+    setStatusPickerOpen(false);
+    try {
+      const { palletId } = await apiFetch<{ palletId: number }>(`/api/demo/pallet-status?status=${status}`, token!);
+      void loadPallet(String(palletId));
+    } catch (err) {
+      setMessage({ type: 'error', text: `Demo pallet: ${err instanceof Error ? err.message : 'unavailable'}` });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, loadPallet]);
+
+  /** Footer demo-button slot content: a good scan, the status picker, and a bad scan trigger. */
   const demoSlot = useMemo(() => (
     <>
       <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">
         ✓ Scan PID
+      </button>
+      <button type="button" onClick={() => setStatusPickerOpen(true)} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#003366] hover:bg-[#004488] text-white transition-colors">
+        Find by Status
       </button>
       <button type="button" onClick={demoBad} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#660000] hover:bg-[#770000] text-white transition-colors">
         ✗ Bad PID
@@ -408,7 +530,9 @@ export function PIIPage() {
         <button
           type="button"
           onClick={focusPalletField}
-          className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${palletField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+          className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] border-2 transition-colors ${
+            palletInvalid ? INVALID_WASH : palletField.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+          }`}
         >
           <span className="font-data text-[26px] font-medium text-white">
             {palletField.value || <span className="text-[#444]">—</span>}
@@ -436,11 +560,14 @@ export function PIIPage() {
                 </div>
                 <CurrentValue>{fmtDpci(pallet.dpci)}</CurrentValue>
               </div>
+              <DataRow label="Description">{pallet.descShort}</DataRow>
               <div className="flex items-center gap-3 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">VCP / SSP</span>
-                <EditBox value={vcpEdit.field.value} active={vcpEdit.field.isActive} onFocus={vcpEdit.focus} width="w-[90px]" />
-                <span className="text-[#555]">/</span>
-                <EditBox value={sspEdit.field.value} active={sspEdit.field.isActive} onFocus={sspEdit.focus} width="w-[90px]" />
+                <div className={`flex items-center gap-3 rounded-[10px] ${vcpSspInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
+                  <EditBox value={vcpEdit.field.value} active={vcpEdit.field.isActive} onFocus={vcpEdit.focus} width="w-[90px]" />
+                  <span className="text-[#555]">/</span>
+                  <EditBox value={sspEdit.field.value} active={sspEdit.field.isActive} onFocus={sspEdit.focus} width="w-[90px]" />
+                </div>
                 <CurrentValue>{pallet.vcp}/{pallet.ssp}</CurrentValue>
               </div>
               <div className="flex items-center gap-3 py-2 border-b border-[#1A1A1A]">
@@ -465,15 +592,19 @@ export function PIIPage() {
                     <span className="ml-2 font-ui text-[11px] font-semibold text-[#FF6666] normal-case tracking-normal">Required for this item</span>
                   )}
                 </span>
-                {/* No numpad equivalent for date entry exists in this app — kept as a native
-                    date input, unlike every other Edit-mode box on this screen. */}
-                <input
-                  aria-label="Expiration Date"
-                  type="date"
-                  value={editExpirationDate}
-                  onChange={(e) => setEditExpirationDate(e.target.value)}
-                  className="font-data text-[20px] text-white bg-[#0D0D0D] border-2 border-[#3A3A3A] rounded-[8px] px-3 h-[44px] w-[180px] focus:outline-none focus:border-[#CC0000]"
-                />
+                {/* Month/Day/Year numpad chain (v1.7.0), matching PAR's exact format. */}
+                <div className="flex items-center gap-2">
+                  <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Month</span>
+                  <EditBox value={monthField.value} active={monthField.isActive} onFocus={focusMonthField} width="w-[64px]" invalid={monthInvalid} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Day</span>
+                  <EditBox value={dayField.value} active={dayField.isActive} onFocus={focusDayField} width="w-[64px]" invalid={dayInvalid} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Year</span>
+                  <EditBox value={yearField.value} active={yearField.isActive} onFocus={focusYearField} width="w-[84px]" />
+                </div>
                 <CurrentValue>{fmtDate(pallet.expirationDate)}</CurrentValue>
               </div>
               <div className="flex items-start gap-2 py-2 border-b border-[#1A1A1A]">
@@ -487,6 +618,7 @@ export function PIIPage() {
             <div className="flex gap-8">
               <div className="flex-1 flex flex-col">
                 <DataRow label="DPCI"><LiveId type="dpci" id={fmtDpci(pallet.dpci)} /></DataRow>
+                <DataRow label="Description">{pallet.descShort}</DataRow>
                 <DataRow label="UPC"><LiveId type="upc" id={pallet.upc} /></DataRow>
                 <DataRow label="VCP / SSP">
                   {pallet.vcp} / {pallet.ssp}
@@ -579,6 +711,15 @@ export function PIIPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {statusPickerOpen && (
+        <DemoPicker
+          title="Find a pallet with which status?"
+          options={STATUS_PICKER_OPTIONS}
+          onPick={pickStatus}
+          onCancel={() => setStatusPickerOpen(false)}
+        />
       )}
     </div>
   );

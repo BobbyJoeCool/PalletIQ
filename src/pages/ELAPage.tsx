@@ -4,6 +4,7 @@ import { AisleSizeTable, type AisleSizeRow, type AisleSizeSort } from '../compon
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { useAuth } from '../context/AuthContext';
+import { useELA } from '../context/ELAContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
 import { SIZES } from '../lib/sizes';
@@ -22,22 +23,22 @@ type SortState = AisleSizeSort;
  */
 export function ELAPage() {
   const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const navigate = useNavigate();
   const storageCodes = useStorageCodes();
 
-  const [storageCode, setStorageCode] = useState('');
-  const [size, setSize] = useState('');
+  // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
+  // ELAContext.tsx's own doc comment.
+  const { storageCode, setStorageCode, size, setSize, selected, setSelected } = useELA();
   const [rows, setRows] = useState<AisleRow[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<number | null>(null);
   const [sort, setSort] = useState<SortState>({ column: 'aisle', direction: 'asc' });
 
   /** Applies a new Storage Code filter, clearing the current row selection. */
   const handleStorageCodeChange = useCallback((v: string) => {
     setStorageCode(v);
     setSelected(null);
-  }, []);
+  }, [setStorageCode, setSelected]);
 
   const storageDesc = useMemo(
     () => storageCodes?.find((c) => c.code === storageCode)?.desc ?? null,
@@ -70,6 +71,7 @@ export function ELAPage() {
       setMessage({ type: 'error', text: `Invalid Size — ${size}` });
       return;
     }
+    clearMessage();
     let cancelled = false;
     setLoading(true);
     // Default sort matches what was actually searched for: the queried size's own count
@@ -85,20 +87,29 @@ export function ELAPage() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [storageCode, size, isInvalidCode, isInvalidSize, token, setMessage]);
+  }, [storageCode, size, isInvalidCode, isInvalidSize, token, setMessage, clearMessage]);
 
   const selectedRow = rows?.find((r) => r.aisle === selected) ?? null;
 
   /** Selects a result row, or deselects it if it's already the selected row. */
   function toggleRow(aisle: number) {
-    setSelected((s) => (s === aisle ? null : aisle));
+    setSelected(selected === aisle ? null : aisle);
   }
 
-  /** Sorts by the tapped column; tapping the already-active column flips its direction. */
+  /** Sorts by the tapped column; tapping the already-active column flips its direction.
+   *  Sorting by a size column also fills that size into the Size filter above (direct
+   *  instruction) — column is literally a size code whenever it isn't 'aisle' (see
+   *  AisleSizeTable's own column definitions), so this is the same value the filter field
+   *  itself would hold; re-triggers the existing fetch-on-filter-change effect and clears
+   *  the current row selection, same as changing Size directly via the field does. */
   function handleSort(column: string) {
     setSort((prev) => (prev.column === column
       ? { column, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
       : { column, direction: column === 'aisle' ? 'asc' : 'desc' }));
+    if (column !== 'aisle') {
+      setSize(column);
+      setSelected(null);
+    }
   }
 
   /** Navigates to ELZ, pre-populated with the selected row's aisle and the current Storage Code. */
@@ -118,8 +129,8 @@ export function ELAPage() {
       {/* Top bar: filter fields + navigation actions */}
       <div className="flex items-end justify-between gap-4 shrink-0">
         <div className="flex items-end gap-4">
-          <StorageCodeField value={storageCode} onChange={handleStorageCodeChange} closeOnAutoSubmit />
-          <SizeField value={size} onChange={(v) => { setSize(v); setSelected(null); }} />
+          <StorageCodeField value={storageCode} onChange={handleStorageCodeChange} closeOnAutoSubmit invalid={isInvalidCode} />
+          <SizeField value={size} onChange={(v) => { setSize(v); setSelected(null); }} invalid={isInvalidSize} />
         </div>
 
         <div className="flex gap-3">

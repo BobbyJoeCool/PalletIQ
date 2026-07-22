@@ -326,7 +326,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   const { stacks, updateStack, master } = useStaging();
   const { hidePanel } = useNumpad();
   const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const stack = stacks[index];
 
   const aisleField = useNumpadField('numpad');
@@ -380,6 +380,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
     if (trimmed && !isNaN(aisleNum)) {
       try {
         await apiFetch(`/api/locations/empty-by-zone?aisle=${aisleNum}`, token!);
+        clearMessage();
       } catch (err) {
         const code = err instanceof Error ? err.message : '';
         if (code === 'NOT_FOUND') {
@@ -391,7 +392,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
       }
     }
     updateStack(index, { aisle: trimmed });
-  }, [hidePanel, index, updateStack, token, setMessage]);
+  }, [hidePanel, index, updateStack, token, setMessage, clearMessage]);
 
   /** Registers this stack's Aisle field numpad handler. */
   const focusAisleField = useCallback(() => {
@@ -710,33 +711,27 @@ function LocationsPanel({ height }: { height?: number }) {
                   </span>
                 );
               }
-              // The next suggestion (first overall) and the last (final location needed to
-              // fully satisfy the quantity, green per STG#03) are both tap targets — tapping
-              // either opens the reject/hold flow, not staging (per issue #77, unchanged by
-              // #81). A bubble that's both (Quantity = 1) renders as the green/last style.
-              if (b.isNext || b.isLast) {
-                return (
-                  <button
-                    key={b.key}
-                    type="button"
-                    onClick={() => setRejectTarget(b.loc)}
-                    style={bubbleStyle}
-                    className={`px-2 flex items-center justify-center rounded-full border-2 font-data font-bold text-center whitespace-nowrap transition-colors ${
-                      b.isLast ? 'border-[#5FD18B] bg-[rgba(95,209,139,0.12)] text-[#5FD18B] hover:border-[#7FE0A8]' : 'border-[#3A6BB0] bg-[#132C4D] text-white hover:border-[#5A8BD0]'
-                    }`}
-                  >
-                    {fmtLocation(b.loc)}
-                  </button>
-                );
-              }
+              // Every real-location bubble is a tap target — tapping any of them opens the
+              // reject/hold flow, not staging (issue #97, reversing #77's first/last-only
+              // restriction: rejecting a bubble always triggers a full server-side re-fetch
+              // of the suggestion list via handleHeld()'s bumpDataVersion(), regardless of
+              // which position was rejected, so there's no queue-compaction logic tied to a
+              // bubble's position that middle-bubble rejection would break). isLast (the
+              // final location needed to fully satisfy the quantity) still gets the distinct
+              // green styling from STG#03; every other position — including isNext, and now
+              // every middle position — shares the same blue tap-target style.
               return (
-                <span
+                <button
                   key={b.key}
+                  type="button"
+                  onClick={() => setRejectTarget(b.loc)}
                   style={bubbleStyle}
-                  className="px-2 flex items-center justify-center rounded-full border-2 border-[#3A6BB0] bg-[#132C4D] text-white font-data font-bold text-center whitespace-nowrap"
+                  className={`px-2 flex items-center justify-center rounded-full border-2 font-data font-bold text-center whitespace-nowrap transition-colors ${
+                    b.isLast ? 'border-[#5FD18B] bg-[rgba(95,209,139,0.12)] text-[#5FD18B] hover:border-[#7FE0A8]' : 'border-[#3A6BB0] bg-[#132C4D] text-white hover:border-[#5A8BD0]'
+                  }`}
                 >
                   {fmtLocation(b.loc)}
-                </span>
+                </button>
               );
             })}
           </div>

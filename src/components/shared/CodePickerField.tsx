@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useNumpadField } from '../../lib/useNumpadField';
 import { useNumpad } from '../../context/NumpadContext';
+import { INVALID_WASH } from '../../lib/invalidWash';
 
 export interface CodeOption { code: string; desc: string }
 
@@ -47,6 +48,18 @@ interface CodePickerFieldProps {
   strict?: boolean;
   /** Required when `strict` is true — called with the rejected value in place of `onChange`. */
   onInvalid?: (code: string) => void;
+  /** Applies the app-wide red-wash treatment (see `src/lib/invalidWash.ts`) instead of the
+   *  plain active-only border — reserved for an actual validation failure the caller has
+   *  already determined, same precedence as PAR's `FieldBox` (invalid wins over active). */
+  invalid?: boolean;
+}
+
+/** Imperative handle so a caller can programmatically focus the field (e.g. PAR's
+ *  screen-wide auto-advance chain) — mirrors LocationEntryFields' `autoFocus` prop intent,
+ *  but as a direct call instead of a boolean-toggle prop, since the caller needs this to
+ *  reliably re-fire on every chain pass rather than only the first. */
+export interface CodePickerFieldHandle {
+  focus: () => void;
 }
 
 /**
@@ -59,15 +72,17 @@ interface CodePickerFieldProps {
  * Used by StorageCodeField and SizeField, which each supply their own `options` (narrowed
  * or full) and entry-field specifics (maxLength, uppercasing, styling).
  */
-export function CodePickerField({
-  value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false, closeOnAutoSubmit = false, earlyCommit, strict = false, onInvalid,
-}: CodePickerFieldProps) {
+export const CodePickerField = forwardRef<CodePickerFieldHandle, CodePickerFieldProps>(function CodePickerField({
+  value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false, closeOnAutoSubmit = false, earlyCommit, strict = false, onInvalid, invalid = false,
+}, ref) {
   const field = useNumpadField(panel, maxLength, undefined, earlyCommit);
   const { hidePanel } = useNumpad();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { field.set(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useImperativeHandle(ref, () => ({ focus: focusField }));
 
   // Tap-outside closes the popup — it's a lightweight anchored dropdown, not a modal, so
   // it shouldn't need its own explicit dismiss control.
@@ -119,7 +134,9 @@ export function CodePickerField({
           onClick={focusField}
           disabled={disabled}
           aria-label={ariaLabel}
-          className={`flex-1 min-w-0 flex items-center justify-center ${boxHeight} px-4 rounded-[12px] bg-[#0D0D0D] border-2 disabled:opacity-40 transition-colors ${field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+          className={`flex-1 min-w-0 flex items-center justify-center ${boxHeight} px-4 rounded-[12px] border-2 disabled:opacity-40 transition-colors ${
+            invalid ? INVALID_WASH : field.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+          }`}
         >
           <span className={`font-data ${textSize} font-medium text-white tracking-[0.04em] truncate`}>
             {field.value || <span className="text-[#444]">—</span>}
@@ -163,4 +180,4 @@ export function CodePickerField({
       )}
     </div>
   );
-}
+});

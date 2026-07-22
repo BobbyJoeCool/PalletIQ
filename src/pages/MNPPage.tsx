@@ -6,6 +6,7 @@ import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
+import { type MNPScannedPallet, useMNP } from '../context/MNPContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
@@ -15,15 +16,8 @@ import { hasMinRole, type Role } from '@shared/index';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-interface Qty { pallets: number; cartons: number; ssps: number }
-
-interface ScannedPallet {
-  id: number;
-  dpci: string;
-  descShort: string;
-  quantity: Qty;
-  currentLocation: string | null;
-}
+// ScannedPallet's shape now lives in MNPContext.tsx (App-Wide screen-persistence,
+// v1.7.0) as `MNPScannedPallet`, imported above rather than redeclared.
 
 interface HistoryEntry {
   key: number;
@@ -386,11 +380,13 @@ type ScreenState = 'ready' | 'pallet_scanned' | 'level_modal';
  */
 export function MNPPage() {
   const { token, user } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const { deliverScan } = useNumpad();
 
   const [screenState, setScreenState] = useState<ScreenState>('ready');
-  const [scannedPallet, setScannedPallet] = useState<ScannedPallet | null>(null);
+  // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
+  // MNPContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern.
+  const { scannedPallet, setScannedPallet } = useMNP();
   // Quick-hold panel (WLH.md) for the scanned pallet's current location, if it has one.
   const [holdOpen, setHoldOpen] = useState(false);
   const [pendingLocation, setPendingLocation] = useState<string | null>(null);
@@ -474,7 +470,7 @@ export function MNPPage() {
     const palletId = parseInt(v, 10);
     setLoading(true);
     try {
-      const result = await apiFetch<{ pallet: ScannedPallet; eligible: boolean }>(
+      const result = await apiFetch<{ pallet: MNPScannedPallet; eligible: boolean }>(
         '/api/puts/manual/scan',
         token!,
         { method: 'POST', body: JSON.stringify({ palletId: isNaN(palletId) ? v : palletId }) },
@@ -487,6 +483,10 @@ export function MNPPage() {
       if (result.pallet.currentLocation) {
         playAlert('info');
         setMessage({ type: 'info', text: `Pallet ${result.pallet.id} currently stored in ${fmtLocation(result.pallet.currentLocation)} — proceeding as move` });
+      } else {
+        // Clears any stale error from a prior failed scan (issue #95) — the
+        // currentLocation branch above already overwrites it with its own info message.
+        clearMessage();
       }
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
@@ -529,6 +529,7 @@ export function MNPPage() {
       setPendingLocation(locationId);
       setLevelHint(locationId.length === 8 ? parseInt(locationId.slice(6, 8), 10) : demoLevelHintRef.current);
       setScreenState('level_modal');
+      clearMessage();
     } catch {
       playAlert('error');
       resetLocationField();

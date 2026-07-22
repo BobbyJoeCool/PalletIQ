@@ -18,7 +18,10 @@ Route: `/empty/aisle` · Jump code: `ELA` · Component: `src/pages/ELAPage.tsx`
    /api/locations/empty-by-aisle` automatically — there is no separate submit step.
    - 2a. If the code isn't a real Storage Code, the message bar shows `"Invalid Storage
      Code — {code}"` and no query runs; the results area shows *"Enter a valid Storage
-     Code to see available locations"*.
+     Code to see available locations"*. The Storage Code field itself also picks up the
+     app-wide red-wash treatment (v1.7.0, individual field wash — see
+     `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) instead of just its
+     plain active border, via `StorageCodeField`'s new `invalid` prop.
 3. Worker optionally types or picks a **Size** (`SizeField` — XS/HS/S/M/L, same
    type-or-tap-chevron pattern; a two-letter code auto-commits at 2 characters, a single
    letter S/M/L commits immediately after 1 keystroke). Size only narrows which aisles
@@ -27,7 +30,9 @@ Route: `/empty/aisle` · Jump code: `ELA` · Component: `src/pages/ELAPage.tsx`
    (see step 5).
    - 3a. If the typed value isn't one of XS/HS/S/M/L, the message bar shows `"Invalid Size
      — {size}"` and no query runs; the results area shows *"Enter a valid Size to see
-     available locations"*.
+     available locations"*. Same red-wash treatment as Storage Code above, via
+     `SizeField`'s new `invalid` prop — each field washes independently since Storage Code
+     and Size each have their own, independently-checkable validity.
 4. Once a valid Storage Code (with or without Size) resolves, a banner reads *"Displaying
    {code}: {description}"* above the results table, and the table fills with one row per
    aisle that has at least one non-zero empty or staged count (aisles that are all-zero
@@ -42,6 +47,11 @@ Route: `/empty/aisle` · Jump code: `ELA` · Component: `src/pages/ELAPage.tsx`
    count for that size to the bottom (a `0` isn't a useful "smallest" result); descending
    already puts zeros last naturally. Ties keep prior relative row order (stable sort).
    Staged counts never affect sort order, only empty counts (or the aisle number itself).
+   **(v1.7.0)** Sorting by a Size column also fills that size into the **Size** filter field
+   above (direct instruction) — the column key *is* the size code, so this reuses the same
+   value the field itself would hold; re-triggers the existing fetch-on-filter-change effect
+   and clears the current row selection, same as changing Size directly via the field does.
+   Sorting by Aisle doesn't touch the Size filter.
 7. Worker taps a row to select it (highlights it) — this activates the **View Zone Map**
    and **Stage Aisle** buttons in the top-right of the screen. Tapping the same row again
    deselects it and disables both buttons; tapping a different row moves the selection.
@@ -74,6 +84,11 @@ Route: `/empty/aisle` · Jump code: `ELA` · Component: `src/pages/ELAPage.tsx`
 Message bar messages persist until replaced by the next `setMessage` call (no auto-clear
 timer) — see `MessageBarContext`. There is no explicit acknowledgment step; the next
 successful (or differently-failing) filter change simply overwrites whatever was shown.
+
+**(v1.7.0, issue #95)** A stale error also clears on the next successful lookup: the
+`empty-by-aisle` fetch effect now calls `clearMessage()` before running (once past the
+Storage Code/Size validation guards, which still set and keep their own errors), so a
+prior invalid entry's error doesn't linger through a subsequent valid one.
 
 ## Layout
 
@@ -192,6 +207,8 @@ query-string params, so the values only survive a single client-side navigation 
 refresh of the destination screen loses the pre-population, which is expected (STG/ELZ
 both restore whatever their own session state already had if navigated to directly).
 
+**Session persistence via `ELAContext`.** `storageCode`, `size`, and `selected` (the selected row) all live in `ELAProvider` (mounted in `App.tsx`, alongside all 12 sibling per-screen providers — `StagingProvider`/`PIIProvider`/`ISIProvider`/`LIIProvider`/`PIPProvider`/`SDPProvider`/`MNPProvider`/`IIDProvider`/`PARProvider`/`WLHProvider`/`SARProvider`/`ELZProvider`, all 13 now mounted together wrapping `AppShell`), not local component state, so navigating away from ELA and back restores the last-run filter and selection instead of resetting to a blank query. Deliberately the filter *inputs*, not a cached results array — the fetch effect (see "Query trigger" above) already re-runs automatically whenever `storageCode` has a value, so restoring the inputs gets both persistence and freshness for free, instead of risking a stale, out-of-date empty-location count.
+
 **Shared table component:** `AisleSizeTable` (`src/components/shared/AisleSizeTable.tsx`)
 is the literal same component STG's own "no Aisle yet" info panel renders (as of v1.6.6) —
 extracted out of this page specifically so the two screens can never drift into two
@@ -212,9 +229,10 @@ button, which is the only behavioral difference between the two call sites.
   in v1.6.4, plus a Size-validation follow-up shipped in v1.6.5 (see Change Log). See
   `DevNotes/Fixes/MASTER-CHECKLIST.md`'s ELA section for the authoritative "all done"
   confirmation.
-- **App-wide (cross-cutting, not ELA-specific):** "Add screen persistence across the app"
-  is an open App-Wide v1.7.0 item — ELA's own filter/selection state does not currently
-  persist across navigation away and back (unlike STG's session-level `StagingContext`).
+- **App-wide (cross-cutting, not ELA-specific):** the App-Wide screen-persistence item
+  has since landed — ELA's own filter/selection state now persists across navigation away
+  and back via `ELAContext` (see Behind the Scenes above), matching STG's earlier
+  session-level `StagingContext` pattern.
 
 ## Change Log
 

@@ -3,11 +3,15 @@ import { useSearchParams } from 'react-router-dom';
 import { DemoPicker } from '../components/shared/DemoPicker';
 import { HOLD_LABELS, type HoldCategory } from '../components/shared/HoldPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { SizeField } from '../components/shared/SizeField';
+import type { CodePickerFieldHandle } from '../components/shared/CodePickerField';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
+import { type PARItemLookup, usePAR } from '../context/PARContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
@@ -26,11 +30,16 @@ function splitDpciString(s: string): { dept: string; class: string; item: string
 
 type Mode = 'single' | 'multiple';
 
-interface ItemLookup { dpci: string; descShort: string; requiresExpirationDate: boolean }
+// ItemLookup's shape now lives in PARContext.tsx (App-Wide screen-persistence, v1.7.0)
+// as `PARItemLookup`, imported above rather than redeclared.
 interface ReinstateRowResult { palletId: number; cartons: number; ssps: number; cartonsPerPallet: number; status: 'PUT_PENDING' | 'STORED'; locationId: string | null }
 interface ReinstateResult { pallets: ReinstateRowResult[] }
 interface SampleReinstate { dpci: string; upc: string; vcp: number; ssp: number; cartons: number; ssps: number }
-interface LocationStatusInfo { status: string; holdCategory: HoldCategory | null; contraction: boolean }
+interface LocationStatusInfo { status: string; holdCategory: HoldCategory | null; contraction: boolean; storageCode: string; size: string }
+/** One row in the session-local Reinstate Log (v1.7.0) — `key` doubles as React's list key
+ *  since a Pallet ID is already unique per row. `locationId` is null for a PUT_PENDING
+ *  create (no Location entered/resolved), same as `ReinstateRowResult`'s own field. */
+interface ReinstateHistoryEntry { key: number; palletId: number; dpci: string; cartons: number; locationId: string | null; timestamp: Date }
 
 // INVALID_WASH (v1.6.11 invalid-field treatment) now lives in src/lib/invalidWash.ts,
 // shared with LocationEntryFields.tsx — see that file's own doc comment for the full spec.
@@ -172,9 +181,12 @@ export function PARPage() {
     showNumpad();
   }, [showNumpad]);
 
-  // Screen-wide auto-advance (v1.6.11, direct instruction — DPCI/UPC → VCP → SSP →
-  // Cartons → SSPs → Month→Day→Year (if the item requires an Expiration Date) or straight
-  // to Location's Aisle box otherwise). `locationAutoFocus` is declared up here (rather
+  // Screen-wide auto-advance (v1.6.11, direct instruction; Size step added v1.7.0 —
+  // "after entering VCP/SSP, it should direct to Size before we direct to carton count") —
+  // DPCI/UPC → VCP → SSP → Size (skipped when a Location is already entered, since it's
+  // disabled/inherited then) → Cartons → SSPs → Month→Day→Year (if the item requires an
+  // Expiration Date) or straight to Location's Aisle box otherwise). `locationAutoFocus` is
+  // declared up here (rather
   // than alongside the rest of Location's own state, further down) because both branches
   // of that fork — Expiration Date's own `handleYearConfirm` and Cartons/SSPs' own
   // `handleSspsConfirm` — need to set it, and both are declared before Location's section;
@@ -236,7 +248,10 @@ export function PARPage() {
     [printerField, resetToNumpad],
   );
 
-  const [item, setItem] = useState<ItemLookup | null>(null);
+  // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
+  // PARContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern, scoped to
+  // just the resolved item (not the whole multi-step create form).
+  const { item, setItem } = usePAR();
   const [dpciInvalid, setDpciInvalid] = useState(false);
   const [upcInvalid, setUpcInvalid] = useState(false);
   const [expirationDate, setExpirationDate] = useState(''); // ISO YYYY-MM-DD, or ''
@@ -255,7 +270,7 @@ export function PARPage() {
     upcField.clear();
     setUpcInvalid(false);
     try {
-      const data = await apiFetch<ItemLookup>(`/api/items/dpci/${digits}`, token!);
+      const data = await apiFetch<PARItemLookup>(`/api/items/dpci/${digits}`, token!);
       setItem(data);
       setDpciInvalid(false);
       // Screen-wide auto-advance (v1.6.11, direct instruction): "after entering the DPCI
@@ -306,7 +321,7 @@ export function PARPage() {
     if (!trimmed) return;
     resetToNumpad();
     try {
-      const data = await apiFetch<ItemLookup>(`/api/items/upc/${encodeURIComponent(trimmed)}`, token!);
+      const data = await apiFetch<PARItemLookup>(`/api/items/upc/${encodeURIComponent(trimmed)}`, token!);
       setItem(data);
       setUpcInvalid(false);
       const parsed = splitDpciString(data.dpci);
@@ -339,6 +354,14 @@ export function PARPage() {
   const yearField = useNumpadField('numpad', 4);
   const [monthInvalid, setMonthInvalid] = useState(false);
   const [dayInvalid, setDayInvalid] = useState(false);
+  // Live-value mirrors — same stale-closure hazard as vcpValueRef/sspValueRef above:
+  // handleDayConfirm/handleYearConfirm are registered via a chain frozen at whenever Month
+  // was first tapped (before any of Month/Day/Year had values), so their own reads of
+  // monthField.value/dayField.value never see later updates. This was the actual cause of
+  // a direct report: entering 10/24/2027 and hitting Create Pallet submitted "//2027" —
+  // Month and Day were both read stale (empty) inside handleYearConfirm's ISO composition.
+  const monthValueRef = useRef('');
+  const dayValueRef = useRef('');
 
   /** Days in a given month, 1-indexed (`month`: 1=Jan…12=Dec). `year` is optional and only
    *  affects February: omitted (Month/Day are validated against each other before Year is
@@ -383,11 +406,15 @@ export function PARPage() {
    *  the month, we should validate the month to be only 1-12") and advances to Day once
    *  exactly 2 digits are entered, regardless of whether the value itself was in range —
    *  same "length drives advance, correctness is checked separately" convention the DPCI
-   *  chain uses. Reads live from `monthField.value` rather than a parallel ref (see
-   *  `loadByDpci`'s own note on why this screen no longer tracks chain values in refs). */
+   *  chain uses. Writes monthValueRef (not just monthField.value) — unlike the DPCI chain,
+   *  Month/Day/Year have no other value-setting path (no demo prefill, no URL param) for a
+   *  ref to ever go stale against, so the DPCI chain's reasoning for reading `.value`
+   *  directly doesn't apply here; a ref is what actually fixes the bug this chain had
+   *  (see monthValueRef/dayValueRef's own declaration comment). */
   function handleMonthConfirm(value: string) {
     const v = value.trim();
     if (v.length !== 2) return;
+    monthValueRef.current = v;
     const n = parseInt(v, 10);
     setMonthInvalid(n < 1 || n > 12);
     setTimeout(() => focusDayField(), 50);
@@ -399,7 +426,8 @@ export function PARPage() {
   function handleDayConfirm(value: string) {
     const v = value.trim();
     if (v.length !== 2) return;
-    const monthNum = parseInt(monthField.value, 10);
+    dayValueRef.current = v;
+    const monthNum = parseInt(monthValueRef.current, 10);
     const dayNum = parseInt(v, 10);
     const monthOk = monthNum >= 1 && monthNum <= 12;
     setDayInvalid(monthOk && (dayNum < 1 || dayNum > daysInMonth(monthNum)));
@@ -415,13 +443,13 @@ export function PARPage() {
     const v = value.trim();
     if (v.length !== 4) return;
     resetToNumpad();
-    const monthNum = parseInt(monthField.value, 10);
-    const dayNum = parseInt(dayField.value, 10);
+    const monthNum = parseInt(monthValueRef.current, 10);
+    const dayNum = parseInt(dayValueRef.current, 10);
     const yearNum = parseInt(v, 10);
     const monthOk = monthNum >= 1 && monthNum <= 12;
     const dayOk = monthOk && dayNum >= 1 && dayNum <= daysInMonth(monthNum, yearNum);
     setDayInvalid(monthOk && !dayOk);
-    const iso = `${v}-${monthField.value}-${dayField.value}`;
+    const iso = `${v}-${monthValueRef.current}-${dayValueRef.current}`;
     setExpirationDate(iso);
     if (monthOk && dayOk) {
       checkExpirationDate(iso);
@@ -438,6 +466,25 @@ export function PARPage() {
   const vcpField = useNumpadField();
   const sspField = useNumpadField();
   const [vcpSspInvalid, setVcpSspInvalid] = useState(false);
+  // Live-value mirrors for handleVcpConfirm/handleSspConfirm to read the *other* field's
+  // just-committed value from — reading vcpField.value/sspField.value directly here would
+  // be stale: each handler is a closure frozen at the moment its own field was tapped
+  // (vcpField.focus(handleVcpConfirm)), which predates that field ever having a value, so
+  // its own internal reference to the *other* field's `.value` never sees later updates
+  // (same stale-closure hazard already documented on the DPCI chain's deptValueRef/
+  // classValueRef — this bug went unnoticed here until a direct report: typing VCP=9,
+  // SSP=2 never washed/warned, because handleSspConfirm's `vcpField.value` read was frozen
+  // at '' from before VCP was ever typed).
+  const vcpValueRef = useRef('');
+  const sspValueRef = useRef('');
+  // Pallet Size (direct instruction, v1.7.0) — worker-entered, since a PAR-reinstated
+  // pallet has no Item-level intrinsic Size to fall back on (unlike Storage Code) and would
+  // otherwise start with a null Size until its first put, leaving SDP's default location
+  // search with nothing to match on for this pallet. Optional — `Pallet.size` stays
+  // nullable regardless; a Location entered below (with its own real Size) still takes
+  // precedence over this field server-side, same as Storage Code already does.
+  const [sizeValue, setSizeValue] = useState('');
+  const sizeFieldRef = useRef<CodePickerFieldHandle>(null);
 
   const vcpNum = vcpField.value ? parseInt(vcpField.value, 10) : NaN;
   const sspNum = sspField.value ? parseInt(sspField.value, 10) : NaN;
@@ -461,19 +508,34 @@ export function PARPage() {
   function handleVcpConfirm(value: string) {
     const v = value.trim();
     vcpField.set(v);
-    checkVcpSsp(v, sspField.value);
+    vcpValueRef.current = v;
+    checkVcpSsp(v, sspValueRef.current);
     setTimeout(() => focusSsp(), 50);
   }
-  /** SSP field submit: checks the ratio and advances to Cartons — Single Pallet mode only
+  /** SSP field submit: checks the ratio and advances to Size — Single Pallet mode only
    *  (direct instruction doesn't cover Multiple Pallets' own fields, which aren't part of
-   *  this auto-advance flow). Via focusCartonsRef, not focusCartons directly — see that
-   *  ref's own declaration comment (near the top of the component) for why. */
+   *  this auto-advance flow) — screen-wide auto-advance (v1.7.0, direct instruction): "after
+   *  entering VCP/SSP, it should direct to Size before we direct to carton count." Skips
+   *  straight to Cartons instead when a Location is already entered, since Size is disabled
+   *  (inherited from the Location) at that point — see SizeField's `disabled` prop below.
+   *  Via focusCartonsRef, not focusCartons directly — see that ref's own declaration comment
+   *  (near the top of the component) for why. */
   function handleSspConfirm(value: string) {
     const v = value.trim();
     sspField.set(v);
-    checkVcpSsp(vcpField.value, v);
+    sspValueRef.current = v;
+    checkVcpSsp(vcpValueRef.current, v);
+    if (mode === 'single') {
+      if (location) setTimeout(() => focusCartonsRef.current(), 50);
+      else setTimeout(() => sizeFieldRef.current?.focus(), 50);
+    } else resetToNumpad();
+  }
+
+  /** Size field commit: advances to Cartons — Single Pallet mode only, continuing the
+   *  VCP -> SSP -> Size -> Cartons chain (see handleSspConfirm's own comment). */
+  function handleSizeChange(v: string) {
+    setSizeValue(v);
     if (mode === 'single') setTimeout(() => focusCartonsRef.current(), 50);
-    else resetToNumpad();
   }
 
   function focusVcp() { vcpField.focus(handleVcpConfirm); }
@@ -584,8 +646,12 @@ export function PARPage() {
   /** Live existence + status/hold/contraction check, direct instruction — fires once all
    *  three Location boxes are complete, mirroring DPCI's own existence-check effect
    *  rather than waiting until submit. Occupied/held/contracted locations are not
-   *  rejected outright (see below) — only "not found" blocks Create Pallet. */
+   *  rejected outright (see below) — only "not found" blocks Create Pallet. Skipped
+   *  entirely when Aisle or Bin is already known invalid — Level "not existing" in an
+   *  Aisle/Bin that itself doesn't exist isn't a separate, independently-wrong fact, and
+   *  only the top-level field actually at fault should wash (direct instruction). */
   const checkLocation = useCallback(async (id: string) => {
+    if (aisleInvalid || binInvalid) return;
     try {
       const data = await apiFetch<LocationStatusInfo>(`/api/locations/${id}`, token!);
       setLocationInvalid(false);
@@ -596,7 +662,7 @@ export function PARPage() {
       setMessage({ type: 'error', text: 'Location not found' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, aisleInvalid, binInvalid]);
 
   /** Aisle box's own progressive check (v1.6.11) — fires the moment Aisle completes, before
    *  Bin is even typed. A stale Bin/Level result from a previously-entered, now-replaced
@@ -613,15 +679,19 @@ export function PARPage() {
 
   /** Bin box's own progressive check (v1.6.11) — fires the moment Bin completes, reusing
    *  `getLocation`'s existing 6-digit (Aisle+Bin, level-agnostic) lookup rather than a new
-   *  endpoint, since that's already exactly "does this Aisle+Bin combination exist." */
+   *  endpoint, since that's already exactly "does this Aisle+Bin combination exist." Skipped
+   *  entirely when Aisle is already known invalid — Bin can't meaningfully exist or not
+   *  exist within an Aisle that itself doesn't, and only the top-level field actually at
+   *  fault (Aisle) should wash, not every downstream box too (direct instruction). */
   const checkAisleBinExists = useCallback(async (aisle: string, bin: string) => {
+    if (aisleInvalid) return;
     try {
       await apiFetch(`/api/locations/${aisle}${bin}`, token!);
       setBinInvalid(false);
     } catch {
       setBinInvalid(true);
     }
-  }, [token]);
+  }, [token, aisleInvalid]);
 
   /** `isOverride` is true for a value that bypassed the normal per-box typed sequence — a
    *  full-barcode scan (LocationEntryFields' own `wasScanned`) or a demo-picker prefill
@@ -647,24 +717,44 @@ export function PARPage() {
   // Occupied (status !== EMPTY), on hold, or contracted — the pallet being reinstated is
   // very likely physically sitting here already, so this warns-then-allows rather than
   // blocking outright (direct instruction, a deliberate departure from a normal put).
+  // Storage Code mismatch (v1.7.0, direct instruction — "type check the storage code of
+  // the location vs. the DPCI... a warning popup should come up") reuses this same
+  // warn-then-allow flow rather than a separate dialog, since it's the same shape of
+  // decision ("this looks wrong, but continue anyway?"), just a different reason.
+  const storageMismatch = item != null && locationStatusInfo != null && item.storageCode !== locationStatusInfo.storageCode;
   const locationNeedsWarning = locationStatusInfo != null && (
-    locationStatusInfo.status !== 'EMPTY' || locationStatusInfo.holdCategory != null || locationStatusInfo.contraction
+    locationStatusInfo.status !== 'EMPTY' || locationStatusInfo.holdCategory != null || locationStatusInfo.contraction || storageMismatch
   );
 
   /** Builds the specific warning copy for whichever condition(s) actually apply, so the
-   *  worker knows exactly what they're overriding before confirming. */
+   *  worker knows exactly what they're overriding before confirming. Status/hold/
+   *  contraction reasons share one sentence ("may already be physically here"); a Storage
+   *  Code mismatch gets its own, since that reasoning doesn't apply to it — an otherwise
+   *  perfectly empty, clear location can still be the wrong storage type. */
   function locationWarningMessage(): string {
     if (!locationStatusInfo) return '';
-    const reasons: string[] = [];
-    if (locationStatusInfo.status !== 'EMPTY') reasons.push(`currently ${locationStatusInfo.status}`);
-    if (locationStatusInfo.holdCategory) reasons.push(`on ${HOLD_LABELS[locationStatusInfo.holdCategory].name}`);
-    if (locationStatusInfo.contraction) reasons.push('under Contraction');
-    return `Location ${fmtLocation(location)} is ${reasons.join(' and ')}. The pallet may already be physically here — continue anyway?`;
+    const statusReasons: string[] = [];
+    if (locationStatusInfo.status !== 'EMPTY') statusReasons.push(`currently ${locationStatusInfo.status}`);
+    if (locationStatusInfo.holdCategory) statusReasons.push(`on ${HOLD_LABELS[locationStatusInfo.holdCategory].name}`);
+    if (locationStatusInfo.contraction) statusReasons.push('under Contraction');
+
+    const sentences: string[] = [];
+    if (statusReasons.length > 0) {
+      sentences.push(`Location ${fmtLocation(location)} is ${statusReasons.join(' and ')} — the pallet may already be physically here`);
+    }
+    if (storageMismatch) {
+      sentences.push(`Location ${fmtLocation(location)} is Storage Code ${locationStatusInfo.storageCode}, but this item is ${item!.storageCode}`);
+    }
+    return `${sentences.join('. ')}. Continue anyway?`;
   }
 
   // ── Submit ───────────────────────────────────────────────────────────────────
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Reinstate Log (v1.7.0, direct instruction) — session-local, right column, matching
+  // PIP's Pull History / MNP's Put History convention. Not persisted across navigation
+  // (same as those), since it's a same-visit convenience log, not app state.
+  const [history, setHistory] = useState<ReinstateHistoryEntry[]>([]);
 
   const hasPartial = mode === 'multiple' && (partialCartonsNum > 0 || partialSspsNum > 0);
   // Bugfix (v1.6.11, 2026-07-20): a worker can tap directly into any box of the Month/Day/
@@ -686,6 +776,10 @@ export function PARPage() {
     !expirationInvalid && !monthInvalid && !dayInvalid &&
     (!expirationBoxesTouched || expirationBoxesComplete) &&
     (mode !== 'single' || !location || (!locationInvalid && !aisleInvalid && !binInvalid)) &&
+    // Size is mandatory unless a Location is entered (Single Pallet mode only — it
+    // inherits Size from there instead); Multiple Pallets mode can never target a
+    // Location at all, so Size is always required there (direct instruction).
+    ((mode === 'single' && !!location) || sizeValue.trim() !== '') &&
     (mode === 'single'
       // SSPs is optional (direct instruction — "if empty, it's 0"), matching Multiple
       // mode's own Partial SSPs field, which already defaults empty to 0 (sspsNum's own
@@ -728,11 +822,16 @@ export function PARPage() {
     monthField.clear();
     dayField.clear();
     yearField.clear();
+    monthValueRef.current = '';
+    dayValueRef.current = '';
     setMonthInvalid(false);
     setDayInvalid(false);
     vcpField.clear();
     sspField.clear();
+    vcpValueRef.current = '';
+    sspValueRef.current = '';
     setVcpSspInvalid(false);
+    setSizeValue('');
     setMode('single');
     cartonsField.clear();
     sspsField.clear();
@@ -760,6 +859,7 @@ export function PARPage() {
         vcp: vcpNum, ssp: sspNum, mode,
         expirationDate: expirationDate || null,
       };
+      if (sizeValue) body.size = sizeValue;
       if (confirmNearExpiration) body.confirmNearExpiration = true;
       if (mode === 'single') {
         body.cartons = cartonsNum;
@@ -789,6 +889,18 @@ export function PARPage() {
           : `Pallet ${first.palletId} created — PUT_PENDING`)
         : `${result.pallets.length} pallets created — PUT_PENDING`;
       setMessage({ type: 'success', text });
+      // Reinstate Log (v1.7.0, direct instruction — "create a log for reinstates similar
+      // to other screens") — one entry per pallet actually created (a Multiple Pallets
+      // create can produce several at once, each with its own distinct Pallet ID), read
+      // before clearForm() resets `item` to null.
+      const dpci = item!.dpci;
+      const now = new Date();
+      setHistory((h) => [
+        ...result.pallets.map((p) => ({
+          key: p.palletId, palletId: p.palletId, dpci, cartons: p.cartons, locationId: p.locationId, timestamp: now,
+        })),
+        ...h,
+      ]);
       setExpirationConfirmPending(false);
       setConfirming(false);
       clearForm();
@@ -914,20 +1026,29 @@ export function PARPage() {
 
   /** Location picker: fills the Location field with a real location matching the picked
    *  status (or a nonexistent one for "Invalid") — same as scanning/typing one in, nothing
-   *  more; the live checkLocation() this triggers is what actually surfaces the result. */
-  const pickLocation = useCallback(async (key: 'empty' | 'occupied' | 'invalid' | 'held' | 'contracted') => {
+   *  more; the live checkLocation() this triggers is what actually surfaces the result.
+   *  Every status option besides Invalid is now scoped to the resolved item's own Storage
+   *  Code (v1.7.0), so all of them land on a genuinely valid put target storage-code-wise;
+   *  "Wrong Storage Type" is the deliberate exception, finding a mismatch on purpose to
+   *  exercise the new Storage-Code warn-then-allow flow. */
+  const pickLocation = useCallback(async (key: 'empty' | 'occupied' | 'invalid' | 'held' | 'contracted' | 'wrongType') => {
     setLocationPickerOpen(false);
     if (key === 'invalid') {
       handleLocationResolved('99999999', true);
       return;
     }
+    if (!item) {
+      setMessage({ type: 'error', text: 'Resolve a DPCI/UPC first' });
+      return;
+    }
     try {
-      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>(`/api/demo/location?status=${key}`, token!);
+      const qs = `status=${key}&storageCode=${encodeURIComponent(item.storageCode)}`;
+      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>(`/api/demo/location?${qs}`, token!);
       handleLocationResolved(locationId + String(level).padStart(2, '0'), true);
     } catch {
       setMessage({ type: 'error', text: 'Demo fill unavailable' });
     }
-  }, [token, handleLocationResolved, setMessage]);
+  }, [token, item, handleLocationResolved, setMessage]);
 
   const demoSlot = useMemo(() => (
     <>
@@ -999,8 +1120,15 @@ export function PARPage() {
   const confirmSummary = confirmSummaryLines.join('\n');
 
   return (
-    <div className="absolute inset-0 flex flex-col p-6 gap-5 select-none overflow-y-auto">
-      {/* Row 1 — DPCI / UPC entry + Description, Printer preview pushed to the right.
+    <div className="absolute inset-0 flex select-none">
+      {/* Left column — the multi-step create form. Right column (below) holds Printer,
+          Create Pallet, and the Reinstate Log (v1.7.0, direct instruction — "move the
+          Create Pallet button to a column on the right of everything else, move the
+          printer right over top of it... this way the create pallet button can be larger.
+          Then, on the right, under the keypad, create a log for reinstates"). Matches
+          PIP's/MNP's own left-form/right-log column split. */}
+      <div className="flex-1 flex flex-col p-6 gap-5 overflow-y-auto">
+      {/* Row 1 — DPCI / UPC entry + Description.
           DPCI is its own numpad-driven Dept/Class/Item chain of 3 FieldBoxes (v1.6.11,
           direct instruction — replaces the shared DpciField's native inputs so every field
           on this screen brings up the on-screen numpad), sized to land at the same 261px
@@ -1021,13 +1149,32 @@ export function PARPage() {
         <div className="ml-8">
           <FieldBox label="UPC" value={upcField.value} onFocus={focusUpcField} active={upcField.isActive} invalid={upcInvalid} width="w-[261px]" />
         </div>
-        <div className="ml-auto">
-          <PrinterField value={printerField.value} onFocus={focusPrinterField} active={printerField.isActive} />
-        </div>
       </div>
 
-      {/* Description — its own row, direct instruction */}
-      <PlainText label="Description" value={item?.descShort ?? ''} width="w-[600px]" />
+      {/* Description — its own row, direct instruction. The item's own Storage Code symbol
+          sits in front of it (v1.7.0, direct instruction; moved from after to before on a
+          follow-up) — a quick-glance reference for what this item is actually supposed to
+          store as, to compare against the Location indicator further down once one
+          resolves. The badge's own wrapper mirrors PlainText's label-row-plus-gap structure
+          exactly (an invisible label spacer, same classes as PlainText's real one) so the
+          badge lands vertically centered on the description *text* specifically, not just
+          bottom-aligned with the whole label+value block. */}
+      <div className="flex items-start gap-3">
+        {item && (
+          <div className="flex flex-col gap-1">
+            <span className="font-ui text-[13px] font-medium uppercase tracking-wider invisible">.</span>
+            <span className="flex items-center h-[60px]">
+              <span
+                title="Item's Storage Code"
+                className="flex items-center justify-center h-[28px] px-2.5 rounded-[6px] border border-[#3A3A3A] bg-[#1A1A1A] font-data text-[15px] font-bold text-[#CFCFCF] tracking-wide"
+              >
+                {item.storageCode}
+              </span>
+            </span>
+          </div>
+        )}
+        <PlainText label="Description" value={item?.descShort ?? ''} width="w-[600px]" />
+      </div>
 
       {/* Row 2 — VCP / SSP entry. Group-washed together (direct instruction — "apply it to
           the VCP/SSP on this page as well," extending the DPCI/Expiration Date/Location
@@ -1040,6 +1187,7 @@ export function PARPage() {
           <FieldBox label="VCP" value={vcpField.value} onFocus={focusVcp} active={vcpField.isActive} width="w-[126px]" />
           <FieldBox label="SSP" value={sspField.value} onFocus={focusSsp} active={sspField.isActive} width="w-[126px]" />
         </div>
+        <SizeField ref={sizeFieldRef} value={sizeValue} onChange={handleSizeChange} width="w-[126px]" disabled={mode === 'single' && !!location} />
         <PlainText label="SSPs per Carton" value={sspPerCarton != null ? String(sspPerCarton) : ''} width="w-[160px]" />
       </div>
 
@@ -1138,12 +1286,18 @@ export function PARPage() {
           completes (v1.6.11 revised, direct instruction) — Aisle checked against
           `/api/locations/aisle-exists` the moment it's entered, Bin checked against a
           6-digit Aisle+Bin lookup once entered, Level checked against the full 8-digit
-          resolution once selected — each box washes individually
-          (`aisleInvalid`/`binInvalid`/`levelInvalid`) rather than the whole 3-box group
-          washing as one unit (the prior treatment), so a specific wrong box is exactly
-          what's highlighted. Occupied/held/contracted don't block entry, just flag via the
-          amber note below, since Create Pallet's own warn-then-allow popup is where that's
-          actually gated. */}
+          resolution once selected. Each box washes individually
+          (`aisleInvalid`/`binInvalid`/`levelInvalid`), and — v1.7.0, direct instruction —
+          the wrapping box around all three *also* washes whenever any one of them is
+          invalid, layering group + individual together rather than choosing one or the
+          other: "the box holding the location entry fields should have the red error
+          background as well as any field that doesn't exist... ONLY the top level field."
+          checkAisleBinExists/checkLocation are each guarded to skip entirely once a parent
+          box (Aisle, or Aisle+Bin) is already known invalid, so an Aisle that doesn't exist
+          washes only Aisle individually (plus the group) — Bin/Level never also wash just
+          because their parent doesn't exist. Occupied/held/contracted don't block entry,
+          just flag via the amber note below, since Create Pallet's own warn-then-allow
+          popup is where that's actually gated. */}
       <div className="flex flex-col gap-1">
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">
           Location (optional)
@@ -1158,32 +1312,92 @@ export function PARPage() {
             </span>
           )}
         </span>
-        <div className={mode === 'multiple' ? 'opacity-40 pointer-events-none' : ''}>
-          <LocationEntryFields
-            value={location}
-            onResolved={handleLocationResolved}
-            autoFocus={locationAutoFocus}
-            onAisleEntered={(aisle) => void checkAisleExists(aisle)}
-            onBinEntered={(aisle, bin) => void checkAisleBinExists(aisle, bin)}
-            aisleInvalid={aisleInvalid}
-            binInvalid={binInvalid}
-            levelInvalid={locationInvalid}
+        <div className="flex items-end gap-4">
+          <div className={[
+            mode === 'multiple' ? 'opacity-40 pointer-events-none' : '',
+            (aisleInvalid || binInvalid || locationInvalid) ? `${INVALID_WASH} border-2 p-1 rounded-[10px] self-start` : '',
+          ].filter(Boolean).join(' ')}
+          >
+            <LocationEntryFields
+              value={location}
+              onResolved={handleLocationResolved}
+              autoFocus={locationAutoFocus}
+              onAisleEntered={(aisle) => void checkAisleExists(aisle)}
+              onBinEntered={(aisle, bin) => void checkAisleBinExists(aisle, bin)}
+              aisleInvalid={aisleInvalid}
+              binInvalid={binInvalid}
+              levelInvalid={locationInvalid}
+            />
+          </div>
+          {/* Location's own Storage Code/Size (v1.7.0, direct instruction — moved here from
+              Row 2 per follow-up: "inline with the Location entry, not after SSPs per
+              Carton") — lets the worker compare what the Location actually is against the
+              item's own Storage Code badge up by Description. Blank until a Location
+              actually resolves, same "information, not a field" PlainText treatment as
+              every other display on this screen. */}
+          <PlainText
+            label="Storage/Size"
+            value={locationStatusInfo ? `${locationStatusInfo.storageCode}-${locationStatusInfo.size}` : ''}
+            width="w-[160px]"
           />
         </div>
       </div>
+      </div>
 
-      <button
-        type="button"
-        onClick={handleCreateClick}
-        disabled={!canSubmit || submitting}
-        className="w-[240px] h-[64px] mt-2 rounded-[12px] font-ui text-[18px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40 transition-colors"
-      >
-        Create Pallet
-      </button>
+      {/* Middle column — Printer + Create Pallet (now full-width within this narrow column
+          and noticeably taller, per direct instruction: "this way the create pallet button
+          can be larger"), sitting between the left form and the Reinstate Log column —
+          direct instruction, corrected from an earlier round that stacked Printer/Create
+          Pallet above the log within one shared column instead of as its own column. */}
+      <div className="w-[220px] flex flex-col gap-4 p-5 border-l border-[#1C1C1C] shrink-0">
+        <PrinterField value={printerField.value} onFocus={focusPrinterField} active={printerField.isActive} />
+        <button
+          type="button"
+          onClick={handleCreateClick}
+          disabled={!canSubmit || submitting}
+          className="w-full h-[88px] rounded-[12px] font-ui text-[22px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40 transition-colors"
+        >
+          Create Pallet
+        </button>
+      </div>
+
+      {/* Right column — Reinstate Log (session-local, same convention as PIP's Pull
+          History / MNP's Put History), full height. The on-screen Numpad/Keyboard panel
+          (rendered by AppShell, not this page) overlays the bottom-right corner of the
+          content area when open — same as it already does over PIP/MNP's own right-column
+          logs. */}
+      <div className="w-[420px] flex flex-col border-l border-[#1C1C1C] overflow-hidden">
+        <div className="px-5 py-3 border-b border-[#1C1C1C] shrink-0">
+          <span className="font-ui text-[14px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
+            Reinstate Log
+          </span>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {history.length === 0 ? (
+            <p className="px-5 py-4 font-ui text-[15px] text-[#555]">No reinstates this session</p>
+          ) : (
+            history.map((entry) => (
+              <div key={entry.key} className="px-5 py-3 border-b border-[#111] flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <LiveId type="pallet" id={String(entry.palletId)} className="!text-[22px] !font-bold" />
+                  <span className="font-data text-[12px] text-[#555]">
+                    {entry.timestamp.toLocaleTimeString()}
+                  </span>
+                </div>
+                <span className="font-data text-[15px] text-[#CFCFCF]">
+                  <LiveId type="dpci" id={entry.dpci} /> · {entry.cartons} cartons{entry.locationId
+                    ? <> · <LiveId type="location" id={entry.locationId} /></>
+                    : ' · PUT_PENDING'}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
 
       {locationWarningPending && (
         <ConfirmDialog
-          title="Location isn't clear"
+          title="Confirm Location"
           message={locationWarningMessage()}
           confirmLabel="Continue"
           variant="danger"
@@ -1240,6 +1454,7 @@ export function PARPage() {
             { key: 'invalid', label: 'Invalid' },
             { key: 'held', label: 'Hold' },
             { key: 'contracted', label: 'Contraction' },
+            { key: 'wrongType', label: 'Wrong Storage Type' },
           ]}
           onPick={(k) => void pickLocation(k)}
           onCancel={() => setLocationPickerOpen(false)}

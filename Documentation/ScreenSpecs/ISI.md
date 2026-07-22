@@ -20,7 +20,7 @@
 
 ### Mis-scan / error handling
 
-- **DPCI/UPC has no matching Item** (API returns 404 `NOT_FOUND`): `playAlert('error')`, message bar shows `Item not found`. The field(s) used **stay visible with the bad value** (v1.6.8 — previously cleared back to empty; changed per direct feedback so the worker can see what didn't resolve rather than it vanishing) — the worker can retype over it directly rather than starting from scratch. The results/search state is cleared (`setSearch(null)`) rather than showing a stale prior lookup.
+- **DPCI/UPC has no matching Item** (API returns 404 `NOT_FOUND`): `playAlert('error')`, message bar shows `Item not found`. The field(s) used **stay visible with the bad value** (v1.6.8 — previously cleared back to empty; changed per direct feedback so the worker can see what didn't resolve rather than it vanishing) — the worker can retype over it directly rather than starting from scratch. The results/search state is cleared (`setSearch(null)`) rather than showing a stale prior lookup. The field(s) also pick up the app-wide red-wash treatment (v1.7.0 — see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`): DPCI washes as one group (`dpciInvalid`, matching PAR's DPCI precedent — a single composite existence lookup with no independent per-box check), UPC washes on its own (`upcInvalid`, its own single box). Each lookup clears the *other* mode's invalid flag, mirroring PAR's `loadByDpci`/`loadByUpc` exactly.
 - **Malformed/partial DPCI or missing UPC reaching the API** (should not normally happen given the fixed-length auto-advance, but the API itself independently validates): `400 INVALID_INPUT` — surfaces the same generic failure path as a 404 in the current UI (both hit the same `catch` block).
 - A `?dpci=`/`?upc=` deep link or a demo-button scan that supplies a whole DPCI at once populates all three display boxes directly (`deptField.set`/`classField.set`/`itemField.set`) rather than leaving them on their `—` placeholders — this was a real bug (fixed in v1.1.0) where the fields stayed blank despite the item loading successfully.
 
@@ -29,6 +29,7 @@
 - The message bar is non-blocking; an error message (`Item not found`) persists until the worker's next action clears it (a fresh field edit doesn't auto-clear it).
 - A `Loading…` (animated, muted) placeholder shows between submitting the lookup and the response returning; it replaces the results area, not the message bar.
 - There is no "success" message bar text on a normal lookup — the results list appearing *is* the success state. No audio plays for a normal successful hit, only for the error case.
+- **(v1.7.0, issue #95)** A stale error also clears on the next successful DPCI/UPC lookup — both `loadByDpci` and `loadByUpc` now call `clearMessage()` early, so a plain successful lookup with no message of its own no longer leaves the prior error visible.
 
 ## Layout (landscape, full app shell)
 

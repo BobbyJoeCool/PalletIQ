@@ -98,12 +98,25 @@ function ShellInner() {
   const isHome = location.pathname === '/';
   const title = SCREEN_TITLES[location.pathname] ?? 'PalletIQ';
 
+  /**
+   * Tap-anywhere-to-defocus (App-Wide item 8, v1.7.0). Every interactive control in this
+   * app is a real `<button>` (confirmed across all shared field components, Numpad/Keyboard,
+   * Header, Footer), so a click that didn't land inside one is, by construction, a tap on
+   * background chrome — dismiss the panel the same way each field's own Blur/OK already does.
+   * Skipped entirely while no panel is open, so this never fires an extra no-op hidePanel().
+   */
+  function handleBackgroundTap(e: React.MouseEvent) {
+    if (activePanel === 'none') return;
+    if ((e.target as HTMLElement).closest('button')) return;
+    hidePanel();
+  }
+
   return (
-    <div className="fixed inset-0 flex flex-col bg-black">
+    <div className="fixed inset-0 flex flex-col bg-black" onClick={handleBackgroundTap}>
       <Header
         title={title}
-        onJump={() => setJumpOpen(true)}
-        onActivity={() => setActivityOpen(true)}
+        onJump={() => { hidePanel(); setJumpOpen(true); }}
+        onActivity={() => { hidePanel(); setActivityOpen(true); }}
         disableNav={isHome}
         locked={navLocked}
       />

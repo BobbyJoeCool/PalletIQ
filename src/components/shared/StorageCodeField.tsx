@@ -23,6 +23,8 @@ interface StorageCodeFieldProps {
    *  (or the full reference list, if `options` is omitted) instead of committing it. */
   strict?: boolean;
   onInvalid?: (code: string) => void;
+  /** See CodePickerField's own doc — applies the app-wide red-wash treatment. */
+  invalid?: boolean;
 }
 
 /**
@@ -33,7 +35,7 @@ interface StorageCodeFieldProps {
  * what's actually present when the caller knows enough context to narrow, or the full
  * `GET /api/storage-codes` reference list otherwise.
  */
-export function StorageCodeField({ value, onChange, options, size = 'default', width, label = 'Storage Code', disabled = false, closeOnAutoSubmit = false, strict = false, onInvalid }: StorageCodeFieldProps) {
+export function StorageCodeField({ value, onChange, options, size = 'default', width, label = 'Storage Code', disabled = false, closeOnAutoSubmit = false, strict = false, onInvalid, invalid = false }: StorageCodeFieldProps) {
   // Always called (Rules of Hooks) — its cached result is simply unused once the caller
   // supplies a narrowed `options` list.
   const fullList = useStorageCodes();
@@ -55,6 +57,7 @@ export function StorageCodeField({ value, onChange, options, size = 'default', w
       closeOnAutoSubmit={closeOnAutoSubmit}
       strict={strict}
       onInvalid={onInvalid}
+      invalid={invalid}
     />
   );
 }

@@ -10,6 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
+import { useWLH } from '../context/WLHContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
@@ -346,7 +347,7 @@ function HoldLogPanel({ entries }: { entries: HoldLogEntry[] }) {
  */
 export function WLHPage() {
   const { token, user } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const { hidePanel: hideModeSwitchPanel } = useNumpad();
   const [searchParams] = useSearchParams();
   const role = (user?.role ?? 'WORKER') as Role;
@@ -358,8 +359,14 @@ export function WLHPage() {
   // running its own cleanup — clearing it explicitly here avoids leaving the numpad open
   // and "bound" to a field that no longer exists on screen.
   const setMode = useCallback((m: 'single' | 'range') => { hideModeSwitchPanel(); setModeState(m); }, [hideModeSwitchPanel]);
-  const [locationId, setLocationId] = useState<string | null>(null);
+  // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
+  // WLHContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern.
+  const { locationId, setLocationId } = useWLH();
   const [checking, setChecking] = useState(false);
+  // Red-wash invalid state (App-Wide item 9, v1.7.0) — a single combined Aisle+Bin+Level
+  // existence lookup with no per-box check, so this washes as a group via
+  // LocationEntryFields' new `groupInvalid` prop (same reasoning as PAR's DPCI).
+  const [locationInvalid, setLocationInvalid] = useState(false);
 
   // Session hold log (v1.6.10) — shared by both modes, so it's lifted up here rather than
   // owned by RangeHoldPanel or HoldPanel individually.
@@ -384,6 +391,8 @@ export function WLHPage() {
       setLocationId(
         String(data.aisle).padStart(3, '0') + String(data.bin).padStart(3, '0') + String(data.level).padStart(2, '0'),
       );
+      setLocationInvalid(false);
+      clearMessage();
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: 'Location not found' });
@@ -391,11 +400,12 @@ export function WLHPage() {
       // instruction) — a bad scan/entry should stay visible so the worker can see and
       // correct what they typed, matching PII's v1.6.7 "field clears on failed scan" fix.
       setLocationId(null);
+      setLocationInvalid(true);
     } finally {
       setChecking(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, clearMessage]);
 
   // Pre-population via ?id= (LII's "Hold" button, or a future quick-hold navigation).
   const idParam = searchParams.get('id');
@@ -499,7 +509,7 @@ export function WLHPage() {
             <RangeHoldPanel onLog={addLogEntry} />
           ) : (
             <>
-              <LocationEntryFields onResolved={resolveLocation} />
+              <LocationEntryFields onResolved={resolveLocation} groupInvalid={locationInvalid} />
 
               {/* Always visible from navigation (v1.6.10, direct instruction) — the
                   Location indicator and HoldPanel no longer wait for a resolved location;

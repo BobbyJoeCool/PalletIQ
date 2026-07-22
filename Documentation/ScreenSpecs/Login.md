@@ -31,6 +31,7 @@
 - **Any other login failure** (connection error, unexpected response): generic `Connection error — please try again`, PIN also clears.
 - **Direct/stale navigation to `/pin`** with no route state (e.g. a bookmarked URL, a page reload on `/pin`): `PinPage` immediately issues a `<Navigate to="/login" replace />` — there's no partial/broken PIN screen state possible.
 - **zNumber length cap:** once the value reaches 7 characters (the fixed-width `User.zNumber` column length), further keypad presses are silently ignored rather than erroring — there is no length-related error message, just a hard stop on further input (added v1.6.0; previously unbounded).
+- **App-wide red-wash audit (v1.7.0):** no field on either screen picked up the red-wash treatment (`DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) — both zNumber and PIN reset to empty atomically on every failure path (`setZnumber('z')` / `setPin('')`), so there's never a moment where a bad value sits visibly in a box to wash; same finding, same reasoning, as MNP/STG's audits. The zNumber display box also has no focus/active state at all to begin with (always the same static border), unlike every other numpad-driven field in the app.
 
 ### Status / messaging behavior
 

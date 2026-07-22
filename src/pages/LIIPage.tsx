@@ -44,7 +44,7 @@ const STATUS_PICKER_OPTIONS: { key: StatusPickerKey; label: string }[] = [
  */
 export function LIIPage() {
   const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { hidePanel } = useNumpad();
@@ -69,6 +69,7 @@ export function LIIPage() {
 
   /** Looks up a location (by 6- or 8-digit id) via the API and reconstructs the canonical 8-digit id from the resolved fields. */
   const loadLocation = useCallback(async (id: string) => {
+    clearMessage();
     setLoading(true);
     try {
       const data = await apiFetch<LIILocationData>(`/api/locations/${id}`, token!);
@@ -91,7 +92,7 @@ export function LIIPage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, clearMessage]);
 
   // Pre-population via ?id= (LiveId taps navigate to /location?id=<8-digit>).
   const idParam = searchParams.get('id');

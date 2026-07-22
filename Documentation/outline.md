@@ -237,6 +237,7 @@ Accessed via a dedicated menu entry (manual entry or scan of a pallet ID), or by
 **Visible to all users:**
 
 - DPCI
+- Description (short) — the item's short description, read-only
 - UPC (derived from DPCI)
 - VCP
 - SSP
@@ -272,7 +273,7 @@ Accessed via a dedicated menu entry (manual entry or scan of a location barcode,
 **Shows current state only** (no history of past pallets stored there):
 
 - Aisle, Bin, Level, Zone, Size, Storage Code — all set at warehouse setup and read-only on this screen under every role
-- Pallet ID currently in the location (null if empty)
+- Pallet ID(s) currently in the location (empty if none) — most locations hold at most one, but a location can hold multiple pallets simultaneously (e.g. Bulk); every occupant is shown, not just the first.
 - Status: Pull Pending, Stored, Empty, Reserved, Hold (Inbound/Outbound/Both/Permanent), etc.
 
 **Navigation:** a button jumps to the Pallet ID screen for the pallet currently in this location (if any). A second button opens the Hold action for this location, consistent with the Hold quick-actions present on Put and Pull screens.
@@ -292,6 +293,7 @@ Holds communicate that something is operationally wrong with a location and gate
 
 - A reason code is required to place any hold. The worker selects from a dropdown or, if known, types the code directly.
 - Any user can place Hold Both, which is the standard "something's wrong here, stop and look" action — this is intentionally low-friction since it's how floor problems get flagged.
+- Placing a hold also requires being able to **remove** whatever hold is already on that location: a role that can't remove the existing hold can't replace it with a different type either (re-placing the same type is exempt). This stops a lower-gated hold type from being used to route around a higher-tier hold like Hold Permanent (v1.7.0).
 - Quick-hold actions exist on the Put and Pull screens (and via the Hold button on the Location ID screen) so a worker doesn't have to navigate away to flag a problem location.
 
 ---
@@ -338,7 +340,7 @@ Below or alongside the grid, a **per-zone summary** (combining both odd and even
 
 A persistent, queryable record of transactional events — not a flat file, stored as a database table (or small set of tables) alongside the rest of the application's data so it can be filtered by location, pallet ID, DPCI, or user, and so logged pallet/location references can link back to live records.
 
-**Logged events** include, at minimum: put confirmed, pull confirmed, pallet moved, hold placed, hold removed, pallet field edited, location unassigned, blocked put, and the Manual Put pallet-ID scan described above.
+**Logged events** include, at minimum: put confirmed, pull confirmed, pallet moved, hold placed, hold removed, pallet field edited, location unassigned, blocked put, pallet reinstated (one entry per pallet created, even when a single Pallet Reinstate submission creates several), and the Manual Put pallet-ID scan described above.
 
 Each entry captures, at minimum: timestamp, acting user, action type, and the relevant pallet ID / location ID / DPCI, with action-specific details (e.g. old value/new value on an edit, hold reason code) captured in a flexible field rather than a rigid fixed-column structure.
 

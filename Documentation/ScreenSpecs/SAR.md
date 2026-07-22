@@ -92,6 +92,8 @@ flowchart TD
 
 **No auto-refresh is a deliberate simplicity choice, not a bug.** The screen loads once on mount (`useEffect` with an empty dependency array) and never re-polls; a worker who wants current numbers must navigate away and back. There is no "Refresh" button on this screen (unlike STG, which added one in v1.6.6) — SAR has never had one at any point in its history.
 
+**Session persistence via `SARContext`.** Only the selected aisle (`selected: number | null`) lives in `SARProvider` (mounted in `App.tsx`, alongside all 12 sibling per-screen providers — `StagingProvider`/`PIIProvider`/`ISIProvider`/`LIIProvider`/`PIPProvider`/`SDPProvider`/`MNPProvider`/`IIDProvider`/`PARProvider`/`WLHProvider`/`ELAProvider`/`ELZProvider`, all 13 now mounted together wrapping `AppShell`), not local component state, so navigating away from SAR and back keeps the same aisle selected instead of resetting the Directed Put/Stage Aisle buttons to disabled. The report's `rows` themselves are deliberately excluded from persistence — SAR always re-fetches fresh on mount (see the "No auto-refresh" note above), since this is a live view of current staging state and showing stale cached rows after navigating back would be actively worse than the normal brief loading flash, unlike LII/PII/ISI/IID/WLH's own "resume the last cached lookup" pattern.
+
 **Failed fetch and empty state are indistinguishable to the worker.** `SARPage`'s fetch `.catch()` sets `rows` to `[]`, the same value a genuinely-empty system produces — there's no separate error banner. A developer investigating a "why does SAR say nothing is staged" report should not assume the report is necessarily accurate without checking the network/server logs first.
 
 ## Open items still remaining

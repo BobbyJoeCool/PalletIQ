@@ -190,7 +190,16 @@ export function HoldPanel({ locationId, onDone, showClose = false, onAction }: H
   // while `info` is being fetched, and the real value once it lands; every action control
   // below is disabled until `info` (a genuinely resolved location) actually exists.
   const canRemove = info?.holdCategory ? hasMinRole(role, REMOVE_ROLE[info.holdCategory]) : false;
-  const placeableTypes = (Object.keys(HOLD_LABELS) as HoldCategory[]).filter((t) => hasMinRole(role, HOLD_LABELS[t].placeRole));
+  // Changing a location to a *different* hold type is equivalent to removing whatever's
+  // currently on it (a role that can't remove the current hold shouldn't be able to route
+  // around that gate by placing a lesser one instead — e.g. a sub-Lead role could
+  // previously replace an existing Hold Permanent with Hold Both, despite never having
+  // permission to remove the Perm hold itself, since Hold Both's own placeRole is WORKER).
+  // No types are placeable at all while a hold exists that this role can't remove; with no
+  // current hold, the normal per-type placeRole gate applies as before.
+  const placeableTypes = info?.holdCategory && !canRemove
+    ? []
+    : (Object.keys(HOLD_LABELS) as HoldCategory[]).filter((t) => hasMinRole(role, HOLD_LABELS[t].placeRole));
   const currentHoldLabel = !hasLocation ? '—' : loading ? 'Loading…' : info?.holdCategory ? HOLD_LABELS[info.holdCategory].name : 'None';
   const currentHoldColor = info?.holdCategory ? HOLD_TEXT_COLOR[info.holdCategory] : hasLocation && !loading ? 'text-white' : 'text-[#666]';
 

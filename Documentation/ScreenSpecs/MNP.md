@@ -30,6 +30,7 @@
 - Pallet not found (`404 PALLET_NOT_FOUND`) → error, `"Pallet not found"`, field clears.
 - Pallet has no stored cartons (`409 NO_CARTONS`) → error, `"Pallet {ID} has no stored cartons — cannot put"`, field clears.
 - Destination Aisle+Bin not found (`404`) → error, `"Location not found"`, destination boxes clear and refocus.
+- **App-wide red-wash audit (v1.7.0):** unlike PIP/SDP/PII/IID/ISI, no field on this screen picked up the red-wash treatment (`DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) — every failure above clears its field atomically before the next render (`palletField.clear()` / `resetLocationField()`), so there's never a moment where a bad value sits visibly in a box to wash. Audited and intentionally skipped, not overlooked.
 - Contraction, non-IM (`403 CONTRACTED`) → error, `"This location is on contraction — put not allowed"`; returns to `pallet_scanned` with destination cleared.
 - Contraction, IM+, not yet acknowledged (`409 CONTRACTION_CONFIRM_REQUIRED`) → opens the contraction confirm dialog rather than an error message.
 - Destination occupied/staged (`409 DESTINATION_OCCUPIED`) → opens the Occupied/Combine popup rather than an error message.
@@ -43,6 +44,7 @@
 - A successful put/move shows `warning` tone with a "(was occupied)"/"(was staged)" suffix if the destination wasn't clean; plain `info`/`success` otherwise.
 - Consolidate success shows `success` — `"Pallet {source} combined into Pallet {target}"`.
 - Move detection at scan time (step 2b) shows `info`, distinct from the occupied/staged outcome at confirm time (which is `warning`) — these are two different conditions (pallet's own prior location vs. destination's current occupant).
+- **(v1.7.0, issue #95)** A stale error also clears on success: `handlePalletScan`'s success path calls `clearMessage()` in an `else` branch alongside the `currentLocation` check (that branch still sets its own info message and isn't touched), and `handleDestinationResolved`'s success path clears it right after entering `level_modal`.
 
 ## Layout
 
@@ -147,6 +149,8 @@ flowchart TD
 **Consolidate's asymmetric write.** Unlike a normal move, consolidate never calls `placePallet` — it directly updates both pallets' rows and, separately, frees the incoming pallet's own prior location (if any) in the same transaction. The destination location's own `status` is untouched by consolidate (the occupant is still `STORED` there, unchanged); only the two `Pallet` rows and the *source* pallet's old location move.
 
 **No server-side reservation means client-side cancellation is best-effort.** `cancelScan`'s `POST /api/puts/manual/cancel` call is fired-and-forgotten (`.catch()` swallows failures) from both the Clear button and the component's unmount-cleanup effect. The unmount path specifically reads a `tokenRef` (not `useAuth().token` directly) because an idle-timeout logout nulls the real token via a route swap before MNPPage gets another render — by the time cleanup runs, the ref still holds the last-known-valid token even though the live auth state no longer does.
+
+**Session persistence via `MNPContext`.** The scanned pallet (`scannedPallet`, typed `MNPScannedPallet`) lives in `MNPProvider` (mounted in `App.tsx`, alongside all 12 sibling per-screen providers — `StagingProvider`/`PIIProvider`/`ISIProvider`/`LIIProvider`/`PIPProvider`/`SDPProvider`/`IIDProvider`/`PARProvider`/`WLHProvider`/`SARProvider`/`ELAProvider`/`ELZProvider`, all 13 now mounted together wrapping `AppShell`), not local component state, so navigating away from MNP and back restores the last-scanned pallet instead of resetting to the empty ready state. Unlike SDP, MNP has no server-side reservation/timeout tied to a scanned pallet, so there's no expiry to reconcile on resume. Only the scanned pallet persists — the destination Aisle/Bin/Level entry boxes' in-progress typing, the Level Modal's own state, and the session-local Put History panel (client-side only, resets on navigation away per the Data section above) are never part of this state.
 
 **Placement atomicity.** The shared `placePallet` helper (used by both MNP's normal-completion path and SDP's `confirmPut`) runs the old-location-clear and new-location-store as one `prisma.$transaction`, so a pallet can never appear to exist in two locations at once, even under a mid-write crash.
 

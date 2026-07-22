@@ -10,6 +10,7 @@ export interface PIIPalletData {
   pid: number;
   dpci: { dept: number; class: number; item: number };
   upc: string;
+  descShort: string;
   vcp: number;
   ssp: number;
   currentCartons: number;

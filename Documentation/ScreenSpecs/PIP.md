@@ -28,12 +28,12 @@
 
 ### Mis-scan / error handling
 
-- Label not found (`404`) → error, `"Label not found"`, field clears and refocuses.
-- Label not `PRINTED` (`409`) → error, `"Invalid status: {status}"` (e.g. `PULLED`/`CANCELED`/`PURGED`), field clears and refocuses.
-- Label's pull function doesn't match the selected dropdown value → error, `"Wrong function — label requires {fn}"`, field keeps its value and refocuses.
-- Pallet ID mismatch (`400 PALLET_MISMATCH`) → error, `"Incorrect Pallet ID"`, Pallet ID field only clears/refocuses; other fields untouched.
-- UPC mismatch (`400 ALTERNATE_MISMATCH`) → error, `"Invalid UPC"`, UPC field only clears/refocuses.
-- Location mismatch (`400 ALTERNATE_MISMATCH`) → error, `"Invalid Location"`, Location's three boxes remount/clear and Aisle refocuses.
+- Label not found (`404`) → error, `"Label not found"`, field keeps its value (corrected here — this doc previously said "clears," which hasn't matched the actual code's `focusLabelField()`-not-`.clear()` behavior) and refocuses; also picks up the app-wide red-wash treatment (v1.7.0 — see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) via `FieldDisplay`'s new `invalid` prop, since it's the one field on this screen where a failed value stays visible long enough to be worth washing.
+- Label not `PRINTED` (`409`) → error, `"Invalid status: {status}"` (e.g. `PULLED`/`CANCELED`/`PURGED`), field keeps its value (same correction as above) and refocuses; same red-wash treatment.
+- Label's pull function doesn't match the selected dropdown value → error, `"Wrong function — label requires {fn}"`, field keeps its value and refocuses; same red-wash treatment.
+- Pallet ID mismatch (`400 PALLET_MISMATCH`) → error, `"Incorrect Pallet ID"`, Pallet ID field only clears/refocuses; other fields untouched. Not washed — the field clears atomically with the error (no visible moment where a bad value sits in the box), unlike Label above.
+- UPC mismatch (`400 ALTERNATE_MISMATCH`) → error, `"Invalid UPC"`, UPC field only clears/refocuses. Not washed, same reasoning as Pallet ID.
+- Location mismatch (`400 ALTERNATE_MISMATCH`) → error, `"Invalid Location"`, Location's three boxes remount/clear and Aisle refocuses. Not washed, same reasoning — `LocationEntryFields`' own per-box `invalid` props (used by PAR) aren't wired here since PIP's Location failure is a whole-value verify mismatch, not a per-box existence check, and the boxes clear before any wash would be visible anyway.
 - Pull function mismatch at verify time (`409 WRONG_PULL_FUNCTION`) → error, `"Pull function mismatch"`.
 - FP level-only mismatch (`400 LEVEL_MISMATCH`) → opens the Level Correction popup instead of an error message; declining it produces the same `"Invalid Location"` error as an ordinary mismatch.
 - Any other verify failure → generic error, `"Verification failed — please try again"`.
@@ -43,6 +43,7 @@
 - Errors are transient but not auto-cleared — they persist until the next message-bar update.
 - The success message (`"Last Pull {location} — {pallets}P / {cartons}C / {ssps}S"`) deliberately persists through the return to the ready state and through the next label scan (not cleared on state transition) — a worker can verify their previous pull while already moving to the next one. A rescan while still-unverified does *not* stomp this message with a spurious warning (issue #45 fix) — only a genuine error path updates the message bar in that case.
 - All error paths play `playAlert('error')`; successful pulls play `playAlert('info')`.
+- **(v1.7.0, issue #95)** `handleLabelScan`'s success path also calls `clearMessage()` (right after `setLabelInvalid(false)`), so a stale error clears on the next successful label load. The later PID/UPC/Location verify steps already overwrite any stale error via their shared `onPullSuccess`'s own success message, so no gap existed there.
 
 ## Layout
 
@@ -146,6 +147,8 @@ flowchart TD
 **Location match rule.** The rule is resolved entirely server-side in `verifyPull` (api/functions/pulls.ts), keyed on `pullFunction` + `wasScanned`. `wasScanned` is not derived from `NumpadContext`'s `isScanningRef` for the Location path (unlike Pallet ID/UPC) — it comes structurally from `LocationEntryFields`, since a scan is the only way a box can receive a value longer than its own typed maxLength. This distinction matters for CF (aisle+bin only when scanned, full match when hand-typed) and FP (level-mismatch recovery only available when scanned — a hand-typed level that's wrong is just wrong, since the worker already claims to know it).
 
 **FP level-mismatch resubmission.** The corrected level typed into the popup is never validated against `pallet.location.level` — it's recorded as-is in `ActivityLog.details.confirmedLevel` as the worker's attestation. This is a deliberate scope decision (issue #72) — Full Pallet pulls happen from floor level, so the worker frequently cannot physically scan the true (possibly high-rack) level's barcode.
+
+**Session persistence via `PIPContext`.** The scanned label (`labelData`, mirroring the page's own former local `LabelScanResult` shape: label/pallet/location) lives in `PIPProvider` (mounted in `App.tsx`, alongside all 12 sibling per-screen providers — `StagingProvider`/`PIIProvider`/`ISIProvider`/`LIIProvider`/`SDPProvider`/`MNPProvider`/`IIDProvider`/`PARProvider`/`WLHProvider`/`SARProvider`/`ELAProvider`/`ELZProvider`, all 13 now mounted together wrapping `AppShell`), not local component state, so navigating away from PIP and back restores the last-scanned label instead of resetting to the empty ready state. Only the resolved label/pallet/location data persists — the Pallet ID/UPC/Location verification fields' in-progress typing, and the session-local Pull History panel (client-side only, resets on navigation away per the Data section above), are never part of this state.
 
 **Focus-race guard.** `PIPPage.tsx` re-focuses the Label field synchronously inside `onPullSuccess` rather than relying solely on the `'ready'`-state effect's 50ms-delayed call — without this, a fast scanner scan of the next label could land on the just-cleared-but-still-registered Pallet ID/UPC field instead of Label, producing a spurious "Label not verified" warning (this was issue #45's actual root cause, fixed in v1.0.9/v1.1.0).
 

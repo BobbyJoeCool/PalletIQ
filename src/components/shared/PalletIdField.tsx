@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useNumpadField } from '../../lib/useNumpadField';
+import { INVALID_WASH } from '../../lib/invalidWash';
 
 interface PalletIdFieldProps {
   value: string;
@@ -8,12 +9,17 @@ interface PalletIdFieldProps {
    *  entry box. Styling is variant-based, not free className passthrough (issue #78). */
   size?: 'compact' | 'default';
   label?: string;
+  /** Applies the app-wide red-wash treatment (see `src/lib/invalidWash.ts`) instead of the
+   *  plain active-only border — reserved for an actual validation failure the caller has
+   *  already determined (e.g. not-found/canceled/pull-pending), same precedence as PAR's
+   *  `FieldBox` (invalid wins over active). */
+  invalid?: boolean;
 }
 
 /** Shared Pallet ID entry field (issue #78) — numpad-driven, variable length (no fixed
  *  maxLength/auto-commit, since Pallet IDs aren't a uniform length); matches PII's original
  *  entry box. */
-export function PalletIdField({ value, onChange, size = 'default', label = 'Pallet ID' }: PalletIdFieldProps) {
+export function PalletIdField({ value, onChange, size = 'default', label = 'Pallet ID', invalid = false }: PalletIdFieldProps) {
   const field = useNumpadField('numpad');
   useEffect(() => { field.set(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -31,7 +37,9 @@ export function PalletIdField({ value, onChange, size = 'default', label = 'Pall
       <button
         type="button"
         onClick={focusField}
-        className={`flex items-center ${boxHeight} w-full px-5 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+        className={`flex items-center ${boxHeight} w-full px-5 rounded-[12px] border-2 transition-colors ${
+          invalid ? INVALID_WASH : field.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+        }`}
       >
         <span className={`font-data ${textSize} font-medium text-white`}>
           {field.value || <span className="text-[#444]">—</span>}

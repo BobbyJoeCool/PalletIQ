@@ -1,5 +1,6 @@
+import { forwardRef } from 'react';
 import { SIZES, SIZE_NAMES } from '../../lib/sizes';
-import { CodePickerField, type CodeOption } from './CodePickerField';
+import { CodePickerField, type CodeOption, type CodePickerFieldHandle } from './CodePickerField';
 
 const FULL_SIZE_OPTIONS: CodeOption[] = SIZES.map((s) => ({ code: s, desc: SIZE_NAMES[s] }));
 
@@ -22,6 +23,8 @@ interface SizeFieldProps {
    *  (or the full XS–L list, if `options` is omitted) instead of committing it. */
   strict?: boolean;
   onInvalid?: (code: string) => void;
+  /** See CodePickerField's own doc — applies the app-wide red-wash treatment. */
+  invalid?: boolean;
 }
 
 /** A single-letter code is already a complete, unambiguous Size — "X" and "H" are held
@@ -41,9 +44,10 @@ function isCompleteSingleLetterSize(v: string): boolean {
  * context (e.g. an aisle + Storage Code already entered), or the full list otherwise — Size
  * has no lookup table to fetch from, so the un-narrowed case is just this static list.
  */
-export function SizeField({ value, onChange, options, size = 'default', width, label = 'Size', ariaLabel, disabled = false, strict = false, onInvalid }: SizeFieldProps) {
+export const SizeField = forwardRef<CodePickerFieldHandle, SizeFieldProps>(function SizeField({ value, onChange, options, size = 'default', width, label = 'Size', ariaLabel, disabled = false, strict = false, onInvalid, invalid = false }, ref) {
   return (
     <CodePickerField
+      ref={ref}
       value={value}
       onChange={onChange}
       options={options ?? FULL_SIZE_OPTIONS}
@@ -58,6 +62,7 @@ export function SizeField({ value, onChange, options, size = 'default', width, l
       disabled={disabled}
       strict={strict}
       onInvalid={onInvalid}
+      invalid={invalid}
     />
   );
-}
+});

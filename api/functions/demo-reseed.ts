@@ -263,11 +263,18 @@ function pickStackQuantity(size: string): number {
  * random-aisle-percentage simulation entirely (v1.6.9 follow-up, per direct instruction).
  * Eligibility mirrors `findNextStagingLocation` (stagingLogic.ts): EMPTY, non-contracted,
  * not on a placement-blocking hold, never XS (XS is hand-put, never staged).
+ *
+ * After the shift-time loop finishes (which can produce zero staging at all if `resumeFrom`
+ * is already past `w.shiftEnd` — e.g. reseeding before the 6am shift start, since `shiftEnd`
+ * is `min(now, 4pm)`), tops up to a guaranteed `MIN_STAGED_AISLES` aisles regardless, using
+ * the same selection order, timestamped "now" rather than the simulated shift clock — a
+ * floor for SAR/STG's demo picture, independent of what time the reseed happens to run.
  */
-async function simulateGpmStaging(tx: TxClient, resumeFrom: Date, w: ShiftWindow): Promise<{ locations: number; loads: number }> {
+async function simulateGpmStaging(tx: TxClient, resumeFrom: Date, w: ShiftWindow): Promise<{ locations: number; loads: number; aisles: number }> {
   let t = pastBreak(resumeFrom, w);
   let locationsStaged = 0;
   let loads = 0;
+  const stagedAisles = new Set<number>();
 
   const pool = await tx.location.findMany({
     where: {
@@ -295,9 +302,14 @@ async function simulateGpmStaging(tx: TxClient, resumeFrom: Date, w: ShiftWindow
       const remaining = aisleLocs.filter((l) => !toStage.includes(l));
       if (remaining.length === 0) break;
       const size = randomFrom(remaining).size;
-      const sameSize = remaining.filter((l) => l.size === size);
+      // Fill order matches seed.ts's applyStaging exactly — highest bin first, then lowest
+      // level within a bin — since that's the real order a GPMer fills an aisle from the
+      // back, not a random scatter (issue #98; this simulator previously shuffled).
+      const sameSize = remaining
+        .filter((l) => l.size === size)
+        .sort((a, b) => b.bin - a.bin || a.level - b.level);
       const qty = Math.min(pickStackQuantity(size), sameSize.length);
-      toStage.push(...shuffle(sameSize).slice(0, qty));
+      toStage.push(...sameSize.slice(0, qty));
     }
 
     if (toStage.length === 0) {
@@ -318,6 +330,7 @@ async function simulateGpmStaging(tx: TxClient, resumeFrom: Date, w: ShiftWindow
         },
       });
       locationsStaged++;
+      stagedAisles.add(aisle);
       const list = byAisle.get(aisle)!;
       const idx = list.indexOf(loc);
       if (idx !== -1) list.splice(idx, 1);
@@ -326,7 +339,62 @@ async function simulateGpmStaging(tx: TxClient, resumeFrom: Date, w: ShiftWindow
     t = pastBreak(new Date(t.getTime() + randomInt(5, 7) * 60_000), w);
   }
 
-  return { locations: locationsStaged, loads };
+  // Guaranteed minimum, independent of the shift-time simulation above (direct instruction
+  // — reported empty-looking STG/SAR after a pre-6am reseed). shiftEnd is `min(now, 4pm)`;
+  // reseeding before shiftStart (6am) means shiftEnd < shiftStart, so the `while (t <
+  // w.shiftEnd)` loop above never executes at all — not just for staging, for every
+  // simulate* function — leaving nothing for STG/SAR to show. This tops up to at least
+  // MIN_STAGED_AISLES aisles regardless of what the loop above produced (including zero),
+  // using the same real-GPM selection order (highest bin first, then lowest level) as
+  // above and as production's own `findNextStagingLocation`/`restageAisle`. Timestamped
+  // "now" rather than the simulated shift clock `t` — these aren't a shift-time artifact,
+  // they're a floor that needs to already exist regardless of when the reseed runs.
+  const MIN_STAGED_AISLES = 8; // matches seed.ts's own applyStaging STAGED_AISLES count
+  if (stagedAisles.size < MIN_STAGED_AISLES) {
+    const candidateAisles = shuffle(
+      [...byAisle.keys()].filter((a) => !stagedAisles.has(a) && byAisle.get(a)!.length > 0),
+    );
+    for (const aisle of candidateAisles) {
+      if (stagedAisles.size >= MIN_STAGED_AISLES) break;
+      const aisleLocs = byAisle.get(aisle)!;
+      const toStage: typeof pool = [];
+
+      for (let stack = 0; stack < 3; stack++) {
+        const remaining = aisleLocs.filter((l) => !toStage.includes(l));
+        if (remaining.length === 0) break;
+        const size = randomFrom(remaining).size;
+        const sameSize = remaining
+          .filter((l) => l.size === size)
+          .sort((a, b) => b.bin - a.bin || a.level - b.level);
+        const qty = Math.min(pickStackQuantity(size), sameSize.length);
+        toStage.push(...sameSize.slice(0, qty));
+      }
+      if (toStage.length === 0) continue;
+
+      const now = new Date();
+      for (const loc of toStage) {
+        await tx.location.update({
+          where: { LocationID: { aisle: loc.aisle, bin: loc.bin, level: loc.level } },
+          data: { status: 'STAGED' },
+        });
+        await tx.activityLog.create({
+          data: {
+            userId: 'z002p23', actionType: 'STAGE', timestamp: now,
+            locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
+            details: JSON.stringify({ storageCode: loc.storageCode, size: loc.size, seeded: true, workerLog: true }),
+          },
+        });
+        locationsStaged++;
+        stagedAisles.add(aisle);
+        const list = byAisle.get(aisle)!;
+        const idx = list.indexOf(loc);
+        if (idx !== -1) list.splice(idx, 1);
+      }
+      loads++;
+    }
+  }
+
+  return { locations: locationsStaged, loads, aisles: stagedAisles.size };
 }
 
 /**
@@ -708,13 +776,14 @@ function assignPullFunction(level: number, size: string, qty: number, totalCarto
  *   system created a pull request" per direct product decision. Any pallet still
  *   pull-pending from a prior reseed is reset to STORED first, alongside the label wipe
  *   above, since its old labels no longer exist.
- * - Unstages every currently-STAGED location, then restages a random 10-40% of each
- *   aisle's eligible (EMPTY, non-contracted, unheld) locations, backdating each one's
- *   "staged since" moment (a STAGE ActivityLog entry, same as real staging writes) by an
- *   age drawn from an exponential distribution — see randomExponentialAgeSeconds' doc
- *   comment. Gives SAR and STG's live info panel a realistic, varied staged-aisle picture
- *   immediately after reseeding instead of starting from whatever staging state happened
- *   to be left over from prior manual testing.
+ * - Staging is simulated shift-realistically via `simulateGpmStaging` (see its own doc
+ *   comment) — a "triple load" every 5-7 minutes, one aisle at a time, filling each
+ *   aisle back-to-front (highest bin first) the same way a real GPMer/`findNextStagingLocation`
+ *   would, not a random scatter. Because that simulation only covers `[shiftStart,
+ *   shiftEnd]` (`shiftEnd` is `min(now, 4pm)`), reseeding before the 6am shift start
+ *   produces an empty window and zero simulated staging — `simulateGpmStaging` tops itself
+ *   up to a guaranteed minimum aisle count regardless, so SAR/STG never look empty
+ *   immediately after a reseed no matter what time it's run.
  *
  * All batch dates are today's date; purge dates are 7 days out, per outline.md. The whole
  * operation runs in a single transaction so a failure partway through leaves the previous
@@ -962,6 +1031,12 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
       putPalletsCreated: putPalletRows.length,
       labelsCreated: labelRows.length,
       labelsByStorageCodeAndFunction,
+      // Top-level fields the login screen's reseed summary actually reads (ReseedResult in
+      // src/lib/api.ts) — previously never populated here, only nested below under
+      // workerActivityLog.z002p23*, so LoginPage.tsx's summary always showed "undefined
+      // staged across undefined aisles" regardless of how much staging actually happened.
+      locationsStaged: stagingResult.locations,
+      aislesStaged: stagingResult.aisles,
       workerActivityLog: {
         isFreshDay,
         shiftWindow: { start: shiftWindow.shiftStart, end: shiftWindow.shiftEnd },

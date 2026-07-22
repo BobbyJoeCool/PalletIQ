@@ -1,9 +1,18 @@
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { ELAProvider } from './context/ELAContext';
+import { ELZProvider } from './context/ELZContext';
+import { IIDProvider } from './context/IIDContext';
 import { ISIProvider } from './context/ISIContext';
 import { LIIProvider } from './context/LIIContext';
+import { MNPProvider } from './context/MNPContext';
+import { PARProvider } from './context/PARContext';
 import { PIIProvider } from './context/PIIContext';
+import { PIPProvider } from './context/PIPContext';
+import { SARProvider } from './context/SARContext';
+import { SDPProvider } from './context/SDPContext';
 import { StagingProvider } from './context/StagingContext';
+import { WLHProvider } from './context/WLHContext';
 import { AppShell } from './components/shell/AppShell';
 import { ELAPage } from './pages/ELAPage';
 import { ELZPage } from './pages/ELZPage';
@@ -47,13 +56,25 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/pin"   element={<PinPage />} />
 
-      {/* All authenticated function screens share the app shell. StagingProvider/PIIProvider/
-          ISIProvider/LIIProvider are mounted here (not inside STGPage/PIIPage/ISIPage/
-          LIIPage) so STG's fork state, PII's last-loaded pallet, ISI's last search, and
-          LII's last-loaded location all survive navigating away and back, and are
-          naturally cleared on logout when ProtectedRoute unmounts this whole subtree. */}
+      {/* All authenticated function screens share the app shell. Every per-screen
+          persistence Provider (App-Wide screen-persistence item, v1.7.0 — StagingProvider/
+          PIIProvider/ISIProvider/LIIProvider were the original 4; PIPProvider/SDPProvider/
+          MNPProvider/IIDProvider/PARProvider/WLHProvider/SARProvider/ELAProvider/
+          ELZProvider extend the same pattern to the remaining 9 screens) is mounted here
+          (not inside each screen's own page component) so each screen's own last-loaded
+          result survives navigating away and back, and is naturally cleared on logout when
+          ProtectedRoute unmounts this whole subtree. Nesting order doesn't matter — none of
+          these providers depend on each other. */}
       <Route element={<ProtectedRoute />}>
-        <Route element={<StagingProvider><PIIProvider><ISIProvider><LIIProvider><AppShell /></LIIProvider></ISIProvider></PIIProvider></StagingProvider>}>
+        <Route element={
+          <StagingProvider><PIIProvider><ISIProvider><LIIProvider>
+            <PIPProvider><SDPProvider><MNPProvider><IIDProvider><PARProvider>
+              <WLHProvider><SARProvider><ELAProvider><ELZProvider>
+                <AppShell />
+              </ELZProvider></ELAProvider></SARProvider></WLHProvider>
+            </PARProvider></IIDProvider></MNPProvider></SDPProvider></PIPProvider>
+          </LIIProvider></ISIProvider></PIIProvider></StagingProvider>
+        }>
           <Route path="/"                        element={<HomePage />} />
           {/* Phase 6 screens */}
           <Route path="/pull"                    element={<PIPPage />} />

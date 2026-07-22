@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useSAR } from '../context/SARContext';
 import { apiFetch } from '../lib/api';
 
 interface AisleStagedRow {
@@ -79,7 +80,10 @@ export function SARPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<AisleStagedRow[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<number | null>(null);
+  // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
+  // SARContext.tsx's own doc comment for why only `selected`, not the report rows
+  // themselves, is persisted here.
+  const { selected, setSelected } = useSAR();
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +100,7 @@ export function SARPage() {
 
   /** Toggles row selection — tapping the already-selected aisle deselects it. */
   function toggleSelect(aisle: number) {
-    setSelected((s) => (s === aisle ? null : aisle));
+    setSelected(selected === aisle ? null : aisle);
   }
 
   /** Navigates to SDP, pre-populated with the selected aisle. */

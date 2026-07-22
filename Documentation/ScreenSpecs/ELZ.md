@@ -38,6 +38,9 @@ can set or lift Contraction from ELZ.
    - 3a. A Storage Code that isn't a real code at all (checked against the full reference
      list, not the aisle-narrowed popup) shows `"Invalid Storage Code — {code}"` in the
      message bar and is dropped from the query — the grid still loads from Aisle alone.
+     The Storage Code field also picks up the app-wide red-wash treatment (v1.7.0 — see
+     `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) via
+     `StorageCodeField`'s `invalid` prop, same as ELA.
 4. Once Aisle resolves, the screen shows:
    - **Left/center:** the physical aisle grid (`AisleGrid`) — 8 columns (Zone 1-4 ×
      Odd/Even), Level 1 at the bottom, highest level at top. Always unfiltered by
@@ -57,7 +60,10 @@ can set or lift Contraction from ELZ.
 - Aisle number doesn't exist (backend 404s) → message bar `"Invalid Aisle — {aisle}"`;
   grid area shows `"No locations found for Aisle {aisle}"` (with `" — {storageCode}"`
   appended if one was entered); summary panel is empty. Every aisle in the seed data has
-  locations, so this always means the aisle number itself is wrong.
+  locations, so this always means the aisle number itself is wrong. The Aisle box itself
+  also red-washes (v1.7.0, individual field wash, keyed off the same `notFound` state) —
+  unlike Storage Code/Size, this box isn't built on `CodePickerField`, so the wash is
+  applied directly in its own `className` ternary rather than through a prop.
 - Storage Code not a real code → message bar `"Invalid Storage Code — {code}"`; code is
   dropped from the query rather than blocking the whole screen (the grid still loads).
 - Other network/API failure → message bar `"Lookup failed — please try again"` (generic
@@ -67,6 +73,12 @@ can set or lift Contraction from ELZ.
 
 Same as ELA — message bar text persists until the next `setMessage` call replaces it; no
 auto-dismiss timer, no explicit acknowledgment step.
+
+**(v1.7.0, issue #95)** Also same as ELA: the zone fetch effect clears a stale error on
+its own successful run (in an `else` branch alongside the Storage Code check), so a prior
+invalid entry's error doesn't linger through a subsequent valid one — except when Storage
+Code itself is invalid, in which case that error deliberately stays even if the Aisle-only
+grid still loads.
 
 ## Layout
 
@@ -174,6 +186,8 @@ location in the aisle per zone (both sides combined, since bin numbering is
 level-invariant within a zone) — purely a header decoration, not used by any filtering
 logic.
 
+**Session persistence via `ELZContext`.** `aisle` and `storageCode` (the filter inputs) live in `ELZProvider` (mounted in `App.tsx`, alongside all 12 sibling per-screen providers — `StagingProvider`/`PIIProvider`/`ISIProvider`/`LIIProvider`/`PIPProvider`/`SDPProvider`/`MNPProvider`/`IIDProvider`/`PARProvider`/`WLHProvider`/`SARProvider`/`ELAProvider`, all 13 now mounted together wrapping `AppShell`), not local component state, so navigating away from ELZ and back restores the last-viewed aisle instead of resetting to the empty Ready state. Deliberately the filter *inputs*, not a cached `empty-by-zone` result — `ELZPage`'s own query effect already re-fetches fresh data whenever `aisle` is set, the same reasoning `ELAContext` uses. Router-state prefill (ELA's "View Zone Map" button, or STG) still wins over whatever was persisted from a prior visit — the mount-time prefill effect calls both the local numpad-field setter and the context setter whenever prefill is present, so a fresh navigation with explicit state always takes priority over a plain back-navigation with none.
+
 **Shared component with STG:** `AisleGrid` is the same component STG's own embedded
 "Live Info Panel" ELZ-format view renders (as of v1.6.6, at `flex-1` sizing matching this
 screen's own, after the `dense` prop was retired) — a fix or visual change made here
@@ -193,9 +207,9 @@ component with no per-caller divergence left.
 - No screen-specific open fix-list items remain — all 3 of ELZ's `tasks.md` items shipped
   in v1.6.5 (two of them via a combined approach rather than literally as originally
   scoped — see Change Log). See `DevNotes/Fixes/MASTER-CHECKLIST.md`'s ELZ section.
-- **App-wide (cross-cutting, not ELZ-specific):** "Add screen persistence across the
-  app" — ELZ's own Aisle/Storage Code/selection state does not currently persist across
-  navigation away and back.
+- **App-wide (cross-cutting, not ELZ-specific):** the App-Wide screen-persistence item
+  has since landed — ELZ's own Aisle/Storage Code filter now persists across navigation
+  away and back via `ELZContext` (see Behind the Scenes above).
 
 ## Change Log
 

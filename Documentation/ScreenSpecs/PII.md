@@ -31,8 +31,8 @@
 
 ### Mis-scan / error handling
 
-- Non-numeric or unparseable Pallet ID entry: `playAlert('error')`, message bar `"Pallet not found"`, screen returns to Ready (pallet cleared from context if one was loaded). **(v1.6.7)** The typed value is left in the field rather than cleared, so the worker can see and correct what they actually entered instead of retyping from scratch — issue PII#01.
-- `GET /api/pallets/:id` 404: identical handling — `playAlert('error')`, `"Pallet not found"`, field left as-typed, back to Ready.
+- Non-numeric or unparseable Pallet ID entry: `playAlert('error')`, message bar `"Pallet not found"`, screen returns to Ready (pallet cleared from context if one was loaded). **(v1.6.7)** The typed value is left in the field rather than cleared, so the worker can see and correct what they actually entered instead of retyping from scratch — issue PII#01. **(v1.7.0)** The field also picks up the app-wide red-wash treatment (see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) via a `palletInvalid` flag — an individual wash, since Pallet ID is the screen's only entry field.
+- `GET /api/pallets/:id` 404: identical handling — `playAlert('error')`, `"Pallet not found"`, field left as-typed, back to Ready, same red-wash treatment.
 - Save with no reason code but at least one changed field: client-side block, message bar `"A reason code is required to save changes"` — no request sent.
 - Save rejected server-side for a missing reason code despite a changed field (`400 INVALID_INPUT`): generic `"Update failed — INVALID_INPUT"` (this path is normally pre-empted client-side by the reason-code check above).
 - **(v1.6.7)** SSP doesn't evenly divide VCP (`400 INVALID_VCP_SSP_RATIO`): message bar `"SSP must divide evenly into VCP"`; Edit mode is not exited. Re-checked on every save regardless of which field actually changed (see Data/Behind the Scenes below).
@@ -46,6 +46,7 @@
 - Error/success messages use the shared MessageBar — non-blocking, does not require dismissal, persists until the next message or navigation replaces it.
 - The Expiration-Date "coming up soon" popup is a blocking modal-style overlay (not a MessageBar message) — requires an explicit Confirm or Cancel tap. It renders in the screen's upper half, `pointer-events-none` on its wrapper except the panel itself, so it never covers the bottom-right Numpad/Keyboard corner (an app-wide convention for this style of confirm).
 - Loading state shows a plain `"Loading…"` pulsing text placeholder while the fetch is in flight; no skeleton layout.
+- **(v1.7.0, issue #95)** A stale error also clears on the next successful pallet load — `loadPallet` now calls `clearMessage()` unconditionally right after `hidePanel()`, so it fires even though a successful load doesn't set a message of its own.
 
 ## Layout
 
@@ -63,6 +64,7 @@
 │  ── Loaded (read-only) ──────────────────────────────────────────────────────  │
 │  Pallet ID      4471203                    Status          [STORED]           │
 │  DPCI           123-45-6789                Current Location  012-034-05       │
+│  Description    Widget, Blue, 12pk                                            │
 │  UPC            001234567890                Received By     z001234 — 7/1 8:02 │
 │  VCP / SSP      12 / 6   2 SSPs per Carton  Put By           z005566 — 7/1 9:15│
 │  Total Cartons  24                          Last Pulled By   —                 │
@@ -76,6 +78,7 @@
 │                                                                                 │
 │  ── Edit mode (IM+, replaces read-only block above) ─────────────────────────  │
 │  DPCI  [123]-[45]-[6789]         Current: 123-45-6789                         │
+│  Description    Widget, Blue, 12pk                                            │
 │  VCP / SSP  [12] / [6]           Current: 12/6                                │
 │  Total Cartons [24]              Current: 24                                  │
 │  SSPs on Pallet [3]              Current: 3                                   │
@@ -84,17 +87,19 @@
 │  Reason Code  [E01______] [▾]    ← type 3 chars or tap ▾ (same as Storage Code)│
 │  [ Cancel ]   [ Save ]                                                        │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ [123 Keypad] [ABC Keyboard]      ✓ Scan PID   ✗ Bad PID        BD 26198  7/17 3:41 PM │  54px Footer
+│ [123 Keypad] [ABC Keyboard]  ✓ Scan PID  Find by Status  ✗ Bad PID  BD 26198 7/17 3:41 PM │  54px Footer
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Input handling
 
 - Pallet ID field: on-screen Numpad via `useNumpadField()` / `NumpadContext`; variable length (no `maxLength`/auto-submit) — confirmed by an explicit Enter/OK, or an atomic hardware-scanner `deliverScan()`.
+- **(v1.7.0, direct instruction — "a helper button that finds pallet ID on PII by status, with each of those statuses")** A **Find by Status** footer button opens the shared `DemoPicker` with one option per literal `PalletStatus` value (Put Pending, Stored, CA Pull Pending, FP Pull Pending, Pulled, Canceled, Consolidated — see `shared/index.ts`), same shape as LII's own status picker. Backed by a new dedicated endpoint, `GET /api/demo/pallet-status?status={value}` (`samplePalletByStatus` in `api/functions/samples.ts`) — a separate function from `samplePallet`/`GET /api/demo/pallet`, since that endpoint's own `status` query param already means a set of scenario-driven filters (e.g. `"stored"` = has a location, `"pull-pending"` = derived from open Labels) rather than a literal 1:1 match against every `PalletStatus` value; reusing that param for a different meaning would collide. Picking an option loads that pallet the same way a real "Scan PID" does.
+- **(v1.7.0, direct instruction — "PII should have a line for Description of the DPCI")** A read-only **Description** row (the resolved item's `descShort`) sits directly below DPCI, in both the read-only view and Edit mode — matching PAR's own always-visible Description row. `GET /api/pallets/:id` now selects `descShort` off `itemRef` alongside `upc`/`requiresExpirationDate`. Not itself editable and not a live DPCI-lookup — it reflects the currently-loaded pallet's item, same as Edit mode's "Current: {value}" indicators show the pre-edit DPCI rather than re-resolving as the boxes are retyped.
 - **(v1.6.7)** Edit-mode DPCI/VCP/SSP/Total Cartons/SSPs on Pallet/Full Pallets: every one of these is now a numpad-driven `EditBox` (a local `PIIPage.tsx` component, tap to open the on-screen Numpad via a shared `useEditField` hook), replacing the previous plain native `<input>`/`<input type="number">` fields — direct instruction that no Edit-mode box should pop the OS's own keyboard/number pad. DPCI's three boxes keep their old fixed-width zero-pad-on-confirm behavior (3/2/4 digits), now via `useNumpadField`'s own `padOnSubmit` instead of a manual `onBlur` handler. The shared `DpciField` component (still used by PAR, which keeps its own plain-native-input DPCI entry deliberately, per that component's own docstring) is no longer used on this screen.
 - **(v1.6.7)** Every Edit-mode box now shows a "Current: {value}" indicator to its right — the pallet's pre-edit value, so the worker can see what they're changing without having to remember or scroll back to the read-only view. VCP/SSP show one combined "Current: {vcp}/{ssp}" per their own merged box row.
-- **(v1.6.7)** VCP, SSP, and SSPs on Pallet each re-run a client-side mirror of `PATCH`'s own VCP/SSP checks (`vcpSspWarning` in `PIIPage.tsx`) immediately when that box commits (numpad Enter/OK, or the synthetic Blur `useNumpadField` fires when focus moves to another field) — a warning-tone `MessageBar` message if invalid, but editing is never blocked; only pressing Save actually enforces it (the server's own check, unchanged from before this round).
-- Expiration Date: native `<input type="date">` — no numpad equivalent exists in this app for date entry, so this one field stays a native input; it still gets the same "Current: {value}" treatment as everything else.
+- **(v1.6.7)** VCP, SSP, and SSPs on Pallet each re-run a client-side mirror of `PATCH`'s own VCP/SSP checks (`vcpSspWarning` in `PIIPage.tsx`) immediately when that box commits (numpad Enter/OK, or the synthetic Blur `useNumpadField` fires when focus moves to another field) — a warning-tone `MessageBar` message if invalid, but editing is never blocked; only pressing Save actually enforces it (the server's own check, unchanged from before this round). **(v1.7.0)** VCP/SSP also picks up the app-wide red-wash treatment (see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) as a group — a `vcpSspInvalid` flag set alongside the warning, washing both boxes together the same way PAR's own VCP/SSP pair does (a cross-validated rule needing both values at once, not attributable to either field alone).
+- **(v1.7.0)** Expiration Date: rebuilt as the same numpad-driven Month/Day/Year chain PAR uses (direct instruction — "exact same format that is on PAR"), replacing the previous native `<input type="date">`. Each box auto-advances on a 2-digit (Month/Day, zero-padded) or 4-digit (Year) commit; Month validates its 1-12 range and Day validates it exists in the entered month, each washing its own box individually on failure (`monthInvalid`/`dayInvalid`) — mirroring PAR's identical per-box checks. PAR's additional whole-date "expiration too soon" group wash was *not* carried over — that's a business-rule check, not a format one, and this screen already surfaces the equivalent case differently, via the server's `EXPIRATION_NEEDS_CONFIRM`/`EXPIRATION_TOO_SOON` responses (see 7d-ii/7d-iii above), not a wash. Still gets the same "Current: {value}" treatment as everything else.
 - **(v1.6.7)** Reason Code: the shared `ReasonCodeField`, redesigned this round onto the same entry-with-dropdown-helper pattern as Storage Code/Size (`CodePickerField`) — type a known 3-character code (auto-commits and dismisses the keyboard, `closeOnAutoSubmit`) or tap the chevron for a popup of `{code} — {desc}` options. Replaces the previous native `<select>` + conditional "Type a code…" custom-field design; this is a shared-component change, so WLH's hold panel and STG's reject/hold popup get the identical new UX too, not just PII.
 - All buttons meet the 72px+ min touch target convention (Edit/Save/Cancel/Go to Location ID are 56px tall but wide, at the lower bound the app uses for secondary action rows).
 - Scanning a barcode while the Pallet ID field is not focused still lands correctly — the header-level hardware scanner buffer (`AppShell`) delivers to whichever field is currently registered.
@@ -183,7 +188,7 @@ flowchart TD
 
 - The original spec (`DevNotes/Screen-Specs/PII.md`) calls for a confirmation prompt before discarding unsaved Edit-mode changes when a new pallet is scanned mid-edit; the shipped code discards silently instead — documented in-code as "a demo-scope simplification," not yet reconciled with the written spec.
 - All five items previously listed here (`DevNotes/Fixes/PII/01`–`05`: Pallet ID field clearing on a failed scan, VCP/SSP divisibility, SSPs-per-carton cap, the VCP/SSP display merge, and cross-navigation persistence) are fixed as of v1.6.7 — see the Change Log below.
-- LII and ISI still need PII#05's "last-viewed-record persists across navigation" pattern, once their own versions pick it up — `PIIContext` was deliberately kept PII-only rather than generalized early (see Behind the Scenes).
+- PII#05's "last-viewed-record persists across navigation" pattern has since been generalized to every other screen in the app (LII, ISI, and 9 more — see each screen's own spec) — `PIIContext` was the first of what's now 13 sibling per-screen providers mounted together in `App.tsx`, not a PII-only special case anymore.
 - No GitHub issue currently open specifically against PII (see CHANGELOG's "Unreleased — Reported Issues" section as of this writing) — the items above lived in `DevNotes/Fixes/PII/`, not as filed GitHub issues.
 - Issue #29 (Warehousing/Inbound menu restructure, distant-future/unscheduled) would let Edit Reason Codes be gated by module/role instead of the current flat, ungated `EDIT_REASON_CODES` list — explicitly deferred until that lands.
 - Issue #84 (open, Major) — reason codes generally (including PII's Edit Reason Codes) should eventually become a database table with per-department/role restrictions, rather than the current hardcoded `editReasonCodes.ts` list; needs a product conversation first.
@@ -192,6 +197,8 @@ flowchart TD
 
 | Date | Change |
 |---|---|
+| 2026-07-21 (v1.7.0) | Added a **Find by Status** demo footer button — a `DemoPicker` listing every `PalletStatus` value, backed by a new `GET /api/demo/pallet-status?status=` endpoint — direct instruction: "a helper button that finds pallet ID on PII by status, with each of those statuses." |
+| 2026-07-21 (v1.7.0) | Added a read-only Description row (item's `descShort`) directly below DPCI, in both the read-only view and Edit mode — direct instruction: "PII should have a line for Description of the DPCI." `GET /api/pallets/:id` now returns `descShort` off the item relation. |
 | 2026-07-18 (v1.6.7, Edit-mode UI round) | Every Edit-mode box (DPCI/VCP/SSP/Total Cartons/SSPs on Pallet/Full Pallets) converted from native inputs to numpad-driven `EditBox`es, each now showing a "Current: {value}" indicator; VCP/SSP merged onto one Edit-mode row matching the read-only display; VCP/SSP/SSPs on Pallet now warn immediately (non-blocking) on defocus via a client-side mirror of `PATCH`'s own checks; the shared `ReasonCodeField` redesigned onto the `CodePickerField` entry-with-dropdown-helper pattern (affects WLH/STG too, not just PII), replacing the old native `<select>` + "Type a code…" design. |
 | 2026-07-18 (v1.6.7) | All 5 remaining PII fix-list items closed: Pallet ID field no longer clears itself on a failed scan; `PATCH` now validates SSP evenly divides VCP (`INVALID_VCP_SSP_RATIO`) and caps `currentSSPs` below one full carton's worth (`SSPS_EXCEED_CARTON`), re-checked on every save; VCP/SSP merged into one read-only row with a computed SSPs-per-carton indicator; the loaded pallet now survives navigating away and back via a new `PIIContext`/`PIIProvider` (PII-scoped only, mirroring `StagingContext`'s pattern). |
 | 2026-07-17 | Rebuilt onto the new standard template from `DevNotes/Screen-Specs/PII.md`, grounded directly in the current `PIIPage.tsx`/`pallets.ts` code. No behavioral changes made as part of this rebuild — see the Open Items note above for the one confirmed spec-vs-code divergence (discard-confirmation prompt) carried forward rather than silently resolved. |

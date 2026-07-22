@@ -8,6 +8,7 @@ import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
+import { INVALID_WASH } from '../lib/invalidWash';
 import { useNumpadField } from '../lib/useNumpadField';
 
 interface LocationsResponse {
@@ -27,7 +28,7 @@ interface LocationsResponse {
  */
 export function ISIPage() {
   const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { search, setSearch } = useISI();
@@ -48,6 +49,14 @@ export function ISIPage() {
   const classValueRef = useRef('');
 
   const [loading, setLoading] = useState(false);
+  // Red-wash invalid state (App-Wide item 9, v1.7.0) — DPCI is a single composite existence
+  // lookup with no per-box check, so it group-washes (same reasoning as PAR's DPCI); UPC is
+  // its own single box, so it washes individually. Mirrors PAR's loadByDpci/loadByUpc
+  // precedent exactly: each lookup clears the *other* field's invalid flag (since each
+  // lookup also clears the other field's boxes), sets its own flag false on success and
+  // true on failure.
+  const [dpciInvalid, setDpciInvalid] = useState(false);
+  const [upcInvalid, setUpcInvalid] = useState(false);
 
   const locations = search?.locations ?? null;
   const selected = search?.selected ?? null;
@@ -67,19 +76,23 @@ export function ISIPage() {
   const loadByDpci = useCallback(async (dpci: string) => {
     populateDpciBoxes(dpci);
     upcField.clear();
+    setUpcInvalid(false);
+    clearMessage();
     setLoading(true);
     try {
       const data = await apiFetch<LocationsResponse>(`/api/items/dpci/${encodeURIComponent(dpci)}/locations`, token!);
       setSearch({ mode: 'dpci', query: dpci, descShort: data.descShort, locations: data.locations, selected: null });
+      setDpciInvalid(false);
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: 'Item not found' });
       setSearch(null);
+      setDpciInvalid(true);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, clearMessage]);
 
   /** Looks up every stored location for a UPC via the API (fix-list item 02). On failure, the bad UPC stays visible (not cleared) so the worker can see what didn't resolve. */
   const loadByUpc = useCallback(async (upc: string) => {
@@ -89,19 +102,23 @@ export function ISIPage() {
     deptField.clear();
     classField.clear();
     itemField.clear();
+    setDpciInvalid(false);
+    clearMessage();
     setLoading(true);
     try {
       const data = await apiFetch<LocationsResponse>(`/api/items/upc/${encodeURIComponent(trimmed)}/locations`, token!);
       setSearch({ mode: 'upc', query: trimmed, descShort: data.descShort, locations: data.locations, selected: null });
+      setUpcInvalid(false);
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: 'Item not found' });
       setSearch(null);
+      setUpcInvalid(true);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, clearMessage]);
 
   /** Registers the Dept field's numpad handler; on confirm (3 digits), advances to Class. */
   function focusDeptField() {
@@ -214,7 +231,7 @@ export function ISIPage() {
       <div className="flex items-end gap-4">
         <div>
           <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
-          <div className="flex items-center gap-2 mt-1">
+          <div className={`flex items-center gap-2 mt-1 rounded-[12px] ${dpciInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
             <button
               type="button"
               aria-label="Dept"
@@ -258,7 +275,9 @@ export function ISIPage() {
           <button
             type="button"
             onClick={focusUpcField}
-            className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${upcField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+            className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] border-2 transition-colors ${
+              upcInvalid ? INVALID_WASH : upcField.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+            }`}
           >
             <span className="font-data text-[26px] font-medium text-white">
               {upcField.value || <span className="text-[#444]">—</span>}

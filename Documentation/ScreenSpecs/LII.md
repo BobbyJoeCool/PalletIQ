@@ -42,6 +42,7 @@ paging described above.
 
 - Error messages use the shared MessageBar — non-blocking, persists until replaced by the next message or navigation.
 - A `"Loading…"` pulsing placeholder shows while the fetch is in flight; the entry fields and any previously-loaded data are hidden during that window (`!loading` gates the results block).
+- **(v1.7.0, issue #95)** A stale error also clears on the next successful Aisle/Bin/Level lookup — `loadLocation` now calls `clearMessage()` up front, so this doesn't require waiting on some other message to overwrite it.
 
 ## Layout
 

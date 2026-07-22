@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Future Versions — Major Features](#future-versions--major-features)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.7.0 — 2026-07-21](#170--2026-07-21)
 - [1.6.10 — 2026-07-20](#1610--2026-07-20)
 - [1.6.9 — 2026-07-20](#169--2026-07-20)
 - [1.6.8 — 2026-07-19](#168--2026-07-19)
@@ -93,7 +94,7 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Minor
 
-- [#95](https://github.com/BobbyJoeCool/PalletIQ/issues/95) — Status bar: error message persists after a subsequent successful scan
+No issues currently open in this category.
 
 ### Nice-to-have/Cosmetic
 
@@ -111,6 +112,116 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.7.0] — 2026-07-21
+
+PAR's full redesign (every entry/display field always visible, dual DPCI/UPC identifier
+entry, Multiple Pallets' N+1-row creation model, required Expiration Date, a new Size
+field, Storage Code mismatch checking, screen-wide auto-advance, and a 3-column layout with
+a session Reinstate Log) plus an app-wide infrastructure batch (cross-navigation session
+persistence, tap-anywhere-to-defocus, a red-wash invalid-field treatment rolled out to 8
+screens, and a stale-error-message fix across 11), bundled together with a cross-screen
+bug/feature batch (SDP, PII ×2, WLH, ELA, STG) and two closed issues (#97, #98). Ships as
+one version rather than the usual one-screen cadence — see `DevNotes/Logs/V1.6/
+version-1_6_10.md` for the full session-by-session record this entry summarizes.
+
+### 1.7.0 — Added
+
+- **PAR: full redesign.** Every entry and display field is now visible at all times, no
+  longer gated behind typing. DPCI and UPC are dual, independent entry points (UPC search
+  populates DPCI; DPCI search clears UPC). New `Pallet.cartonsPerPallet` field, backfilled
+  onto every existing pallet — Multiple Pallets mode now creates **N+1 separate pallet
+  rows** (one per full pallet, one for the partial) instead of one row with a blended
+  count, and `editPallet`'s insufficient-quantity check now reads this field directly
+  instead of an old `receivedCartons` approximation. Expiration Date moved to its own row
+  and is now **required at creation** when the item flags `requiresExpirationDate` — a
+  deliberate stricter departure from PII's prompt-only rule. A new **Size** field
+  (mandatory unless a Location is entered, which then inherits its own Size instead).
+  Every entry field is numpad/keyboard-driven (no native inputs), and the on-screen Numpad
+  stays open on this screen at all times. Screen-wide auto-advance carries a worker through
+  the whole form field-to-field: DPCI/UPC → VCP → SSP → Size → Cartons → SSPs → Month/Day/
+  Year (if required) or straight to Location, ending at Aisle → Bin → Level. Occupied/held/
+  contracted locations, and a Storage Code mismatch between the item and the Location, now
+  **warn and allow** instead of hard-blocking (the pallet being reinstated is very likely
+  already physically there) — two new inline indicators (the item's own Storage Code badge
+  beside Description; the Location's own Storage Code-Size beside its entry boxes) make the
+  comparison visible at a glance. Layout split into 3 columns: the form, a middle column
+  (Printer + a full-height Create Pallet button), and a new session **Reinstate Log** on
+  the right. Footer demo pickers cover DPCI/UPC (Valid, Valid w/Expiration, Valid
+  w/o Expiration, Invalid) and Location (Empty, Occupied, Invalid, Hold, Contraction, Wrong
+  Storage Type). App-wide red-background-wash invalid-field styling trialed here first.
+- **App-Wide: cross-navigation session persistence** for 9 more screens (IID, WLH, SAR,
+  ELA, ELZ, PIP, SDP, MNP, PAR), each via its own new `{Screen}Context` — matches the
+  pattern PII/LII/ISI/Staging already used. Only each screen's resolved/loaded record
+  persists; in-progress typing and focus never do.
+- **App-Wide: tap-anywhere-to-defocus.** Tapping any background chrome (not a button) now
+  closes the active field's numpad/keyboard panel and commits it, the same as its own
+  explicit OK/Enter would — built once in `AppShell`, not per screen.
+- **App-Wide: red-background-wash invalid-field styling**, extended from PAR's own trial to
+  8 more screens (ELA, ELZ, ISI, PIP, IID, PII, SDP, and WLH's shared `HoldPanel`, which
+  also affects PIP/MNP's inline quick-hold panels) — MNP, STG, and Login/PIN were audited
+  and found to already clear bad values atomically, so no field there ever holds a value
+  worth washing. New shared `groupInvalid` prop on `LocationEntryFields` for the
+  group-wash case (WLH's Location field). Spec: `DevNotes/DesignPrompts/
+  Feature-8-AppWide-Invalid-Field-Wash.md`.
+- **SDP: demo Put/Move buttons now exclude pallets that already match an entered Size/
+  Storage Code override**, so directing one actually demonstrates the override doing
+  something instead of frequently landing on a pallet that already matched.
+- **PII: a read-only Description row** (the item's short description) directly below
+  DPCI, in both the read-only view and Edit mode.
+- **PII: a "Find by Status" demo footer button**, covering every `PalletStatus` value (Put
+  Pending, Stored, CA Pull Pending, FP Pull Pending, Pulled, Canceled, Consolidated) via a
+  new `GET /api/demo/pallet-status` endpoint.
+- New `GET /api/locations/aisle-exists` endpoint, backing PAR's per-box Aisle existence
+  check.
+
+### 1.7.0 — Changed
+
+- **PII: Edit mode's VCP/SSP now gets the same red-wash group treatment** every other
+  screen's cross-validated field pairs use, and Expiration Date was rebuilt onto the same
+  numpad-driven Month/Day/Year chain PAR uses, replacing a native `<input type="date">`.
+- **ELA: sorting the results table by a Size column now fills that size into the Size
+  filter above it** (e.g. sorting by Medium fills Medium into the master control).
+- **STG: every "bubble" in the reject/hold queue is now clickable**, not just the first and
+  last (issue #97) — investigated and confirmed the compaction logic that follows a hold
+  doesn't depend on which position triggered it.
+- **STG: stack-advance now carries forward Aisle/Storage Code/Size independently** when all
+  three stacks agreed on that field's value, even when compaction doesn't fully empty the
+  queue (previously only carried forward on a fully-empty compaction).
+- **Demo reseed: staging now fills each aisle from one end** (highest bin first, matching
+  production's real fill order) instead of picking locations at random within the aisle
+  (issue #98); also now tops itself up to a guaranteed minimum of 8 staged aisles
+  regardless of what time the reseed runs (previously, reseeding before 6am produced an
+  empty shift-simulation window and almost nothing staged).
+
+### 1.7.0 — Fixed
+
+- **PAR: VCP/SSP's live divisibility check never actually fired** — a stale-closure bug
+  meant entering VCP 9 / SSP 2 (2 doesn't divide 9) silently passed client-side and only
+  failed at Create Pallet. Fixed with a live-value-ref pair, confirmed safe for this
+  specific field set (no external value-setting path to go stale against, unlike DPCI's
+  own refs, deliberately removed in an earlier round for exactly that reason).
+- **PAR: Expiration Date could submit malformed values** (e.g. `//2027`, silently dropping
+  Month and Day) two separate ways — a stale-closure bug in the Year box's composition, and
+  Create Pallet staying enabled even when Month/Day were skipped or only partially typed.
+  Both fixed; Create Pallet now correctly stays disabled until the whole group is complete.
+- **PAR: hand-entering a DPCI outside strict left-to-right order could falsely come back
+  "not found"** — the chain now reads live field values instead of stale refs populated
+  only by its own in-order handlers.
+- **WLH: a real server-side permission gap** — a role that couldn't remove an existing hold
+  (e.g. Hold Permanent) could still replace it with a different, lower-gated hold type
+  (e.g. Hold Both), effectively routing around the higher-tier hold. `placeHold` now checks
+  removal permission on whatever hold already exists before allowing a different type to
+  replace it.
+- **Demo reseed: the "Reseed Test Data" summary showed "undefined locations staged across
+  undefined aisles"** — the response never actually included the `locationsStaged`/
+  `aislesStaged` fields its own declared type promised.
+- **App-Wide: a stale error message no longer lingers on screen after a later action
+  actually succeeds** (issue #95) — 11 screens' success paths (LII, ISI, IID, PII, ELA,
+  ELZ, STG, SDP, MNP, WLH, PIP) now explicitly clear the Message Bar, closing a gap where
+  only Login/PIN ever did.
 
 ---
 

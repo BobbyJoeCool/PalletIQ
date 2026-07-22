@@ -3,33 +3,21 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
+import { type IIDItemData, useIID } from '../context/IIDContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
+import { INVALID_WASH } from '../lib/invalidWash';
 import { useNumpadField } from '../lib/useNumpadField';
 
 // Item.vcp/Item.ssp do not exist on the actual data model — VCP/SSP are set per-pallet
 // at receiving time, not fixed at the item level (see outline.md's Core Data Concepts,
 // and api/prisma/schema.prisma's Item model). IID.md's read-only field table lists them
 // anyway, which looks like a leftover from an earlier iteration of the data model. This
-// screen displays the Item model's actual fields instead — see phase-9 log.
-interface ItemData {
-  dept: number;
-  class: number;
-  item: number;
-  dpci: string;
-  upc: string;
-  name: string;
-  desc: string;
-  descShort: string;
-  retailPrice: number;
-  cost: number;
-  unitWeight: number | null;
-  packingZoneCode: number;
-  storageCode: string;
-  conveyable: boolean;
-}
+// screen displays the Item model's actual fields instead — see phase-9 log. The shape
+// itself now lives in IIDContext.tsx (App-Wide screen-persistence, v1.7.0) as
+// `IIDItemData`, imported here rather than redeclared.
 
 /**
  * IID — Item ID Lookup. Read-only item lookup for all roles via two independent entry
@@ -38,7 +26,7 @@ interface ItemData {
  */
 export function IIDPage() {
   const { token, user } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const { hidePanel } = useNumpad();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -60,10 +48,18 @@ export function IIDPage() {
   const classField = useNumpadField('numpad', 2, true);
   const itemField = useNumpadField('numpad', 4, true);
   const upcField = useNumpadField('numpad');
-  const [item, setItem] = useState<ItemData | null>(null);
+  // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
+  // IIDContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern.
+  const { item, setItem } = useIID();
   const [loading, setLoading] = useState(false);
   const deptValueRef = useRef('');
   const classValueRef = useRef('');
+  // Red-wash invalid state (App-Wide item 9, v1.7.0) — same DPCI-group/UPC-individual split
+  // as ISI/PAR: DPCI is a composite existence lookup with no per-box check, UPC is its own
+  // single box. Each lookup clears the *other* mode's invalid flag, since each lookup also
+  // clears the other mode's field(s).
+  const [dpciInvalid, setDpciInvalid] = useState(false);
+  const [upcInvalid, setUpcInvalid] = useState(false);
 
   /** Looks up an item by DPCI via the API, clearing the UPC field on success. On failure, the bad DPCI stays visible in the three boxes (not cleared) so the worker can see what didn't resolve. */
   const loadByDpci = useCallback(async (v: string) => {
@@ -79,20 +75,24 @@ export function IIDPage() {
       itemField.set(i);
     }
     upcField.clear();
+    setUpcInvalid(false);
     hidePanel();
+    clearMessage();
     setLoading(true);
     try {
-      const data = await apiFetch<ItemData>(`/api/items/dpci/${encodeURIComponent(trimmed)}`, token!);
+      const data = await apiFetch<IIDItemData>(`/api/items/dpci/${encodeURIComponent(trimmed)}`, token!);
       setItem(data);
+      setDpciInvalid(false);
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: 'Item not found' });
       setItem(null);
+      setDpciInvalid(true);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, hidePanel]);
+  }, [token, hidePanel, clearMessage]);
 
   /** Looks up an item by UPC via the API, clearing the DPCI fields on success. On failure, the bad UPC stays visible (not cleared) so the worker can see what didn't resolve. */
   const loadByUpc = useCallback(async (v: string) => {
@@ -102,20 +102,24 @@ export function IIDPage() {
     deptField.clear();
     classField.clear();
     itemField.clear();
+    setDpciInvalid(false);
     hidePanel();
+    clearMessage();
     setLoading(true);
     try {
-      const data = await apiFetch<ItemData>(`/api/items/upc/${encodeURIComponent(trimmed)}`, token!);
+      const data = await apiFetch<IIDItemData>(`/api/items/upc/${encodeURIComponent(trimmed)}`, token!);
       setItem(data);
+      setUpcInvalid(false);
     } catch {
       playAlert('error');
       setMessage({ type: 'error', text: 'Item not found' });
       setItem(null);
+      setUpcInvalid(true);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, hidePanel]);
+  }, [token, hidePanel, clearMessage]);
 
   /** Registers the Dept field's numpad handler; on confirm (3 digits), advances to Class. */
   function focusDeptField() {
@@ -215,7 +219,7 @@ export function IIDPage() {
       <div className="flex gap-4">
         <div>
           <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
-          <div className="flex items-center gap-2 mt-1">
+          <div className={`flex items-center gap-2 mt-1 rounded-[12px] ${dpciInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
             <button
               type="button"
               aria-label="Dept"
@@ -258,7 +262,9 @@ export function IIDPage() {
           <button
             type="button"
             onClick={focusUpcField}
-            className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${upcField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+            className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] border-2 transition-colors ${
+              upcInvalid ? INVALID_WASH : upcField.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+            }`}
           >
             <span className="font-data text-[26px] font-medium text-white">
               {upcField.value || <span className="text-[#444]">—</span>}

@@ -78,14 +78,26 @@ interface LocationEntryFieldsProps {
    *  Level (or resolving immediately, if Level is locked/optional) — same progressive-
    *  validation use as `onAisleEntered`, one box further in. */
   onBinEntered?: (aisle: string, bin: string) => void;
-  /** Per-box invalid-wash flags (v1.6.11, PAR) — independent of `highlight` (which washes
-   *  all 3 boxes as a single group). Use these when a caller can attribute a specific
-   *  failure to one box specifically (e.g. "this Aisle doesn't exist" vs. "this Bin doesn't
-   *  exist within that Aisle" vs. "this Level doesn't exist within that Aisle+Bin") rather
-   *  than the whole three-box value being generically wrong. All default false. */
+  /** Per-box invalid-wash flags (v1.6.11, PAR) — independent of `groupInvalid`. Use these
+   *  when a caller can attribute a specific failure to one box specifically (e.g. "this
+   *  Aisle doesn't exist" vs. "this Bin doesn't exist within that Aisle" vs. "this Level
+   *  doesn't exist within that Aisle+Bin") rather than the whole three-box value being
+   *  generically wrong. All default false. */
   aisleInvalid?: boolean;
   binInvalid?: boolean;
   levelInvalid?: boolean;
+  /** Washes all three boxes as a single group (v1.7.0 app-wide rollout — see
+   *  `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`), for a caller whose
+   *  failure is a single combined check against the whole Aisle+Bin(+Level) value with no
+   *  way to attribute it to one box specifically (e.g. WLH's whole-location existence
+   *  lookup) — same "attribute to the smallest checkable unit" rule PAR's DPCI group wash
+   *  follows. Independent of the per-box `aisleInvalid`/`binInvalid`/`levelInvalid` flags —
+   *  a caller should use one or the other, not both. Distinct from the older `highlight`
+   *  prop (border-only, currently unused by any caller) — this applies the actual
+   *  `INVALID_WASH` treatment via a wrapping div, matching PAR/ISI/IID's DPCI pattern
+   *  exactly: individual boxes keep their normal styling, the wrapper alone carries the
+   *  wash. */
+  groupInvalid?: boolean;
 }
 
 /**
@@ -105,6 +117,7 @@ interface LocationEntryFieldsProps {
 export function LocationEntryFields({
   onResolved, autoFocus = true, value, highlight = false, onActiveChange, lockedAisle, lockedLevel, size = 'default',
   levelOptional = false, onAisleEntered, onBinEntered, aisleInvalid = false, binInvalid = false, levelInvalid = false,
+  groupInvalid = false,
 }: LocationEntryFieldsProps) {
   const { hidePanel } = useNumpad();
   // maxLength auto-advances once the fixed-length manual entry is complete (3/3/2 digits);
@@ -264,7 +277,7 @@ export function LocationEntryFields({
   const levelWidth = size === 'large' ? 'w-[115px]' : 'w-[100px]';
 
   return (
-    <div className="flex gap-3">
+    <div className={`flex gap-3 rounded-[12px] ${groupInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
       <div className={`flex flex-col gap-1 ${aisleWidth}`}>
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Aisle</span>
         {lockedAisle != null ? (

@@ -610,14 +610,18 @@ async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
 
 /**
  * Places or replaces a hold on a location. Role check per hold category (see
- * HOLD_PLACE_MIN_ROLE above). Writes an activity log entry carrying the reason code —
- * per WLH.md, the reason code itself is never stored as a column, only logged.
+ * HOLD_PLACE_MIN_ROLE above) — and, if a *different* hold already exists on the location,
+ * also per whatever role is required to remove that existing hold (v1.7.0 — closes a gap
+ * where a role that can't remove a hold could still route around that by placing a
+ * different, lower-gated type over it). Writes an activity log entry carrying the reason
+ * code — per WLH.md, the reason code itself is never stored as a column, only logged.
  *
  * @param req - HTTP request with URL param `id` (8-digit location barcode) and body
  *   `{ holdType: 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM'; reasonCode: string }`
  * @returns `{ locationId: string; holdType: string; previousHoldType: string | null }`
  * @throws 400 INVALID_INPUT for a bad id, missing/invalid holdType, or missing reasonCode;
- *   403 FORBIDDEN if caller's role is below the required minimum for that hold type;
+ *   403 FORBIDDEN if caller's role is below the required minimum for that hold type, or
+ *   (when replacing a different existing hold) below the minimum to remove that one;
  *   404 NOT_FOUND if the location doesn't exist
  */
 async function placeHold(req: HttpRequest): Promise<unknown> {
@@ -639,6 +643,16 @@ async function placeHold(req: HttpRequest): Promise<unknown> {
   if (!location) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
   const previousHoldType = location.holdCategory;
+
+  // Changing a location to a *different* hold type is equivalent to removing whatever's
+  // currently on it — a role that can't remove the existing hold shouldn't be able to route
+  // around that gate by placing a different type instead (e.g. a sub-Lead role could
+  // otherwise replace an existing Hold Permanent with Hold Both, despite never having
+  // permission to remove the Perm hold, since Hold Both's own placeRole is WORKER). Re-
+  // placing the *same* type isn't a change, so it's exempt from this check.
+  if (previousHoldType && previousHoldType !== body.holdType && !hasMinRole(auth.role, HOLD_REMOVE_MIN_ROLE[previousHoldType])) {
+    throw Object.assign(new Error('FORBIDDEN'), { status: 403 });
+  }
 
   await prisma.location.update({
     where: { LocationID: { aisle: full.aisle, bin: full.bin, level: full.level } },

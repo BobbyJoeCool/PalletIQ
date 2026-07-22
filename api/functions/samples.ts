@@ -75,8 +75,15 @@ async function sampleLabel(req: HttpRequest, _ctx: InvocationContext): Promise<u
  * "no-cartons" (that path is purely about exercising the error, not finding a matching
  * location).
  *
+ * Optional `excludeStorageCode`/`excludeSize` query params (SDP's Size/Storage Code
+ * override fields) exclude pallets that already naturally match the given value — a demo
+ * Put/Move for a pallet that already has the same Storage Code/Size as the entered override
+ * wouldn't visibly prove the override is doing anything. `excludeSize` only affects
+ * "stored" (unlocated pallets have no Size of their own yet, per above).
+ *
  * @param req - HTTP request with query params `status` ("unlocated" | "stored" | "no-cartons" |
- *   "canceled" | "pull-pending", default "stored") and optional `aisle` (number)
+ *   "canceled" | "pull-pending", default "stored"), optional `aisle` (number), and optional
+ *   `excludeStorageCode`/`excludeSize`
  * @returns `{ palletId: number }`
  * @throws 404 NOT_FOUND if no pallets match the requested status (and aisle's Storage Code/Size, if given)
  */
@@ -87,6 +94,13 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
   const statusParam = params.get('status') ?? 'stored';
   const aisleParam = params.get('aisle');
   const aisle = aisleParam ? parseInt(aisleParam, 10) : null;
+  // Excludes a currently-entered Size/Storage Code override (SDP) from the pick — without
+  // this, a demo Put/Move frequently lands on a pallet that already naturally matches the
+  // override, so directing it doesn't visibly demonstrate the override actually changing
+  // anything. Size has no effect for "unlocated" pallets below (they have no Size of their
+  // own yet — see this function's own doc comment); only Storage Code applies there.
+  const excludeStorageCode = params.get('excludeStorageCode') || undefined;
+  const excludeSize = params.get('excludeSize') || undefined;
 
   let aislePairs: { storageCode: string; size: string }[] | null = null;
   if (aisle != null && !isNaN(aisle)) {
@@ -110,7 +124,17 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
 
   const where =
     statusParam === 'unlocated'
-      ? { locationAisle: null, ...(aisleStorageCodes && { itemRef: { storageCode: { in: aisleStorageCodes } } }) }
+      ? {
+          locationAisle: null,
+          ...((aisleStorageCodes || excludeStorageCode) && {
+            itemRef: {
+              storageCode: {
+                ...(aisleStorageCodes && { in: aisleStorageCodes }),
+                ...(excludeStorageCode && { not: excludeStorageCode }),
+              },
+            },
+          }),
+        }
     : statusParam === 'no-cartons' ? { currentCartons: { lte: 0 } }
     : statusParam === 'canceled' ? { status: 'CANCELED' }
     : statusParam === 'pull-pending'
@@ -118,6 +142,8 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
     : {
         locationAisle: { not: null },
         ...(aislePairs && { OR: aislePairs.map((p) => ({ storageCode: p.storageCode, size: p.size })) }),
+        ...(excludeStorageCode && { storageCode: { not: excludeStorageCode } }),
+        ...(excludeSize && { size: { not: excludeSize } }),
       };
 
   const count = await prisma.pallet.count({ where });
@@ -129,6 +155,36 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
     skip,
     select: { pid: true },
   });
+
+  return { palletId: pallet!.pid };
+}
+
+/**
+ * Returns a random pallet ID matching a literal `Pallet.status` value, for PII's "Find by
+ * Status" demo button (v1.7.0, direct instruction) — a dedicated endpoint rather than
+ * another `samplePallet` branch, since that function's own `status` query param already
+ * means a set of scenario-driven filters (e.g. "stored" = has a location, "canceled" =
+ * `status: 'CANCELED'`, "pull-pending" = derived from open Labels) rather than a literal
+ * 1:1 match against every value of the `PalletStatus` union — reusing the same param name
+ * for a different meaning here would collide. Every value of `PalletStatus` (see
+ * `shared/index.ts`) is a valid `status` here: PUT_PENDING, STORED, CA_PULL_PEND,
+ * FP_PULL_PEND, PULLED, CANCELED, CONSOLIDATED.
+ *
+ * @param req - HTTP request with required query param `status` (a literal `Pallet.status` value)
+ * @returns `{ palletId: number }`
+ * @throws 400 INVALID_INPUT if `status` is missing; 404 NOT_FOUND if no pallet has that status
+ */
+async function samplePalletByStatus(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
+  await requireAuth(req);
+
+  const status = new URL(req.url).searchParams.get('status');
+  if (!status) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
+  const count = await prisma.pallet.count({ where: { status } });
+  if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+  const skip = Math.floor(Math.random() * count);
+  const pallet = await prisma.pallet.findFirst({ where: { status }, skip, select: { pid: true } });
 
   return { palletId: pallet!.pid };
 }
@@ -172,12 +228,23 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
  * level the randomly-picked location actually is); other callers that don't need it just
  * ignore the extra field.
  *
+ *   - "wrongType" (v1.7.0, PAR's Location picker) — requires `storageCode`; returns an
+ *     EMPTY location whose own Storage Code does *not* match it, to exercise PAR's
+ *     Storage-Code-mismatch warn-then-allow flow on demand.
+ *
+ * Optional `storageCode` query param (v1.7.0) additionally scopes "empty"/"occupied"/
+ * "held"/"contracted" to locations that actually carry that Storage Code — PAR's Location
+ * picker passes the currently-resolved item's own Storage Code so every one of those
+ * options is a genuinely valid put target storage-code-wise, not just occupancy-wise.
+ * Ignored by every other caller (LII/MNP/WLH), which don't pass it.
+ *
  * @param req - HTTP request with query param `status`
  *   ("any" | "empty" | "occupied" | "staged" | "reserved" | "pullPending" | "held" |
- *   "contracted" | "multiOccupant" | "consolidate", default "empty") and, for
- *   "consolidate" only, a required `palletId` query param
+ *   "contracted" | "multiOccupant" | "consolidate" | "wrongType", default "empty"),
+ *   optional `storageCode`, and, for "consolidate" only, a required `palletId` query param
  * @returns `{ locationId: string, level: number }` — locationId is a 6-digit zero-padded string
- * @throws 400 INVALID_INPUT if `status=consolidate` is missing/non-numeric `palletId`;
+ * @throws 400 INVALID_INPUT if `status=consolidate` is missing/non-numeric `palletId`, or
+ *   `status=wrongType` is missing `storageCode`;
  *   404 NOT_FOUND if no locations (or, for "consolidate", no source pallet / no same-DPCI
  *   STORED match) satisfy the request
  */
@@ -186,6 +253,25 @@ async function sampleLocation(req: HttpRequest, _ctx: InvocationContext): Promis
 
   const params = new URL(req.url).searchParams;
   const statusParam = params.get('status') ?? 'empty';
+  // PAR's Location picker (v1.7.0): scopes "empty"/"occupied"/"held"/"contracted" to
+  // locations that actually match the given Storage Code, so every one of those options
+  // is a genuinely valid put target storage-code-wise — plus the new "wrongType" status
+  // below, which deliberately finds a mismatch to exercise the opposite case.
+  const storageCode = params.get('storageCode') || undefined;
+
+  if (statusParam === 'wrongType') {
+    if (!storageCode) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    const where = { status: 'EMPTY', storageCode: { not: storageCode } };
+    const count = await prisma.location.count({ where });
+    if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+    const skip = Math.floor(Math.random() * count);
+    const location = await prisma.location.findFirst({ where, skip, select: { aisle: true, bin: true, level: true } });
+    if (!location) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+    const id = String(location.aisle).padStart(3, '0') + String(location.bin).padStart(3, '0');
+    return { locationId: id, level: location.level };
+  }
 
   if (statusParam === 'consolidate') {
     const palletIdParam = params.get('palletId');
@@ -263,13 +349,15 @@ async function sampleLocation(req: HttpRequest, _ctx: InvocationContext): Promis
     return { locationId: id, level: pick.locationLevel };
   }
 
-  const where =
-    statusParam === 'empty'       ? { status: 'EMPTY' }
-    : statusParam === 'occupied'  ? { status: 'STORED' }
-    : statusParam === 'staged'    ? { status: 'STAGED' }
-    : statusParam === 'reserved'  ? { status: 'RESERVED' }
-    : statusParam === 'held'      ? { holdCategory: { not: null } }
-    : /* contracted */              { contraction: true };
+  const where = {
+    ...(statusParam === 'empty'       ? { status: 'EMPTY' }
+      : statusParam === 'occupied'  ? { status: 'STORED' }
+      : statusParam === 'staged'    ? { status: 'STAGED' }
+      : statusParam === 'reserved'  ? { status: 'RESERVED' }
+      : statusParam === 'held'      ? { holdCategory: { not: null } }
+      : /* contracted */              { contraction: true }),
+    ...(storageCode && { storageCode }),
+  };
 
   const count = await prisma.location.count({ where });
   if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
@@ -299,6 +387,13 @@ app.http('samplePallet', {
   authLevel: 'anonymous',
   route: 'demo/pallet',
   handler: withHandler(samplePallet),
+});
+
+app.http('samplePalletByStatus', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'demo/pallet-status',
+  handler: withHandler(samplePalletByStatus),
 });
 
 app.http('sampleLocation', {

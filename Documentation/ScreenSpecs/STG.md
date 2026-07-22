@@ -27,7 +27,14 @@ all the way into Staging, skipping past an empty slot in between if one exists (
 Next is empty but On Deck has data, On Deck jumps straight to Staging). If nothing was
 queued behind it, the newly-emptied Staging slot inherits the just-staged stack's own
 Aisle/Storage Code/Size for convenience (a repeat stage into the same aisle/type then
-only needs a new Quantity). See `compactStacks` in `src/context/StagingContext.tsx`.
+only needs a new Quantity). **(v1.7.0)** When there *was* something queued behind it,
+each of Aisle/Storage Code/Size — independently — carries forward into whatever slot the
+compaction newly opens up, but only if all three stacks (Staging, Next, On Deck) held the
+*exact same value* for that field before staging (e.g. all three on Storage Code CR but
+different Sizes persists only CR, not a Size). Distinct from the "nothing queued behind
+it" case just above, which always persists every one of the staged stack's own fields
+regardless of whether Next/On Deck had anything to compare against. See `compactStacks`
+and `resetStackAfterStage` in `src/context/StagingContext.tsx`.
 
 This queue — plus **Master Control** (a separate, independent Aisle/Storage Code/Size
 used to drive the Live Info Panel below and to "Fill" stacks on request) and the
@@ -98,16 +105,21 @@ exactly as left. State clears only when the authenticated route tree unmounts (l
    the first `quantity` EMPTY locations of that type from the back — logged as one
    combined "restage" entry, reported in the message bar as a per-type summary (e.g.
    `"Cleared CR-M · Restaged 6 CR-L"`).
-10. **Location suggestion reject/hold flow** — the Staging slot's next suggested location
-    (the first bubble, and also the final/green bubble if Quantity = 1) is a tap target
-    that does **not** stage anything: it opens a confirmation popup ("Reject suggested
-    location?") defaulting the reason code to `B05` ("Blocked", editable via the shared
-    `ReasonCodeField` — an entry-with-dropdown-helper field as of v1.6.7, not a plain
-    dropdown; type a code or tap the chevron for a popup of known ones).
+10. **Location suggestion reject/hold flow** — **every** bubble in the Staging slot's
+    suggested-location queue is a tap target (v1.7.0, issue #97 — previously only the
+    first bubble and the final/green bubble were tappable, per #77; reversed since
+    rejecting any bubble always triggers the same full server-side re-suggestion
+    regardless of which position was rejected, so there was never a queue-compaction
+    reason tied to position). Tapping a bubble does **not** stage anything: it opens a
+    confirmation popup ("Reject suggested location?") defaulting the reason code to
+    `B05` ("Blocked", editable via the shared `ReasonCodeField` — an entry-with-dropdown-
+    helper field as of v1.6.7, not a plain dropdown; type a code or tap the chevron for a
+    popup of known ones).
     Confirming places a Hold Both on that location and recalculates a new suggestion.
     Cancelling leaves the original suggestion untouched. If no valid location remains
     after a rejection, the message bar reports `"No valid location available to
-    suggest"`.
+    suggest"`. The final/green bubble (Quantity fully satisfied) keeps its distinct green
+    styling — every other bubble, including the first, shares the same blue style.
 
 ### Mis-scan / error handling
 
@@ -117,6 +129,13 @@ exactly as left. State clears only when the authenticated route tree unmounts (l
   Code/Size validation (`strict`) is skipped while the narrowing reference data (the
   stack's own Aisle's freight types, or the full Storage Code list) hasn't loaded yet, so
   a value typed before that data arrives isn't falsely rejected.
+  **App-wide red-wash audit (v1.7.0):** no field on this screen picked up the red-wash
+  treatment (`DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) — every one
+  of these fields clears itself atomically on an invalid entry (`PalletCodePicker`'s own
+  `strict` handling calls `field.clear()` before `onInvalid`; per-stack/Master Aisle both
+  clear via `updateStack(index, { aisle: '' })` / equivalent), so there's never a moment
+  where a bad value sits visibly in a box to wash — same finding, and same reasoning, as
+  MNP's audit.
 - A per-stack Aisle that doesn't actually exist (checked live against `GET
   /api/locations/empty-by-zone`) is cleared with `"{Stack} Stack - Aisle - Invalid
   Entry"`.
@@ -131,6 +150,11 @@ exactly as left. State clears only when the authenticated route tree unmounts (l
 Message bar text persists until the next `setMessage` call replaces it (no auto-clear).
 Successful stage/restage/hold actions also always play an audio tone (`playAlert('info'
 | 'warning' | 'error')`) and write a log entry, independent of the message bar text.
+
+**(v1.7.0, issue #95)** A stale error also clears on the next successful aisle confirm —
+per-stack `handleAisleConfirm` now calls `clearMessage()` right after its
+`empty-by-zone` existence check succeeds, so a prior invalid-entry error doesn't linger
+through a subsequent valid one.
 
 ## Layout
 

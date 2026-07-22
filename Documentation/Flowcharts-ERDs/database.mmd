@@ -10,12 +10,12 @@ erDiagram
     %% LocationStatus: EMPTY, STORED, PULL_PENDING, RESERVED, STAGED                                           → NVarChar(15)
     %% HoldCategory:   HOLD_IN, HOLD_OUT, HOLD_BOTH, HOLD_PERM (Location.holdCategory, independent of status)   → NVarChar(10)
     %% LocationSize:   XS, HS, S, M, L                                                                         → NVarChar(2)
-    %% PalletStatus:   PUT_PENDING, STORED, PULL_PENDING, PULLED, CANCELED, CONSOLIDATED (open — expand as needed) → NVarChar(15)
+    %% PalletStatus:   PUT_PENDING, STORED, CA_PULL_PEND, FP_PULL_PEND, PULLED, CANCELED, CONSOLIDATED         → NVarChar(15)
     %% LabelStatus:    AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                  → NVarChar(15)
     %% PullFunction:   CA (Carton Air), CF (Carton Floor), FP (Full Pallet), BK (Bulk/level-0, not in demo)   → NVarChar(2)
     %% Role:           ADMIN, MANAGER, LEAD, IM, WORKER                                                        → NVarChar(10)
     %% ActionType:     EDIT_PAL, PULL, RESERVE, PUT, UNASSIGN, BLOCK_PUT, RES_TMOUT, MNP_SCAN, STAGE, RESTAGE,
-    %%                 HOLD_PLACE, HOLD_CLEAR, REINSTATE                                                       → NVarChar(10)
+    %%                 HOLD_PLACE, HOLD_CLEAR, REINSTATE, CONSOLID, MNP_CANCEL                                 → NVarChar(10)
     %% ============================================================
     %% BUSINESS RULES
     %% SSP must be a factor of VCP (enforced in app logic, not schema)

@@ -20,13 +20,14 @@
 
 ### Mis-scan / error handling
 
-- `GET /api/items/dpci/:dpci` or `/upc/:upc` 404: `playAlert('error')`, message bar `"Item not found"`, item data cleared. The field(s) that were used **stay visible with the bad value** (v1.6.8 — previously cleared; changed per direct feedback so the worker can see what didn't resolve).
+- `GET /api/items/dpci/:dpci` or `/upc/:upc` 404: `playAlert('error')`, message bar `"Item not found"`, item data cleared. The field(s) that were used **stay visible with the bad value** (v1.6.8 — previously cleared; changed per direct feedback so the worker can see what didn't resolve) and pick up the app-wide red-wash treatment (v1.7.0 — see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`): DPCI washes as one group (`dpciInvalid` — a single composite existence lookup with no independent per-box check, same as PAR/ISI), UPC washes on its own (`upcInvalid`). Each lookup clears the *other* mode's invalid flag, since each lookup also clears the other mode's field(s).
 - A DPCI whose digit count doesn't total 9 across the three boxes never reaches the API at all — each box only auto-advances/resolves once it hits its own fixed length (3/2/4), so an incomplete entry simply sits waiting for more input rather than erroring.
 
 ### Status / messaging behavior
 
 - Error messages use the shared MessageBar — non-blocking, persists until the next message or navigation.
 - A `"Loading…"` pulsing placeholder shows while the fetch is in flight, hiding any previously-loaded item data during that window.
+- **(v1.7.0, issue #95)** A stale error also clears on the next successful DPCI/UPC lookup — both `loadByDpci` and `loadByUpc` now call `clearMessage()` early, so a plain successful lookup with no message of its own no longer leaves the prior error visible.
 
 ## Layout
 
@@ -121,6 +122,8 @@ flowchart TD
 **"View Storage Locations" button (v1.6.8, closes `DevNotes/Fixes/IID/01`)** — navigates to `/storage-inquiry?dpci=` using `item.dpci` directly (the already-formatted, dash-joined string the API returns), relying on ISI's own `?dpci=` query-param handling to auto-resolve on arrival rather than passing router state. ISI didn't actually support any pre-population before this version despite its own spec claiming otherwise (see ISI.md's Behind the Scenes) — both sides of this fix landed together in v1.6.8.
 
 **"Reinstate Pallet" button (v1.6.8) is a client-side convenience gate, not the actual enforcement.** `isIM` is computed identically to `PARPage.tsx`'s own check (`['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '')`), duplicated rather than shared since no common role-check utility exists yet anywhere in the app (every screen with an IM+ gate computes its own `isIM` locally — see PARPage.tsx, PIIPage.tsx, SDPPage.tsx, STGPage.tsx). Hiding the button from a Worker is purely UX; PARPage independently re-enforces the same gate itself (Access Denied render) and the API's `reinstatePallet` handler enforces it server-side regardless of what the client shows, so there's no security reliance on this button's visibility. Like "View Storage Locations," it navigates via `?dpci=` (`/pallet/reinstate?dpci=${item.dpci}`) rather than router state — PAR's mount effect (`useSearchParams`) reads it into `DpciField`'s state, reusing the same `parseDpciString` helper PAR's own sample-reinstate demo button already used.
+
+**Session persistence via `IIDContext`.** The loaded item lives in `IIDProvider` (mounted in `App.tsx`, alongside all 12 sibling per-screen providers — `StagingProvider`/`PIIProvider`/`ISIProvider`/`LIIProvider`/`PIPProvider`/`SDPProvider`/`MNPProvider`/`PARProvider`/`WLHProvider`/`SARProvider`/`ELAProvider`/`ELZProvider`, all 13 now mounted together wrapping `AppShell`), not local component state, so navigating away from IID and back restores the last-loaded item instead of resetting to the empty Ready state. Only the resolved item persists — the DPCI Dept/Class/Item boxes' and UPC field's in-progress typing, and which field currently holds focus, are never part of this state.
 
 **No session-local history on this screen.** Like LII, IID keeps no in-screen log of prior lookups — a new resolve simply replaces whatever item was previously displayed, and nothing is written to the app-wide Activity Log overlay since no state changes.
 

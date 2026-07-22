@@ -12,9 +12,11 @@ import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNavLock } from '../context/NavLockContext';
 import { useNumpad } from '../context/NumpadContext';
+import { type SDPDirectedResult, useSDP } from '../context/SDPContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
+import { INVALID_WASH } from '../lib/invalidWash';
 import { SIZE_NAMES } from '../lib/sizes';
 import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
 import { useNumpadField } from '../lib/useNumpadField';
@@ -27,18 +29,8 @@ interface NavState {
   aisle?: number;
 }
 
-interface DirectedResult {
-  reservationId: number;
-  directedLocation: string;
-  pallet: {
-    id: number;
-    dpci: string;
-    descShort: string;
-    quantity: { pallets: number; cartons: number; ssps: number };
-    currentLocation: string | null;
-  };
-  alreadyStored: boolean;
-}
+// DirectedResult's shape now lives in SDPContext.tsx (App-Wide screen-persistence,
+// v1.7.0) as `SDPDirectedResult`, imported above rather than redeclared.
 
 interface HistoryEntry {
   reservationId: number;
@@ -73,6 +65,8 @@ function DataRow({ label, children }: { label: string; children: React.ReactNode
  * @param active - True when this field currently holds the numpad handler
  * @param disabled - True when the field should be greyed out (e.g., aisle not yet entered)
  * @param locked - True when the screen is locked to an active reservation; prevents focus
+ * @param invalid - Applies the app-wide red-wash treatment (see `src/lib/invalidWash.ts`)
+ *   instead of the plain active-only border — invalid wins over active/disabled/locked.
  */
 function FieldDisplay({
   label,
@@ -82,6 +76,7 @@ function FieldDisplay({
   disabled = false,
   locked = false,
   size = 'default',
+  invalid = false,
 }: {
   label: string;
   value: string;
@@ -92,6 +87,7 @@ function FieldDisplay({
   /** 'large' bumps height/text size — used for SDP's Aisle field, now that it doesn't
    *  need to share space evenly with the (now dynamically-sized) override fields. */
   size?: 'default' | 'large';
+  invalid?: boolean;
 }) {
   const boxHeight = size === 'large' ? 'h-[88px]' : 'h-[72px]';
   const textSize  = size === 'large' ? 'text-[40px]' : 'text-[32px]';
@@ -105,7 +101,9 @@ function FieldDisplay({
         type="button"
         onClick={onFocus}
         disabled={disabled || locked}
-        className={`flex items-center ${boxHeight} px-5 rounded-[12px] bg-[#0D0D0D] border-2 disabled:opacity-40 transition-colors ${active && !disabled && !locked ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+        className={`flex items-center ${boxHeight} px-5 rounded-[12px] border-2 disabled:opacity-40 transition-colors ${
+          invalid ? INVALID_WASH : active && !disabled && !locked ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+        }`}
       >
         <span className={`font-data ${textSize} font-medium text-white tracking-[0.04em]`}>
           {value || <span className="text-[#444]">—</span>}
@@ -194,7 +192,7 @@ type ScreenState = 'entry' | 'directed';
  */
 export function SDPPage() {
   const { token, user } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const { deliverScan, isScanningRef } = useNumpad();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
   const routerLocation = useLocation();
@@ -202,6 +200,14 @@ export function SDPPage() {
 
   const [screenState, setScreenState] = useState<ScreenState>('entry');
   const [loading, setLoading] = useState(false);
+  // Red-wash invalid state (App-Wide item 9, v1.7.0) — Pallet ID is the one field on this
+  // screen whose bad value deliberately stays visible on failure (see handlePalletScan's
+  // own comment); every one of its several failure codes (not-found, no-cartons, canceled,
+  // pull-pending, no-eligible-locations) shares the same visible-value/refocus-Pallet-ID
+  // treatment in that catch block, so one flag covers all of them. Aisle's own NOT_FOUND
+  // failure clears the field atomically instead (see handleAisleConfirm), so it isn't washed
+  // for the same reason PIP's PID/UPC/Location aren't.
+  const [palletInvalid, setPalletInvalid] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [confirmBlock, setConfirmBlock] = useState(false);
   // Demo-only "which invalid pallet" picker (shared DemoPicker component) — see
@@ -222,7 +228,9 @@ export function SDPPage() {
   const [zoneLocked, setZoneLocked]         = useState(false);
 
   // Directed state.
-  const [directed, setDirected] = useState<DirectedResult | null>(null);
+  // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
+  // SDPContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern.
+  const { directed, setDirected } = useSDP();
 
   // Refs to check from async callbacks.
   const screenStateRef = useRef(screenState);
@@ -384,6 +392,7 @@ export function SDPPage() {
 
     try {
       await apiFetch(`/api/locations/empty-by-zone?aisle=${aisle}`, token!);
+      clearMessage();
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       if (code === 'NOT_FOUND') {
@@ -428,7 +437,7 @@ export function SDPPage() {
       const sizeVal    = sizeOverride;
       const storageVal = storageOverride;
 
-      const result = await apiFetch<DirectedResult>('/api/puts/directed', token!, {
+      const result = await apiFetch<SDPDirectedResult>('/api/puts/directed', token!, {
         method: 'POST',
         body: JSON.stringify({
           aisle,
@@ -443,6 +452,11 @@ export function SDPPage() {
 
       setDirected(result);
       setScreenState('directed');
+      setPalletInvalid(false);
+      // Clears any stale error from a prior failed attempt (issue #95) — the
+      // alreadyStored branch below immediately overwrites this with its own info/warning
+      // message when it applies, so this is a no-op flicker in that case, not a conflict.
+      clearMessage();
       startPolling(result.reservationId);
       setHistory(h => [{
         reservationId: result.reservationId,
@@ -470,6 +484,7 @@ export function SDPPage() {
       // next actual keystroke (see useNumpadField's freshFocusRef), so typing a genuinely
       // different PID still replaces rather than appends onto the stale value.
       focusPalletField();
+      setPalletInvalid(true);
       if (code === 'PALLET_NOT_FOUND') {
         setMessage({ type: 'error', text: 'Pallet ID not found' });
       } else if (code === 'NO_CARTONS') {
@@ -660,6 +675,7 @@ export function SDPPage() {
     setDirected(null);
     setScreenState('entry');
     palletField.clear();
+    setPalletInvalid(false);
     // No explicit clear for the Confirm Location panel — it's only ever rendered while
     // screenState === 'directed', so leaving that state unmounts it, which wipes its
     // internal state for free (see LocationEntryFields).
@@ -687,29 +703,34 @@ export function SDPPage() {
    * aisle already typed in, correctly but unhelpfully failing the resulting demo put with
    * NO_LOCATIONS now that Directed Put enforces Storage Code matching. A no-op filter
    * (server-side) if the Aisle field is still empty.
+   *
+   * Also excludes any entered Size/Storage Code override from the pick — otherwise the
+   * demo pallet frequently already naturally matches the override, so directing it doesn't
+   * visibly demonstrate the override actually changing anything (direct instruction).
    */
   const demoPut = useCallback(async () => {
     try {
-      const { palletId } = await apiFetch<{ palletId: number }>(
-        `/api/demo/pallet?status=unlocated&aisle=${aisleValueRef.current}`, token!,
-      );
+      const params = new URLSearchParams({ status: 'unlocated', aisle: aisleValueRef.current });
+      if (storageOverride) params.set('excludeStorageCode', storageOverride);
+      const { palletId } = await apiFetch<{ palletId: number }>(`/api/demo/pallet?${params.toString()}`, token!);
       deliverScan(String(palletId));
     } catch (err) {
       setMessage({ type: 'error', text: `Demo put: ${err instanceof Error ? err.message : 'unavailable'}` });
     }
-  }, [token, deliverScan, setMessage]);
+  }, [token, deliverScan, setMessage, storageOverride]);
 
-  /** Fetches a real already-stored pallet id and delivers it as a simulated Pallet ID scan, simulating a move. Aisle-constrained — see demoPut's comment. */
+  /** Fetches a real already-stored pallet id and delivers it as a simulated Pallet ID scan, simulating a move. Aisle-constrained and override-excluded — see demoPut's comment (Size applies here too, unlike demoPut, since a stored pallet already has its own). */
   const demoMove = useCallback(async () => {
     try {
-      const { palletId } = await apiFetch<{ palletId: number }>(
-        `/api/demo/pallet?status=stored&aisle=${aisleValueRef.current}`, token!,
-      );
+      const params = new URLSearchParams({ status: 'stored', aisle: aisleValueRef.current });
+      if (storageOverride) params.set('excludeStorageCode', storageOverride);
+      if (sizeOverride) params.set('excludeSize', sizeOverride);
+      const { palletId } = await apiFetch<{ palletId: number }>(`/api/demo/pallet?${params.toString()}`, token!);
       deliverScan(String(palletId));
     } catch (err) {
       setMessage({ type: 'error', text: `Demo move: ${err instanceof Error ? err.message : 'unavailable'}` });
     }
-  }, [token, deliverScan, setMessage]);
+  }, [token, deliverScan, setMessage, storageOverride, sizeOverride]);
 
   /**
    * Dispatches the shared DemoPicker's choice — consolidates what used to be one
@@ -944,6 +965,7 @@ export function SDPPage() {
           active={palletField.isActive}
           disabled={!aisleField.value.trim()}
           locked={locked}
+          invalid={palletInvalid}
         />
 
         {/* Directed state — data + confirm */}

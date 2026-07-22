@@ -8,8 +8,10 @@ import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
+import { type PIPLabelScanResult, usePIP } from '../context/PIPContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
+import { INVALID_WASH } from '../lib/invalidWash';
 import { useNumpadField } from '../lib/useNumpadField';
 import { fmtLocation } from '../lib/fmt';
 
@@ -17,17 +19,8 @@ import { fmtLocation } from '../lib/fmt';
 
 interface Qty { pallets: number; cartons: number; ssps: number }
 
-interface LabelScanResult {
-  label: {
-    id: string;
-    pullFunction: string;
-    quantity: Qty;
-    dpci: string;
-    descShort: string;
-  };
-  pallet: { id: number; quantity: Qty };
-  location: { id: string | null };
-}
+// LabelScanResult's shape now lives in PIPContext.tsx (App-Wide screen-persistence,
+// v1.7.0) as `PIPLabelScanResult`, imported here rather than redeclared.
 
 interface HistoryEntry {
   location: string;
@@ -145,6 +138,9 @@ function DataRow({ label, children }: { label: string; children: React.ReactNode
  * @param disabled - True when the field should not accept focus (e.g., during loading)
  * @param compact - Slightly smaller box/text, for fields that sit side by side (issue #82's
  *   UPC/Location pair) rather than taking the full row width Label/Pallet ID use.
+ * @param invalid - Applies the app-wide red-wash treatment (see `src/lib/invalidWash.ts`)
+ *   instead of the plain active-only border — invalid wins over active, same precedence as
+ *   every other field in the app.
  */
 function FieldDisplay({
   label,
@@ -153,6 +149,7 @@ function FieldDisplay({
   active = false,
   disabled = false,
   compact = false,
+  invalid = false,
 }: {
   label: string;
   value: string;
@@ -160,6 +157,7 @@ function FieldDisplay({
   active?: boolean;
   disabled?: boolean;
   compact?: boolean;
+  invalid?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -170,7 +168,9 @@ function FieldDisplay({
         type="button"
         onClick={onFocus}
         disabled={disabled}
-        className={`flex items-center ${compact ? 'h-[60px] px-4' : 'h-[72px] px-5'} rounded-[12px] bg-[#0D0D0D] border-2 disabled:opacity-40 transition-colors ${active && !disabled ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+        className={`flex items-center ${compact ? 'h-[60px] px-4' : 'h-[72px] px-5'} rounded-[12px] border-2 disabled:opacity-40 transition-colors ${
+          invalid ? INVALID_WASH : active && !disabled ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+        }`}
       >
         <span className={`font-data ${compact ? 'text-[26px]' : 'text-[32px]'} font-medium text-white tracking-[0.04em]`}>
           {value || <span className="text-[#444]">—</span>}
@@ -298,13 +298,23 @@ function LevelCorrectionDialog({
 
 export function PIPPage() {
   const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const { deliverScan, isScanningRef } = useNumpad();
 
   const [screenState, setScreenState] = useState<ScreenState>('ready');
   const [pullFunction, setPullFunction] = useState<string>(PULL_FUNCTIONS[0].code);
-  const [labelData, setLabelData] = useState<LabelScanResult | null>(null);
+  // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
+  // PIPContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern.
+  const { labelData, setLabelData } = usePIP();
   const [loading, setLoading] = useState(false);
+  // Red-wash invalid state (App-Wide item 9, v1.7.0) — only the Label field is a candidate
+  // here: it's the one field on this screen that deliberately keeps a failed value visible
+  // (see handleLabelScan's own comments) rather than clearing-and-refocusing atomically like
+  // PID/UPC/Location do, so it's the only one with a genuinely visible "bad value sitting in
+  // the box" moment to wash. PID/UPC/Location clear their own value before the next render
+  // on every failure path, so a wash flag there would never actually be visible against a
+  // non-empty box — left as message-bar-only, consistent with that existing design.
+  const [labelInvalid, setLabelInvalid] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   // Quick-hold panel (WLH.md: "surfaced as a quick-action on PIP, SDP, and MNP" —
   // inline, not a full navigation) for the scanned label's resolved location.
@@ -374,6 +384,7 @@ export function PIPPage() {
     setPullFunction(fn);
     setScreenState('ready');
     labelField.clear();
+    setLabelInvalid(false);
     setTimeout(() => focusLabelField(), 50);
   }
 
@@ -432,17 +443,20 @@ export function PIPPage() {
     }
     setLoading(true);
     try {
-      const data = await apiFetch<LabelScanResult>(`/api/labels/${encodeURIComponent(v)}`, token!);
+      const data = await apiFetch<PIPLabelScanResult>(`/api/labels/${encodeURIComponent(v)}`, token!);
       if (data.label.pullFunction !== pullFunctionRef.current) {
         playAlert('error');
         // Value stays visible (not cleared) so the worker can see what they scanned;
         // re-focusing (not clearing) still arms a fresh start for the next input, so a
         // manual retry replaces rather than appends onto the stale value.
         focusLabelField();
+        setLabelInvalid(true);
         setMessage({ type: 'error', text: `Wrong function — label requires ${data.label.pullFunction}` });
         return;
       }
       setLabelData(data);
+      setLabelInvalid(false);
+      clearMessage();
       if (priorState !== 'verifying') {
         setScreenState('verifying');
         // PID field auto-focuses via the verifying effect.
@@ -457,6 +471,7 @@ export function PIPPage() {
       // the Wrong Function branch above for why focusLabelField() (not .clear()) is what
       // arms a fresh start for the next input.
       focusLabelField();
+      setLabelInvalid(true);
       if (code === 'NOT_FOUND') {
         setMessage({ type: 'error', text: 'Label not found' });
       } else {
@@ -655,6 +670,7 @@ export function PIPPage() {
     setLabelData(null);
     setScreenState('ready');
     labelField.clear();
+    setLabelInvalid(false);
     pidField.clear();
     upcField.clear();
     resetLocationField(false);
@@ -863,6 +879,7 @@ export function PIPPage() {
           value={labelField.value}
           onFocus={focusLabelField}
           active={labelField.isActive}
+          invalid={labelInvalid}
         />
 
         {/* State 2 — scan data + verification */}
