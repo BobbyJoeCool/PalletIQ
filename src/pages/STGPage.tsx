@@ -4,6 +4,7 @@ import Triple from '../assets/Triple.png';
 import { AisleGrid, type GridLevel, type ZoneBinRange } from '../components/shared/AisleGrid';
 import { AisleSizeTable, type AisleSizeRow, type AisleSizeSort } from '../components/shared/AisleSizeTable';
 import { type CodeOption } from '../components/shared/CodePickerField';
+import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { SizeField } from '../components/shared/SizeField';
 import { ZoneCodeBadge } from '../components/shared/ZoneCodeBadge';
@@ -17,7 +18,9 @@ import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
 import { SIZE_NAMES } from '../lib/sizes';
+import { effectiveStack } from '../lib/stagingHelpers';
 import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
+import { useCodePickerField } from '../lib/useCodePickerField';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useStorageCodes } from '../lib/useStorageCodes';
 
@@ -76,40 +79,62 @@ function FieldDisplay({
   label, value, onFocus, active = false, width = 'w-[160px]',
 }: { label: string; value: string; onFocus: () => void; active?: boolean; width?: string }) {
   return (
-    <div className={`flex flex-col gap-1 ${width}`}>
-      <span className="font-ui text-[12px] font-medium text-[#9A9A9A] uppercase tracking-wider text-center">{label}</span>
-      <button
-        type="button"
-        onClick={onFocus}
-        className={`flex items-center justify-center h-[52px] px-3 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-      >
-        <span className="font-data text-[20px] font-medium text-white">
-          {value || <span className="text-[#444]">—</span>}
-        </span>
-        {active && <span className="inline-block w-[2px] h-[22px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-      </button>
-    </div>
+    <NumpadFieldBox
+      label={label}
+      value={value}
+      onFocus={onFocus}
+      active={active}
+      width={width}
+      centered
+      labelClass="text-[12px]"
+      boxClass="h-[52px] px-3 rounded-[10px]"
+      valueClass="text-[20px] font-medium"
+      caretClass="w-[2px] h-[22px]"
+    />
   );
 }
 
 /** A single pallet-styled input box, sized to sit inside the front-stack box. Two thin
  *  internal lines suggest pallet slats — kept distinct from the generic shared field
  *  components (issue #78) on purpose: this compact stacked-pallet visual is specific to
- *  STG's front-stack box, not a pattern reused elsewhere in the app. `tinted` (used for
- *  Qty, v1.6.6) shades the box with an 80%-transparent red — same size as every other
- *  field now (an earlier `emphasize` variant also made Qty taller/brighter; that's gone,
- *  per the size-parity request, leaving just the color as Qty's visual distinction). */
+ *  STG's front-stack box, not a pattern reused elsewhere in the app. `tinted` shades the
+ *  box with a 50%-transparent blue — used for Qty always (v1.6.6, changed from red to
+ *  blue in issue #99 to match that issue's own override-cell color), and for Aisle
+ *  whenever its per-field override is active (issue #99). `large` doubles the label/value
+ *  font size — Qty only (issue #99 follow-up), since Qty's own row now absorbs the extra
+ *  height Clear/Fill's old row used to occupy and reads oddly undersized at that height
+ *  with the same small text every other field uses. */
 function PalletBox({
-  label, value, onFocus, active = false, tinted = false,
-}: { label: string; value: string; onFocus: () => void; active?: boolean; tinted?: boolean }) {
+  label, value, onFocus, active = false, tinted = false, large = false,
+}: { label: string; value: string; onFocus: () => void; active?: boolean; tinted?: boolean; large?: boolean }) {
   return (
     <button
       type="button"
       onClick={onFocus}
       className={`relative flex-1 flex items-center justify-between px-2 rounded-[5px] border-2 transition-colors min-h-0 ${
-        tinted ? 'bg-[#CC000033]' : 'bg-[#0D0D0D]'
+        tinted ? 'bg-[#3A6BB080]' : 'bg-[#0D0D0D]'
       } ${active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
     >
+      <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
+      <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
+      <span className={`relative font-ui font-medium uppercase tracking-wider text-[#9A9A9A] ${large ? 'text-[18px]' : 'text-[9px]'}`}>
+        {label}
+      </span>
+      <span className={`relative font-data font-semibold text-white ${large ? 'text-[30px]' : 'text-[15px]'}`}>
+        {value || <span className="text-[#444]">—</span>}
+      </span>
+      {active && <span className="absolute right-1 top-1 bottom-1 w-[2px] bg-[#CC0000] animate-pulse rounded-sm" />}
+    </button>
+  );
+}
+
+/** Non-interactive display of a field currently inheriting Master Control's value (issue
+ *  #99) — same visual chrome as PalletBox (so swapping between this and the real entry
+ *  field on override-toggle never shifts layout) but with no button/tap/active-caret
+ *  behavior, since there's nothing to edit while a field is following Master Control. */
+function InheritedDisplay({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="relative flex-1 flex items-center justify-between px-2 rounded-[5px] border-2 border-[#3A3A3A] bg-[#0D0D0D] min-h-0">
       <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
       <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
       <span className="relative font-ui font-medium uppercase tracking-wider text-[#9A9A9A] text-[9px]">
@@ -118,7 +143,26 @@ function PalletBox({
       <span className="relative font-data font-semibold text-white text-[15px]">
         {value || <span className="text-[#444]">—</span>}
       </span>
-      {active && <span className="absolute right-1 top-1 bottom-1 w-[2px] bg-[#CC0000] animate-pulse rounded-sm" />}
+    </div>
+  );
+}
+
+/** Toggle arming/disarming one field's override (issue #99) — rendered to the *left* of
+ *  its field, wide enough to spell out "Override" rather than an icon. Solid blue (0%
+ *  transparent) when active, matching the field's own 50%-transparent blue per the issue's
+ *  spec; plain outline otherwise. */
+function OverrideToggle({ active, onClick, ariaLabel }: { active: boolean; onClick: () => void; ariaLabel: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={ariaLabel}
+      className={`shrink-0 w-[60px] rounded-[5px] border-2 flex items-center justify-center transition-colors ${
+        active ? 'border-[#3A6BB0] bg-[#3A6BB0] text-white' : 'border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white'
+      }`}
+    >
+      <span className="font-ui text-[9px] font-bold uppercase tracking-wide">Override</span>
     </button>
   );
 }
@@ -135,7 +179,7 @@ function PalletBox({
  * of CodePickerField's own field+popup logic to match.
  */
 function PalletCodePicker({
-  label, ariaLabel, value, onChange, options, maxLength, transform, earlyCommit, strict, onInvalid,
+  label, ariaLabel, value, onChange, options, maxLength, transform, earlyCommit, strict, onInvalid, tinted = false,
 }: {
   label: string;
   ariaLabel: string;
@@ -149,43 +193,14 @@ function PalletCodePicker({
    *  instead of committing it (clears the field, calls `onInvalid` in place of `onChange`). */
   strict?: boolean;
   onInvalid?: (code: string) => void;
+  /** 50%-transparent blue field background — set whenever this field's override is active
+   *  (issue #99; PalletCodePicker is only ever rendered for Storage/Size while overridden,
+   *  see StackBox, so every call site passes this as always-true). */
+  tinted?: boolean;
 }) {
-  const field = useNumpadField('keyboard', maxLength, undefined, earlyCommit);
-  const { hidePanel } = useNumpad();
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { field.set(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Tap-outside closes the popup — same lightweight-anchored-dropdown behavior as
-  // CodePickerField's own (see that component for the reasoning).
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(e: PointerEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [open]);
-
-  function focusField() {
-    setOpen(false);
-    field.focus((v, explicit) => {
-      const trimmed = transform ? transform(v.trim()) : v.trim();
-      if (strict && trimmed && !options.some((o) => o.code === trimmed)) {
-        field.clear();
-        onInvalid?.(trimmed);
-      } else {
-        onChange(trimmed);
-      }
-      if (explicit) hidePanel();
-    });
-  }
-
-  function selectOption(code: string) {
-    setOpen(false);
-    onChange(code);
-  }
+  const { field, open, setOpen, wrapperRef, focusField, selectOption } = useCodePickerField(value, onChange, options, {
+    panel: 'keyboard', maxLength, transform, earlyCommit, strict, onInvalid,
+  });
 
   return (
     <div ref={wrapperRef} className="relative flex-1 min-h-0 flex items-stretch gap-1">
@@ -193,9 +208,9 @@ function PalletCodePicker({
         type="button"
         onClick={focusField}
         aria-label={ariaLabel}
-        className={`relative flex-1 min-w-0 flex items-center justify-between px-2 rounded-[5px] border-2 bg-[#0D0D0D] transition-colors ${
-          field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'
-        }`}
+        className={`relative flex-1 min-w-0 flex items-center justify-between px-2 rounded-[5px] border-2 transition-colors ${
+          tinted ? 'bg-[#3A6BB080]' : 'bg-[#0D0D0D]'
+        } ${field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
       >
         <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
         <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
@@ -328,38 +343,47 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   const { token } = useAuth();
   const { setMessage, clearMessage } = useMessageBar();
   const stack = stacks[index];
+  // Resolved Aisle/StorageCode/Size — Master Control's current value for any field this
+  // stack doesn't override, its own stored value for any field that is overridden (issue
+  // #99). Every non-Qty field below reads from here, never straight off `stack.*`.
+  const effective = effectiveStack(stack, master);
 
   const aisleField = useNumpadField('numpad');
   const quantityField = useNumpadField('numpad');
 
   // Keep the on-screen field displays in sync with context — covers the worker's own
-  // confirm, master-control "Fill All", route-state pre-population from ELA/ELZ, and
-  // queue compaction after a sibling stage, all of which mutate context directly rather
-  // than going through these field hooks.
+  // confirm, an override toggling on (pre-filled from Master Control), route-state
+  // pre-population from ELA/ELZ, and queue compaction after a sibling stage, all of which
+  // mutate context directly rather than going through these field hooks.
   useEffect(() => { aisleField.set(stack.aisle); }, [stack.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { quantityField.set(stack.quantity); }, [stack.quantity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Storage/Size are entry-with-dropdown-helper fields (StorageCodeField/SizeField, same
-  // shared components Master Control uses) narrowed to this stack's own Aisle (the open STG
-  // validation-checklist item — "storage and size should be entries with scoped dropdowns
-  // based on the aisle for that stack" — corrected from an earlier plain-`<select>` pass to
-  // match Master Control's own entry-box-plus-popup interaction, per direct instruction).
-  // A typed value is now validated the same as a popup selection would be (`strict` below) —
-  // previously a worker typing a code not actually present in this aisle committed silently
-  // with no error, unlike Aisle just below. Gated on the narrowing data actually being ready
-  // (an Aisle entered, and — for Storage — the reference list loaded) so a value typed before
-  // that data arrives isn't rejected just for being temporarily unverifiable.
-  const stackAisleNum = parseInt(stack.aisle, 10);
+  // shared components Master Control uses) narrowed to this stack's own *effective* Aisle/
+  // StorageCode (the open STG validation-checklist item — "storage and size should be
+  // entries with scoped dropdowns based on the aisle for that stack" — corrected from an
+  // earlier plain-`<select>` pass to match Master Control's own entry-box-plus-popup
+  // interaction, per direct instruction). A typed value is now validated the same as a
+  // popup selection would be (`strict` below) — previously a worker typing a code not
+  // actually present in this aisle committed silently with no error, unlike Aisle just
+  // below. Gated on the narrowing data actually being ready (an Aisle entered, and — for
+  // Storage — the reference list loaded) so a value typed before that data arrives isn't
+  // rejected just for being temporarily unverifiable.
+  const stackAisleNum = parseInt(effective.aisle, 10);
   const aisleTypes = useAisleFreightTypes(isNaN(stackAisleNum) ? null : stackAisleNum);
   const fullStorageCodes = useStorageCodes();
   const storageOptions = aisleTypes && fullStorageCodes
     ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
     : [];
   const sizeOptions = aisleTypes
-    ? aisleTypes.sizesFor(stack.storageCode || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
+    ? aisleTypes.sizesFor(effective.storageCode || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
     : [];
   const storageStrict = aisleTypes !== null && fullStorageCodes !== null;
   const sizeStrict = aisleTypes !== null;
+  /** A typed value that isn't in this stack's own (narrowed-or-full) options list never
+   *  flagged an error before — it just silently never matched anything downstream. Mirrors
+   *  the Aisle field's own invalid-entry message format (same pattern as MasterControl's
+   *  identical pair). */
   const handleInvalidStorage = useCallback(() => {
     playAlert('error');
     setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Storage Code - Invalid Entry` });
@@ -372,7 +396,9 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   /** Validates a confirmed Aisle entry actually exists (the other open STG validation-
    *  checklist item), mirroring SDP's own `handleAisleConfirm` — clears the field and
    *  reports `"{Stack} Stack - Aisle - Invalid Entry"` on the status bar if not, otherwise
-   *  commits it into StagingContext. */
+   *  commits it into StagingContext. Only ever wired up while Aisle is overridden (see
+   *  render below), so this always writes the stack's own override value, never Master
+   *  Control's. */
   const handleAisleConfirm = useCallback(async (v: string) => {
     const trimmed = v.trim();
     hidePanel();
@@ -404,17 +430,29 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
     quantityField.focus((v) => { updateStack(index, { quantity: v.trim() }); hidePanel(); });
   }, [quantityField, hidePanel, index, updateStack]);
 
-  /** Fills this one stack's Aisle/StorageCode/Size from Master Control — the single-slot
-   *  version of `fillAll()`'s own logic (STG#06), independent of the other two stacks. */
-  const fillFromMaster = useCallback(() => {
-    updateStack(index, { aisle: master.aisle, storageCode: master.storageCode, size: master.size });
-  }, [index, master.aisle, master.storageCode, master.size, updateStack]);
+  // Per-field override toggles (issue #99). Arming an override pre-fills that field with
+  // Master Control's *current* value (so the worker edits from a sensible starting point
+  // instead of blank); disarming clears the stack's own stored value back out (it's unused
+  // while not overridden anyway — effectiveStack always reads Master Control for it — but
+  // clearing it avoids a stale value quietly resurfacing next time the override arms again).
+  const toggleAisleOverride = useCallback(() => {
+    updateStack(index, stack.aisleOverride ? { aisleOverride: false, aisle: '' } : { aisleOverride: true, aisle: master.aisle });
+  }, [index, stack.aisleOverride, master.aisle, updateStack]);
+  const toggleStorageOverride = useCallback(() => {
+    updateStack(index, stack.storageCodeOverride ? { storageCodeOverride: false, storageCode: '' } : { storageCodeOverride: true, storageCode: master.storageCode });
+  }, [index, stack.storageCodeOverride, master.storageCode, updateStack]);
+  const toggleSizeOverride = useCallback(() => {
+    updateStack(index, stack.sizeOverride ? { sizeOverride: false, size: '' } : { sizeOverride: true, size: master.size });
+  }, [index, stack.sizeOverride, master.size, updateStack]);
 
-  /** Clears this one stack's Aisle/Storage/Size/Qty and any computed locations/shortfall —
-   *  the single-slot version of `clearForks()`'s own logic, independent of the other two
-   *  stacks (mirrors STG#06's per-stack scoping). */
+  /** Clears this one stack's Aisle/Storage/Size/Qty (and any active overrides on them) and
+   *  any computed locations/shortfall — the single-slot version of `clearForks()`'s own
+   *  logic, independent of the other two stacks (mirrors STG#06's per-stack scoping). */
   const clearStack = useCallback(() => {
-    updateStack(index, { aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0 });
+    updateStack(index, {
+      aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0,
+      aisleOverride: false, storageCodeOverride: false, sizeOverride: false,
+    });
   }, [index, updateStack]);
 
   return (
@@ -434,57 +472,81 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
       >
         {STACK_LABELS[index]}
       </span>
-      {/* flex-col-reverse displays its *last* DOM child at the top — "Fill from Master" is
-       *  listed last here specifically so it renders directly under the stack label above,
-       *  same size as the other fields (v1.6.6). */}
+      {/* flex-col-reverse displays its *last* DOM child at the top — the combined Clear/Qty
+       *  row is listed last here specifically so it renders directly under the stack label
+       *  above, same as "Fill from Master" used to (v1.6.6), before issue #99 removed Fill
+       *  and merged Clear into Qty's own row. */}
       <div className="flex-1 min-h-0 flex flex-col-reverse gap-[3px]">
-        <PalletBox label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} />
-        <PalletCodePicker
-          label="Storage"
-          ariaLabel={`${STACK_LABELS[index]} Storage Code`}
-          value={stack.storageCode}
-          onChange={(v) => updateStack(index, { storageCode: v })}
-          options={storageOptions}
-          maxLength={2}
-          transform={(v) => v.toUpperCase()}
-          strict={storageStrict}
-          onInvalid={handleInvalidStorage}
-        />
-        <PalletCodePicker
-          label="Size"
-          ariaLabel={`${STACK_LABELS[index]} Size`}
-          value={stack.size}
-          onChange={(v) => updateStack(index, { size: v })}
-          options={sizeOptions}
-          maxLength={2}
-          transform={(v) => v.toUpperCase()}
-          earlyCommit={(v) => ['S', 'M', 'L'].includes(v)}
-          strict={sizeStrict}
-          onInvalid={handleInvalidSize}
-        />
-        <PalletBox label="Qty" value={quantityField.value} onFocus={focusQuantityField} active={quantityField.isActive} tinted />
-        {/* Fills this stack from Master Control's Aisle/StorageCode/Size (STG#06), or clears
-         *  it entirely — both independent of the Cab's aisle-wide Fill All/Clear Forks
-         *  (v1.6.6). Share the row Fill from Master's standalone pill used to occupy alone. */}
-        <div className="flex-1 min-h-0 w-4/5 self-center flex gap-1">
-          <button
-            type="button"
-            onClick={fillFromMaster}
-            className="flex-1 min-h-0 flex items-center justify-center px-1 rounded-full border-2 border-[#003366] bg-[#003366] hover:bg-[#004488] transition-colors"
-          >
-            <span className="font-ui text-[10px] font-bold text-white uppercase tracking-wider text-center">
-              Fill
-            </span>
-          </button>
+        {/* Aisle — a non-interactive display of Master Control's current value while not
+         *  overridden, the normal editable box once it is (issue #99). Override toggle sits
+         *  to the *left* of the field per direct instruction. */}
+        <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
+          <OverrideToggle active={stack.aisleOverride} onClick={toggleAisleOverride} ariaLabel={`${STACK_LABELS[index]} Aisle override`} />
+          {stack.aisleOverride ? (
+            <PalletBox label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} tinted />
+          ) : (
+            <InheritedDisplay label="Aisle" value={master.aisle} />
+          )}
+        </div>
+        <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
+          <OverrideToggle active={stack.storageCodeOverride} onClick={toggleStorageOverride} ariaLabel={`${STACK_LABELS[index]} Storage Code override`} />
+          {stack.storageCodeOverride ? (
+            <PalletCodePicker
+              label="Storage"
+              ariaLabel={`${STACK_LABELS[index]} Storage Code`}
+              value={stack.storageCode}
+              onChange={(v) => updateStack(index, { storageCode: v })}
+              options={storageOptions}
+              maxLength={2}
+              transform={(v) => v.toUpperCase()}
+              strict={storageStrict}
+              onInvalid={handleInvalidStorage}
+              tinted
+            />
+          ) : (
+            <InheritedDisplay label="Storage" value={master.storageCode} />
+          )}
+        </div>
+        <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
+          <OverrideToggle active={stack.sizeOverride} onClick={toggleSizeOverride} ariaLabel={`${STACK_LABELS[index]} Size override`} />
+          {stack.sizeOverride ? (
+            <PalletCodePicker
+              label="Size"
+              ariaLabel={`${STACK_LABELS[index]} Size`}
+              value={stack.size}
+              onChange={(v) => updateStack(index, { size: v })}
+              options={sizeOptions}
+              maxLength={2}
+              transform={(v) => v.toUpperCase()}
+              earlyCommit={(v) => ['S', 'M', 'L'].includes(v)}
+              strict={sizeStrict}
+              onInvalid={handleInvalidSize}
+              tinted
+            />
+          ) : (
+            <InheritedDisplay label="Size" value={master.size} />
+          )}
+        </div>
+        {/* Clear (this one stack's local entry only, never Master Control) + Qty, combined
+         *  into one row (issue #99 — previously Qty had its own row, with Fill/Clear below
+         *  it as a second row; Fill is gone now that inheritance is automatic/live, so Clear
+         *  moved up alongside Qty instead of needing a row of its own). `flex-[2]` — this
+         *  row absorbs the old Fill/Clear row's height in addition to Qty's own original
+         *  row, so Qty ends up twice as tall as Aisle/Storage/Size (which stay `flex-1`,
+         *  unchanged) rather than the space just disappearing now that Fill is gone. Clear
+         *  and Qty's own text sized up to match (double the original 9px/15px) so they
+         *  don't look lost in the taller box. */}
+        <div className="flex-[2] min-h-0 flex gap-1">
           <button
             type="button"
             onClick={clearStack}
-            className="flex-1 min-h-0 flex items-center justify-center px-1 rounded-full border-2 border-[#CC0000] text-[#CC0000] hover:bg-[#CC0000] hover:text-white transition-colors"
+            className="shrink-0 w-[64px] flex items-center justify-center rounded-[5px] border-2 border-[#CC0000] text-[#CC0000] hover:bg-[#CC0000] hover:text-white transition-colors"
           >
-            <span className="font-ui text-[10px] font-bold uppercase tracking-wider text-center">
+            <span className="font-ui text-[18px] font-bold uppercase tracking-wider text-center leading-tight">
               Clear
             </span>
           </button>
+          <PalletBox label="Qty" value={quantityField.value} onFocus={focusQuantityField} active={quantityField.isActive} tinted large />
         </div>
       </div>
     </div>
@@ -532,8 +594,11 @@ function useElementSize<T extends HTMLElement>() {
 function LocationsPanel({ height }: { height?: number }) {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
-  const { stacks, updateStack, resetStackAfterStage, addLogEntry, bumpDataVersion, dataVersion } = useStaging();
+  const { stacks, updateStack, resetStackAfterStage, addLogEntry, bumpDataVersion, dataVersion, master } = useStaging();
   const front = stacks[0];
+  // Resolved Aisle/StorageCode/Size for the front slot (issue #99) — location lookup and
+  // staging both need whichever value is actually in effect, inherited or overridden.
+  const frontEffective = effectiveStack(front, master);
 
   const [loading, setLoading] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
@@ -548,7 +613,7 @@ function LocationsPanel({ height }: { height?: number }) {
   // issue #76 — was pressed).
   useEffect(() => {
     const qty = parseInt(front.quantity, 10);
-    if (!front.aisle || !front.storageCode || !front.size || !qty || qty <= 0) {
+    if (!frontEffective.aisle || !frontEffective.storageCode || !frontEffective.size || !qty || qty <= 0) {
       // Fix STG#01: a valid→invalid transition (e.g. Quantity cleared) must clear stale
       // bubbles too, not just skip fetching new ones — this guard used to only handle the
       // empty→valid direction.
@@ -558,7 +623,7 @@ function LocationsPanel({ height }: { height?: number }) {
       return;
     }
     let cancelled = false;
-    fetchStagingLocations(token!, front.aisle, front.storageCode, front.size, qty)
+    fetchStagingLocations(token!, frontEffective.aisle, frontEffective.storageCode, frontEffective.size, qty)
       .then((locations) => {
         if (cancelled) return;
         if (expectingSuggestionRef.current) {
@@ -574,10 +639,10 @@ function LocationsPanel({ height }: { height?: number }) {
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [front.aisle, front.storageCode, front.size, front.quantity, dataVersion]);
+  }, [frontEffective.aisle, frontEffective.storageCode, frontEffective.size, front.quantity, dataVersion]);
 
   const qty = parseInt(front.quantity, 10) || 0;
-  const canStage = !!front.aisle && !!front.storageCode && !!front.size && qty > 0 && front.locations.length > 0;
+  const canStage = !!frontEffective.aisle && !!frontEffective.storageCode && !!frontEffective.size && qty > 0 && front.locations.length > 0;
 
   /** Submits the front slot's assigned locations via POST /api/staging/stage, logs the outcome, and resets/compacts the queue on success. */
   async function handleStage() {
@@ -587,27 +652,27 @@ function LocationsPanel({ height }: { height?: number }) {
       const result = await apiFetch<StageResult>('/api/staging/stage', token!, {
         method: 'POST',
         body: JSON.stringify({
-          aisle: parseInt(front.aisle, 10),
-          storageCode: front.storageCode,
-          size: front.size,
+          aisle: parseInt(frontEffective.aisle, 10),
+          storageCode: frontEffective.storageCode,
+          size: frontEffective.size,
           locationIds: front.locations,
         }),
       });
 
       const nextText = result.nextLocation ? fmtLocation(result.nextLocation) : 'no further locations';
-      addLogEntry(`${result.staged.length} pallets staged in Aisle ${front.aisle} → next location ${nextText}`);
+      addLogEntry(`${result.staged.length} pallets staged in Aisle ${frontEffective.aisle} → next location ${nextText}`);
 
       if (result.shortfall > 0) {
         playAlert('warning');
         const requested = result.staged.length + result.shortfall;
         addLogEntry(
-          `Warning: ${result.staged.length} of ${requested} locations available in Aisle ${front.aisle} — ${result.shortfall} pallets have no location`,
+          `Warning: ${result.staged.length} of ${requested} locations available in Aisle ${frontEffective.aisle} — ${result.shortfall} pallets have no location`,
           true,
         );
         setMessage({ type: 'warning', text: `Staged ${result.staged.length} of ${requested} — ${result.shortfall} pallets unplaced` });
       } else {
         playAlert('info');
-        setMessage({ type: 'success', text: `${result.staged.length} pallets staged in Aisle ${front.aisle}` });
+        setMessage({ type: 'success', text: `${result.staged.length} pallets staged in Aisle ${frontEffective.aisle}` });
       }
 
       resetStackAfterStage();
@@ -1388,21 +1453,21 @@ function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }
 
 /**
  * Top control bar, labeled "Master Control" (v1.6.6). Three elements spaced
- * `justify-between` below the label — Fill All + (IM+) Unstage Aisle (moved back here after
- * briefly living on the Cab graphic — Clear Forks took that spot instead, see Cab), the
- * shared Aisle/StorageCode/Size fields, and Refresh. Refresh sits here (not in its own row
- * above the Locations panel) specifically so it lands immediately left of the Locations
- * column — Master Control's row ends exactly where that column begins, so the last
- * `justify-between` element reads as "against the Locations box" without needing its own
- * dedicated space that would otherwise eat into Locations' height. `justify-between` (not
- * a `grid-cols-3`) per direct instruction — the field group's position now depends on the
+ * `justify-between` below the label — (IM+) Unstage Aisle, the shared Aisle/StorageCode/
+ * Size fields, and Refresh. Refresh sits here (not in its own row above the Locations
+ * panel) specifically so it lands immediately left of the Locations column — Master
+ * Control's row ends exactly where that column begins, so the last `justify-between`
+ * element reads as "against the Locations box" without needing its own dedicated space
+ * that would otherwise eat into Locations' height. `justify-between` (not a
+ * `grid-cols-3`) per direct instruction — the field group's position now depends on the
  * other two elements' actual widths rather than always centering against the row's own
- * full width regardless of them.
+ * full width regardless of them. Fill All was removed in issue #99 — every stack's
+ * Aisle/StorageCode/Size now inherits these fields' current values live unless a worker
+ * explicitly overrides one (see StackBox), so there's no separate "push to the stacks"
+ * step left to trigger; the left-hand button group is simply empty for non-IM+ roles now.
  */
-function MasterControl({ isIM, onFillAll, fillAllDisabled, onUnstage, onRefresh }: {
+function MasterControl({ isIM, onUnstage, onRefresh }: {
   isIM: boolean;
-  onFillAll: () => void;
-  fillAllDisabled: boolean;
   onUnstage: () => void;
   onRefresh: () => void;
 }) {
@@ -1453,19 +1518,11 @@ function MasterControl({ isIM, onFillAll, fillAllDisabled, onUnstage, onRefresh 
           Master Control
         </span>
       </div>
-      {/* Three elements spaced space-between (v1.6.6) — Fill All/Unstage, the field group,
-          and Refresh — rather than a grid's guaranteed true-centering; the field group's
+      {/* Three elements spaced space-between (v1.6.6) — Unstage, the field group, and
+          Refresh — rather than a grid's guaranteed true-centering; the field group's
           position now depends on the other two elements' widths, per direct instruction. */}
       <div className="flex items-end justify-between mt-2">
         <div className="flex items-end gap-2">
-          <button
-            type="button"
-            onClick={onFillAll}
-            disabled={fillAllDisabled}
-            className="h-[44px] px-5 rounded-[10px] font-ui text-[14px] font-semibold bg-[#003366] hover:bg-[#004488] text-white disabled:opacity-40 transition-colors"
-          >
-            Fill All
-          </button>
           {isIM && (
             // Red outline (v1.6.6 — swapped with Clear Forks' solid fill, see Cab) — its
             // destructive nature (clears staged locations) should still stand out, sized to
@@ -1538,12 +1595,10 @@ function STGScreen() {
 
   // Pre-population from ELA "Stage Aisle" / ELZ "Stage Aisle" — see STG.md's
   // Pre-population section. Only applies to Master Control, never the fork/stack slots
-  // directly — a worker still has to tap "Fill All" (or a per-stack fill button) to push
-  // Master Control's values onto any slot. Reverses the earlier "also write all three
-  // stacks" behavior (previously justified as restoring pre-#77 parity) per product
-  // decision made while fixing DevNotes/Fixes/ELA/03 and STG/05. Only applied once per
-  // navigation (route state is consumed, not re-applied on every render) — Master
-  // Control's own empty aisle is used as the "not yet applied" signal.
+  // directly — every stack inherits Master Control's values live unless individually
+  // overridden (issue #99), so there's no separate "push to the stacks" step needed
+  // anymore. Only applied once per navigation (route state is consumed, not re-applied on
+  // every render) — Master Control's own empty aisle is used as the "not yet applied" signal.
   useEffect(() => {
     const state = routerLocation.state as NavState | null;
     if (!state?.aisle || master.aisle) return;
@@ -1556,22 +1611,14 @@ function STGScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routerLocation.state]);
 
-  /** Applies Master Control's Aisle/StorageCode/Size to every stack slot that doesn't have a Quantity yet (issue #81 — restores the pre-#77 "Fill All" behavior; never triggers the reject/hold flow). */
-  function fillAll() {
-    ([0, 1, 2] as const).forEach((i) => {
-      if (!stacks[i].quantity) updateStack(i, { aisle: master.aisle, storageCode: master.storageCode, size: master.size });
-    });
-  }
-
-  // Nothing left for Fill All to do once every slot already has its own Quantity.
-  const allStacksHaveQuantity = stacks.every((s) => !!s.quantity);
-
-  /** Clears all 3 stacks' Aisle/Storage/Size/Qty (and any computed locations/shortfall) —
-   *  Master Control is untouched. Available to every role, unlike Unstage Aisle (which
-   *  acts on real, already-staged locations — this only clears local, unsubmitted entry). */
+  /** Clears all 3 stacks' Aisle/Storage/Size/Qty (and any active overrides or computed
+   *  locations/shortfall) — Master Control is untouched. Available to every role, unlike
+   *  Unstage Aisle (which acts on real, already-staged locations — this only clears local,
+   *  unsubmitted entry). */
   function clearForks() {
     ([0, 1, 2] as const).forEach((i) => updateStack(i, {
       aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0,
+      aisleOverride: false, storageCodeOverride: false, sizeOverride: false,
     }));
   }
 
@@ -1596,8 +1643,6 @@ function STGScreen() {
         <div ref={leftColRef} className="flex-1 min-w-0 flex flex-col">
           <MasterControl
             isIM={isIM}
-            onFillAll={fillAll}
-            fillAllDisabled={!master.aisle || !master.storageCode || allStacksHaveQuantity}
             onUnstage={() => setUnstageOpen(true)}
             onRefresh={handleRefresh}
           />
@@ -1645,7 +1690,7 @@ function STGScreen() {
       {!master.aisle && <LogPanel />}
 
       {unstageOpen && (
-        <UnstageModal aisle={master.aisle || stacks[0].aisle} onClose={() => setUnstageOpen(false)} />
+        <UnstageModal aisle={master.aisle || effectiveStack(stacks[0], master).aisle} onClose={() => setUnstageOpen(false)} />
       )}
     </div>
   );

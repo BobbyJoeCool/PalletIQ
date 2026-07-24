@@ -6,6 +6,7 @@ import { requireAuth, requireRole, hasMinRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { sideOf } from '../lib/zoneLogic.js';
+import { formatDpci } from '../lib/dpci.js';
 import type { Role } from '../lib/jwt.js';
 
 // Canonical ascending size order (mirrors SIZES in src/pages/ELAPage.tsx and STGPage.tsx).
@@ -85,7 +86,7 @@ async function getLocation(req: HttpRequest, _ctx: InvocationContext): Promise<u
     contraction:  location.contraction,
     pallets: location.pallets.map((pallet) => ({
       id: pallet.pid,
-      dpci: `${String(pallet.dept).padStart(3, '0')}-${String(pallet.class).padStart(2, '0')}-${String(pallet.item).padStart(4, '0')}`,
+      dpci: formatDpci(pallet.dept, pallet.class, pallet.item),
       cartons: pallet.currentCartons,
       pallets: pallet.currentPallets,
       ssps:    pallet.currentSSPs,

@@ -225,10 +225,10 @@ button, which is the only behavioral difference between the two call sites.
   double-checking whether ELA's `getLocationsEmptyByAisle` should also exclude contracted
   locations, since it currently does not filter on `contraction` at all). Needs a data
   correction on the Contraction flags themselves, not a code fix, per the issue.
-- No screen-specific open fix-list items remain — all 4 of ELA's `tasks.md` items shipped
-  in v1.6.4, plus a Size-validation follow-up shipped in v1.6.5 (see Change Log). See
-  `DevNotes/Fixes/MASTER-CHECKLIST.md`'s ELA section for the authoritative "all done"
-  confirmation.
+- No screen-specific open fix-list items remain — all 4 of ELA's original `tasks.md`
+  items shipped in v1.6.4, plus a Size-validation follow-up shipped in v1.6.5 (see Change
+  Log). `tasks.md`/`MASTER-CHECKLIST.md` were retired 2026-07-24 — remaining open
+  ELA-tagged work (e.g. #91) is tracked as a GitHub Issue.
 - **App-wide (cross-cutting, not ELA-specific):** the App-Wide screen-persistence item
   has since landed — ELA's own filter/selection state now persists across navigation away
   and back via `ELAContext` (see Behind the Scenes above), matching STG's earlier

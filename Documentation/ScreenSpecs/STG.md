@@ -3,16 +3,17 @@
 **Device:** Tablet — iPad Pro 13" landscape, fixed 1366×1024 canvas (kiosk).
 **Bucket:** Existing Warehouse App (current production screen).
 **Roles:** All roles for staging itself; **Unstage Aisle** and the Unstage/Restage modal's
-Apply action are gated to IM, Lead, Manager, Admin (hidden from Worker). Clear Forks and
-each stack's own per-stack Fill/Clear are available to every role (they only touch local,
-unsubmitted entry fields, never anything already staged).
+Apply action are gated to IM, Lead, Manager, Admin (hidden from Worker). Clear Forks, each
+stack's own Clear, and every per-field override toggle are available to every role (they
+only touch local, unsubmitted entry fields, never anything already staged).
 
 Route: `/stage` · Jump code: `STG` · Component: `src/pages/STGPage.tsx`
 
 This is the most heavily-revised screen in the app — full graphic/layout redesigns
-shipped in v1.3.0 (single front-stack), v1.4.1 (reverted to three independent stacks), and
-v1.6.6 (current fork-graphic/Master-Control/per-stack reorganization). Everything below
-describes the **current, v1.6.6 end state**; see the Change Log for the lineage.
+shipped in v1.3.0 (single front-stack), v1.4.1 (reverted to three independent stacks),
+v1.6.6 (fork-graphic/Master-Control/per-stack reorganization), and v1.7.2 (per-field
+override of Master Control's inherited values, issue #99). Everything below describes the
+**current, v1.7.2 end state**; see the Change Log for the lineage.
 
 ## Concept: Stack Queue (On Deck / Next / Staging)
 
@@ -21,8 +22,22 @@ Each stack is a slot — **On Deck** (leftmost, closest to the mast/operator), *
 (middle), **Staging** (rightmost, "the end of the forks," closest to the Locations
 panel) — holding its own Aisle/Storage Code/Size/Quantity. Only the **Staging** slot
 (index 0 in `StagingContext`) ever computes destination locations or can be staged;
-On Deck/Next are pure data entry for what's queued up behind it. When Staging stages
-and clears, the queue **compacts forward**: whichever of Next/On Deck is filled slides
+On Deck/Next are pure data entry for what's queued up behind it.
+
+**(v1.7.2, issue #99)** Each stack's own Aisle/Storage Code/Size is no longer independent
+local state by default — it *live-inherits* Master Control's current value continuously,
+automatically, with no button, unless a worker explicitly arms a per-field override toggle
+(one each for Aisle/Storage Code/Size — three per stack) for that one stack. An overridden
+field becomes a normal editable box again (pre-filled with Master Control's value at the
+moment it was armed); disarming it reverts to a plain display of whatever Master Control
+currently holds. Since an override (a boolean flag plus its own value) is stored directly
+on the stack's own state, it rides along automatically through `compactStacks`/
+`resetStackAfterStage` below — no separate position-indexed override tracking was needed
+for an override to "travel down the forks" as the queue advances. This replaced the old
+Fill All/per-stack Fill buttons entirely (removed — inheritance no longer needs a manual
+trigger).
+
+When Staging stages and clears, the queue **compacts forward**: whichever of Next/On Deck is filled slides
 all the way into Staging, skipping past an empty slot in between if one exists (e.g. if
 Next is empty but On Deck has data, On Deck jumps straight to Staging). If nothing was
 queued behind it, the newly-emptied Staging slot inherits the just-staged stack's own
@@ -31,14 +46,21 @@ only needs a new Quantity). **(v1.7.0)** When there *was* something queued behin
 each of Aisle/Storage Code/Size — independently — carries forward into whatever slot the
 compaction newly opens up, but only if all three stacks (Staging, Next, On Deck) held the
 *exact same value* for that field before staging (e.g. all three on Storage Code CR but
-different Sizes persists only CR, not a Size). Distinct from the "nothing queued behind
-it" case just above, which always persists every one of the staged stack's own fields
-regardless of whether Next/On Deck had anything to compare against. See `compactStacks`
-and `resetStackAfterStage` in `src/context/StagingContext.tsx`.
+different Sizes persists only CR, not a Size). **(v1.7.2)** Since a non-overridden field
+is already identical across all three stacks automatically (they all live-inherit the
+same Master Control value with no code needed), this carry-forward now only ever fires
+for a field all three stacks happen to independently *override* to the same custom
+value — and, when it does, carries the override flag itself forward too, not just the
+value, so the newly-opened slot correctly stays overridden rather than silently reverting
+to inheritance. Distinct from the "nothing queued behind it" case just above, which always
+persists every one of the staged stack's own fields (and override flags) regardless of
+whether Next/On Deck had anything to compare against. See `compactStacks` and
+`resetStackAfterStage` in `src/context/StagingContext.tsx`.
 
 This queue — plus **Master Control** (a separate, independent Aisle/Storage Code/Size
-used to drive the Live Info Panel below and to "Fill" stacks on request) and the
-session's staging **Log** — is held in `StagingContext`, mounted once app-wide (in
+used to drive the Live Info Panel below, and live-inherited by every stack's own fields
+per the override model above) and the session's staging **Log** — is held in
+`StagingContext`, mounted once app-wide (in
 `App.tsx`, not on this page), so navigating away from STG and back restores the forks
 exactly as left. State clears only when the authenticated route tree unmounts (logout).
 
@@ -53,17 +75,22 @@ exactly as left. State clears only when the authenticated route tree unmounts (l
    Storage Code and Size (both `CodePickerField`-family, `strict` — a value typed that
    isn't actually valid clears itself and posts `"Master Control - Storage Code/Size -
    Invalid Entry"`). These three fields independently drive the **Live Info Panel** at
-   the bottom of the screen (see step 6) regardless of whether Fill All has been used.
-3. Worker fills each of the three stack boxes (**On Deck**, **Next**, **Staging**, left
-   to right) with its own Aisle/Storage Code/Size/Quantity — either by hand, or:
-   - **Fill All** (Master Control, top-left) — applies Master Control's current
-     Aisle/Storage Code/Size to every stack slot that doesn't have a Quantity yet; never
-     overwrites a slot the worker has already started entering a Quantity into.
-   - Each stack's own **Fill** pill — pulls Master Control's Aisle/Storage Code/Size into
-     just that one stack, independent of the other two.
-   - Each stack's own **Clear** pill, or the Cab's **Clear Forks** button — clears that
-     one stack's (or all three stacks') Aisle/Storage Code/Size/Quantity/computed
-     locations; never touches Master Control.
+   the bottom of the screen (see step 6), and are live-inherited by every stack box that
+   isn't individually overriding a given field (see step 3).
+3. **(v1.7.2, issue #99)** Each of the three stack boxes (**On Deck**, **Next**,
+   **Staging**, left to right) shows its own Aisle/Storage Code/Size as a plain,
+   non-interactive display of Master Control's current value by default — no fill step
+   needed, it just tracks Master Control live. Next to each of the three fields is a small
+   override toggle; tapping it arms that one field for that one stack only (turning it
+   blue, pre-filled with Master Control's value at that moment) so the worker can type a
+   different value for just that field on just that stack, independent of Master Control
+   and the other two stacks. Tapping the toggle again disarms it, reverting to the plain
+   inherited display. Quantity is unaffected by any of this — it's always its own direct
+   entry field, never inherited from anywhere.
+   - Each stack's own **Clear** pill (now sharing Quantity's row, to its left), or the
+     Cab's **Clear Forks** button — clears that one stack's (or all three stacks')
+     Aisle/Storage Code/Size/Quantity/computed locations and disarms any active overrides;
+     never touches Master Control.
 4. Once the **Staging** slot's Aisle + Storage Code + Size + Quantity are all filled, the
    **Locations panel** (right of the stack boxes) fetches and displays up to Quantity
    destination locations as tappable bubbles (`{Aisle}-{Bin}-{Level}` format), laid out
@@ -163,14 +190,15 @@ through a subsequent valid one.
 ├────────────────────────────── Message Bar (74px) ────────────────────────────────┤
 ├──────────────────────────── Content slot (792px) ────────────────────────────────┤
 │              Master Control                                                     │
-│ [Fill All][Unstage▲]   [Storage▾][Aisle][Size▾]         [Refresh]              │
+│ [Unstage▲]              [Storage▾][Aisle][Size▾]         [Refresh]              │
 │ ┌────────────────────────────────────────────┐ ┌─────────────────────────────┐  │
 │ │ [Cab img]│ On Deck │  Next  │ Staging(blue) │ │ Locations                   │  │
-│ │ Clear    │ Fill/Clr│Fill/Clr│  Fill/Clr     │ │  (bubbles, 1-3 cols,        │  │
-│ │ Forks    │ Aisle   │ Aisle  │  Aisle        │ │   dynamic size)             │  │
-│ │          │ Storage │Storage │  Storage      │ │                             │  │
-│ │          │ Size    │ Size   │  Size         │ │                             │  │
-│ │          │ Qty     │ Qty    │  Qty          │ │        [STAGE]              │  │
+│ │ Clear    │[Ovr]Aisle│[Ovr]Aisle│[Ovr] Aisle  │ │  (bubbles, 1-3 cols,        │  │
+│ │ Forks    │[Ovr]Storag│[Ovr]Storag│[Ovr] Storage│ │   dynamic size)           │  │
+│ │          │[Ovr]Size │[Ovr]Size │[Ovr]  Size   │ │                             │  │
+│ │          │┌────────┐│┌────────┐│┌────────────┐│ │        [STAGE]              │  │
+│ │          ││Clr│ QTY ││Clr│ QTY │Clr│   QTY    ││ │                             │  │
+│ │          │└────────┘│└────────┘│└────────────┘│ │                             │  │
 │ │──────────┴─────────┴────────┴───────────────│ └─────────────────────────────┘  │
 │ │           (forks strip graphic, shelf)       │                                │
 │ └───────────────────────────────────────────────────────────────────────────────┘  │
@@ -191,26 +219,30 @@ own flipped orientation.
 
 ## Input handling
 
-- **Master Control Aisle** and each **stack's Aisle**: numpad-driven (`useNumpadField`),
-  3-digit auto-commit/pad (Master Control) or plain confirm-driven (stack boxes, via
-  `handleAisleConfirm`, which also validates existence).
-- **Master Control Storage Code/Size** and each **stack's Storage Code/Size**: both use
-  the type-or-tap-chevron code-picker pattern — Master Control via the shared
-  `StorageCodeField`/`SizeField` components; each stack via a local `PalletCodePicker`
-  (a dedicated reimplementation of the same field+popup logic inside the pallet-slat
-  visual chrome `PalletBox` uses, since `CodePickerField`'s own `size` variants don't
-  match that box's rounding/height/label position). Both are `strict` once their
-  narrowing data has loaded.
+- **Master Control Aisle** and each **stack's Aisle** (only rendered as an editable field
+  while overridden — issue #99; a plain display otherwise): numpad-driven
+  (`useNumpadField`), 3-digit auto-commit/pad (Master Control) or plain confirm-driven
+  (stack boxes, via `handleAisleConfirm`, which also validates existence).
+- **Master Control Storage Code/Size** and each **stack's Storage Code/Size** (same
+  overridden-only rendering rule): both use the type-or-tap-chevron code-picker pattern —
+  Master Control via the shared `StorageCodeField`/`SizeField` components; each stack via
+  a local `PalletCodePicker` (a dedicated reimplementation of the same field+popup logic
+  inside the pallet-slat visual chrome `PalletBox` uses, since `CodePickerField`'s own
+  `size` variants don't match that box's rounding/height/label position). Both are
+  `strict` once their narrowing data has loaded.
+- **Each field's override toggle** (issue #99): a plain tap, no numpad/keyboard involved —
+  arms/disarms that one field's override for that one stack.
 - **Quantity** (each stack) and **Unstage/Restage's per-type Quantity**: plain numpad
   fields.
 - Physical barcode scanner input (`deliverScan()`) is available as a shared app
   capability but has no STG-specific scan target — this screen has no location/pallet
   barcode field of its own to scan into.
-- All primary tap targets (Fill All, Unstage Aisle, Clear Forks, per-stack Fill/Clear,
-  location bubbles, STAGE, Refresh) meet or exceed the app's 72px minimum touch-target
-  height where they're a primary action; the per-stack Fill/Clear pills and PalletBox
-  fields are deliberately compact (this screen packs far more controls into one row than
-  any other screen) but remain individually tappable at their rendered size.
+- All primary tap targets (Unstage Aisle, Clear Forks, per-stack Clear, location bubbles,
+  STAGE, Refresh) meet or exceed the app's 72px minimum touch-target height where they're
+  a primary action; the per-stack Clear button, override toggles, and PalletBox/
+  InheritedDisplay fields are deliberately compact (this screen packs far more controls
+  into one row than any other screen) but remain individually tappable at their rendered
+  size.
 
 ## Data
 
@@ -240,18 +272,18 @@ own flipped orientation.
   flow.
 
 **Not written:** Master Control's own Aisle/Storage Code/Size, and every stack's own
-Aisle/Storage Code/Size/Quantity, live only in client-side `StagingContext` (session
-state) — nothing about "what's currently queued on the forks" is persisted server-side
-until a `STAGE`/`RESTAGE` call actually commits a location's status change. The staging
-Log is likewise session-local and not the same thing as the app-wide 12-hour Activity Log
-overlay (both exist independently).
+Aisle/Storage Code/Size/Quantity/override flags (issue #99), live only in client-side
+`StagingContext` (session state) — nothing about "what's currently queued on the forks"
+is persisted server-side until a `STAGE`/`RESTAGE` call actually commits a location's
+status change. The staging Log is likewise session-local and not the same thing as the
+app-wide 12-hour Activity Log overlay (both exist independently).
 
 ## Screen Flow
 
-Covers: pre-population from ELA/ELZ, Fill All / per-stack Fill / Clear Forks / per-stack
-Clear, Staging-slot location computation and shortfall, Stage → queue compaction,
-Unstage/Restage (IM+), reject/hold flow, Live Info Panel's three display modes, field
-validation errors.
+Covers: pre-population from ELA/ELZ, live inheritance / per-field override / Clear Forks /
+per-stack Clear, Staging-slot location computation and shortfall, Stage → queue
+compaction, Unstage/Restage (IM+), reject/hold flow, Live Info Panel's three display
+modes, field validation errors.
 
 ```mermaid
 flowchart TD
@@ -260,10 +292,10 @@ flowchart TD
     B -- No --> D[Restore StagingContext session state as-is]
     C --> E[Master Control filled]
     D --> E
-    E --> F{Worker fills stacks?}
-    F -- Fill All / per-stack Fill --> G[Stack(s) get Master Control's aisle/storageCode/size]
-    F -- Manual entry --> H[Worker types each field directly]
-    G --> I{Staging slot has Aisle+Storage+Size+Qty?}
+    E --> F[Every stack's Aisle/Storage/Size live-inherits Master Control]
+    F -- Worker arms an override toggle --> G[That one field, that one stack, becomes editable]
+    F -- No override --> H[Field stays a plain display, tracking Master Control]
+    G --> I{Staging slot's effective Aisle+Storage+Size+Qty all set?}
     H --> I
     I -- No --> J[Locations panel empty / STAGE disabled]
     I -- Yes --> K[Fetch next-location candidates]
@@ -291,6 +323,29 @@ flowchart TD
 ```
 
 ## Behind the Scenes
+
+**Per-field override / live inheritance (F/G/H, issue #99):** Every consumer of a stack's
+Aisle/Storage Code/Size — the field itself, Storage/Size dropdown narrowing, the Staging
+slot's location fetch, the Stage submission, `UnstageModal`'s aisle fallback — reads
+`effectiveStack(stack, master)` (`src/lib/stagingHelpers.ts`), never the stack's raw
+`aisle`/`storageCode`/`size` fields directly. `effectiveStack` returns Master Control's
+current value for any field not overridden, the stack's own stored value for any field
+that is — this is the entire mechanism; there's no separate "sync" step or effect
+propagating Master Control's changes outward, since every read already resolves live.
+Arming an override (`aisleOverride`/`storageCodeOverride`/`sizeOverride`, one boolean per
+field on `StackState`) pre-fills the stack's own field with Master Control's value at that
+instant; disarming clears it back to `''` (unused while not overridden, but cleared anyway
+so a stale value never quietly resurfaces the next time the override arms again).
+
+**Override toggle placement and row sizing (issue #99, direct-instruction follow-up to
+the initial build):** each field's override toggle renders to the *left* of the field it
+controls (not the right), spelled out as "Override" rather than an icon, wide enough to
+read at a glance. Qty's own row is `flex-[2]` while Aisle/Storage/Size stay `flex-1` — Qty
+deliberately absorbs the vertical space the old Fill/Clear row used to occupy (now that
+Fill is gone) instead of that space just disappearing, so Qty ends up twice the height of
+the other three fields; Clear (sharing that row, to Qty's left) and Qty's own label/value
+text are both sized up to match (double the 9px/15px every other field still uses) so
+they read proportionally, not lost in the taller box.
 
 **Pre-population gate (B/C):** The pre-fill effect checks `!state?.aisle || master.aisle`
 — it only ever applies once per navigation, using Master Control's own empty Aisle as the
@@ -384,14 +439,16 @@ next to the zone summary, not a bug where the log renders twice (it's the same
 - **GitHub #83/#85/#86** (SDP/MNP-focused, not STG-specific) are adjacent but do not
   touch this screen's own code paths.
 - No STG-specific open fix-list items remain from the v1.6.6 round itself — all 7
-  original items plus several found live were shipped in that version (see Change Log
-  and `DevNotes/Fixes/MASTER-CHECKLIST.md`'s STG section for the full item-by-item
-  record).
+  original items plus several found live were shipped in that version (see Change Log).
+  Remaining open STG-tagged work is tracked as GitHub Issues (see this repo's
+  [open issues](https://github.com/BobbyJoeCool/PalletIQ/issues)) — `DevNotes/Fixes/
+  MASTER-CHECKLIST.md` was retired 2026-07-24.
 
 ## Change Log
 
 | Date | Change |
 |---|---|
+| 2026-07-22 (v1.7.2) | **Per-stack override of Master Control's inherited values** ([GitHub #99](https://github.com/BobbyJoeCool/PalletIQ/issues/99)): every stack's Aisle/Storage Code/Size now live-inherits Master Control's current value automatically and continuously (previously a one-time "Fill" copy, after which the stack's fields were independent state with no further relationship to Master Control); a worker can arm a per-field override toggle (Aisle/Storage Code/Size each independent, 3 per stack) to diverge just that one field on just that one stack, pre-filled from Master Control's value at the moment it's armed. Fill All and each stack's own Fill button removed entirely (inheritance no longer needs a manual trigger). Clear moved into the same row as Quantity (to its left), replacing the old separate Fill/Clear row now that Fill is gone. An active override rides along automatically through queue compaction after a stage, since it's stored directly on the stack's own state alongside Aisle/Storage/Size/Quantity. **Follow-up sizing pass (direct instruction):** each override toggle moved to the left of its field and widened to spell out "Override"; Quantity's row now absorbs the old Fill/Clear row's vertical space (`flex-[2]` vs. `flex-1` for Aisle/Storage/Size), with Clear and Quantity's own text doubled in size to match. |
 | 2026-07-17 (v1.6.6) | Full layout/graphic redesign: two-piece Cab + Forks-strip crop replacing the old single small image; Master Control reorganized (Fill All/Unstage Aisle left, fields center, Refresh right) with a new all-roles "Clear Forks" button on the Cab graphic; per-stack Fill/Clear buttons added; per-stack Storage Code/Size converted to entry-with-dropdown-helper fields scoped to that stack's own Aisle; field validation added everywhere (invalid typed Storage Code/Size/Aisle now clears itself and posts an explicit message-bar error instead of silently committing); STG/ELZ Zone Summary switched to color-coded `ZoneCodeBadge` pills; dynamic Locations-panel bubble sizing (1/2/3 columns based on count, sized to available space) replacing the old fixed 5-per-column/112×32px bubbles; Unstage/Restage modal now lists every freight type present (not just currently-staged), with the type bubble itself as the active/inactive toggle; "no Aisle" bottom info panel switched onto the literal shared `AisleSizeTable` ELA's own page uses; final assigned bubble is green and tappable (not red/dead); Staging stack sits in its own blue-bordered box. Fixed several bugs found live: bubbles not clearing on valid→invalid Quantity; Unstage/Restage's Apply dropping an unconfirmed typed quantity; "Fill All" incorrectly disabled when arriving from ELZ; contracted Storage Code/Size never appearing in dropdown-helper popups (also fixed on ELZ/SDP); bubbles growing without bound at 3+ pallets (a self-referential height/bubble-size measurement loop); bubbles slightly oversized at 3+ per column/3 columns (gap space not subtracted from the sizing math). |
 | 2026-07-16 (v1.6.4) | Pre-population from ELA/ELZ's "Stage Aisle" now only fills Master Control — no fork/stack slot is written directly; the worker fills stacks themselves via Fill All or a per-stack fill button (reverses v1.4.1/#81's "auto-fill all three slots" behavior; product decision made while fixing ELA/03 and STG/05). |
 | 2026-07-11 (v1.4.2) | `GET /api/staging/next-location` gained a `count` param — the server now walks the bin/level cursor internally across up to `count` locations in one request, instead of the frontend issuing one HTTP round-trip per pallet in Quantity (#75). |

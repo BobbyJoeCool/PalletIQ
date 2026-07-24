@@ -1,5 +1,13 @@
 import prisma from './prisma.js';
 
+/**
+ * Terminal Label statuses — a label in one of these is resolved and no longer "open"
+ * against its pallet. Used as a `notIn` filter to find open labels; canonical definition,
+ * every such check across the API should filter against this instead of restating the
+ * literal list.
+ */
+export const TERMINAL_LABEL_STATUSES = ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'];
+
 export interface EligibilityResult {
   eligible: true;
   alreadyStored: boolean;
@@ -60,7 +68,7 @@ export async function checkPalletEligibility(palletId: number): Promise<Eligibil
   }
 
   const openLabelCount = await prisma.label.count({
-    where: { pid: palletId, status: { notIn: ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'] } },
+    where: { pid: palletId, status: { notIn: TERMINAL_LABEL_STATUSES } },
   });
   if (openLabelCount > 0) {
     throw Object.assign(new Error('BLOCKED_BY_PENDING_PULL'), { status: 409 });

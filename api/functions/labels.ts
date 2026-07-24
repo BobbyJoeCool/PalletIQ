@@ -3,6 +3,7 @@ import type { HttpRequest, InvocationContext } from '@azure/functions';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
+import { formatDpci } from '../lib/dpci.js';
 
 /**
  * Looks up a label by ID and validates it is in PRINTED (Pending) status.
@@ -69,7 +70,7 @@ async function getLabel(req: HttpRequest, _ctx: InvocationContext): Promise<unkn
         cartons: label.quantity,
         ssps: label.sspQuantity,
       },
-      dpci: `${String(label.dept).padStart(3, '0')}-${String(label.class).padStart(2, '0')}-${String(label.item).padStart(4, '0')}`,
+      dpci: formatDpci(label.dept, label.class, label.item),
       descShort: label.itemRef.descShort,
       batchDate: label.batchDate,
       destinationStore: label.destinationStore,

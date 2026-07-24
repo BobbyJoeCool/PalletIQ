@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DataRow } from '../components/shared/DataRow';
 import { DemoPicker } from '../components/shared/DemoPicker';
 import { Dropdown } from '../components/shared/Dropdown';
 import { HoldPanel } from '../components/shared/HoldPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { LiveId } from '../components/ui/LiveId';
+import { ModalOverlay } from '../components/ui/ModalOverlay';
+import { DigitGrid, NumericReadout } from '../components/ui/NumericKeypad';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
@@ -11,7 +16,7 @@ import { useNumpad } from '../context/NumpadContext';
 import { type PIPLabelScanResult, usePIP } from '../context/PIPContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
-import { INVALID_WASH } from '../lib/invalidWash';
+import { useDigitInput } from '../lib/useDigitInput';
 import { useNumpadField } from '../lib/useNumpadField';
 import { fmtLocation } from '../lib/fmt';
 
@@ -115,18 +120,6 @@ function QtyTable({ current, pull, remaining, remainingZero }: { current: Qty; p
   );
 }
 
-/** Single labeled data row in the pull-data panel — displays plain text or an inline component. */
-function DataRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 py-1.5 border-b border-[#1A1A1A]">
-      <span className="w-[160px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-        {label}
-      </span>
-      <div className="font-data text-[22px] text-white">{children}</div>
-    </div>
-  );
-}
-
 /**
  * Input display field driven by NumpadContext. Tapping calls onFocus, which registers
  * the field's submit handler. The blinking red cursor appears when active and not disabled.
@@ -160,26 +153,17 @@ function FieldDisplay({
   invalid?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-        {label}
-      </span>
-      <button
-        type="button"
-        onClick={onFocus}
-        disabled={disabled}
-        className={`flex items-center ${compact ? 'h-[60px] px-4' : 'h-[72px] px-5'} rounded-[12px] border-2 disabled:opacity-40 transition-colors ${
-          invalid ? INVALID_WASH : active && !disabled ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
-        }`}
-      >
-        <span className={`font-data ${compact ? 'text-[26px]' : 'text-[32px]'} font-medium text-white tracking-[0.04em]`}>
-          {value || <span className="text-[#444]">—</span>}
-        </span>
-        {active && !disabled && (
-          <span className={`inline-block w-[3px] ${compact ? 'h-[30px]' : 'h-[38px]'} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />
-        )}
-      </button>
-    </div>
+    <NumpadFieldBox
+      label={label}
+      value={value}
+      onFocus={onFocus}
+      active={active}
+      disabled={disabled}
+      invalid={invalid}
+      boxClass={compact ? 'h-[60px] px-4 rounded-[12px]' : 'h-[72px] px-5 rounded-[12px]'}
+      valueClass={compact ? 'text-[26px] font-medium tracking-[0.04em]' : 'text-[32px] font-medium tracking-[0.04em]'}
+      caretClass={compact ? 'w-[3px] h-[30px]' : 'w-[3px] h-[38px]'}
+    />
   );
 }
 
@@ -216,23 +200,16 @@ type ScreenState = 'ready' | 'verifying';
  * level is accepted as-is with no further validation (an attestation, not a lookup) and
  * is what gets resubmitted in place of the originally-scanned level. Modeled on MNP's
  * LevelModal keypad (not the shared ConfirmDialog, which has no room for an input) but
- * kept local to this file rather than extracted into a shared component — MNP's version
+ * kept local to this file rather than fully merged into one shared dialog — MNP's version
  * has no Cancel action (collecting a level there is mandatory, not a correction the
- * worker can back out of), so the two components' needs already diverge.
+ * worker can back out of), so the two components' bottom sections still diverge even
+ * after sharing their overlay chrome/readout/digit-grid (Refactoring Audit findings F3/F4).
  */
 function LevelCorrectionDialog({
   scannedLevel, actualLevel, onConfirm, onCancel,
 }: { scannedLevel: number; actualLevel: number; onConfirm: (level: number) => void; onCancel: () => void }) {
-  const [input, setInput] = useState('');
+  const { input, pressDigit, backspace } = useDigitInput();
 
-  /** Appends a digit to the level input, capped at 2 digits. */
-  function pressDigit(d: string) {
-    setInput((v) => (v.length >= 2 ? v : v + d));
-  }
-  /** Removes the last digit from the level input. */
-  function backspace() {
-    setInput((v) => v.slice(0, -1));
-  }
   /** Accepts the typed level as-is (no validation against real data) and reports it. */
   function confirm() {
     const level = parseInt(input, 10);
@@ -240,59 +217,33 @@ function LevelCorrectionDialog({
     onConfirm(level);
   }
 
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
-
   return (
-    <div data-testid="level-correction-dialog" className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-8 w-[520px] shadow-2xl">
-        <h2 className="font-ui text-[22px] font-semibold text-white text-center mb-3">
-          What level was this pallet actually pulled from?
-        </h2>
-        <p className="font-ui text-[15px] text-[#9A9A9A] text-center mb-5">
-          You scanned Level {scannedLevel}, but this pallet's recorded location is Level {actualLevel}.
-        </p>
+    <ModalOverlay testId="level-correction-dialog" width="w-[520px]">
+      <h2 className="font-ui text-[22px] font-semibold text-white text-center mb-3">
+        What level was this pallet actually pulled from?
+      </h2>
+      <p className="font-ui text-[15px] text-[#9A9A9A] text-center mb-5">
+        You scanned Level {scannedLevel}, but this pallet's recorded location is Level {actualLevel}.
+      </p>
 
-        <div className="flex items-center justify-center h-[64px] mb-5 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A]">
-          <span className="font-data text-[36px] font-medium text-white tracking-[0.1em]">
-            {input || <span className="text-[#444]">—</span>}
-          </span>
-        </div>
+      <NumericReadout value={input} />
 
-        <div className="grid grid-cols-3 gap-3 mb-4">
-          {keys.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => pressDigit(d)}
-              className="h-[64px] rounded-[14px] bg-[#1F1F1F] border border-[#2C2C2C] text-white font-data text-[26px] font-medium hover:border-[#555] transition-colors active:scale-95"
-            >
-              {d}
-            </button>
-          ))}
-          <button type="button" onClick={backspace} className="h-[64px] rounded-[14px] bg-[#1F1F1F] border border-[#2C2C2C] text-white font-ui text-[18px] font-medium hover:border-[#555] transition-colors active:scale-95">
-            ⌫
-          </button>
-          <button type="button" onClick={() => pressDigit('0')} className="h-[64px] rounded-[14px] bg-[#1F1F1F] border border-[#2C2C2C] text-white font-data text-[26px] font-medium hover:border-[#555] transition-colors active:scale-95">
-            0
-          </button>
-          <span />
-        </div>
+      <DigitGrid onDigit={pressDigit} onBackspace={backspace} keySize="compact" className="mb-4" />
 
-        <div className="flex gap-3">
-          <button type="button" onClick={onCancel} className="flex-1 h-[56px] rounded-[12px] border border-[#3A3A3A] font-ui text-[17px] font-medium text-white hover:bg-[#1A1A1A] transition-colors">
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={confirm}
-            disabled={!input}
-            className="flex-1 h-[56px] rounded-[12px] font-ui text-[17px] font-semibold text-white bg-[#CC0000] hover:bg-[#AA0000] disabled:opacity-40 transition-colors"
-          >
-            Confirm Level
-          </button>
-        </div>
+      <div className="flex gap-3">
+        <button type="button" onClick={onCancel} className="flex-1 h-[56px] rounded-[12px] border border-[#3A3A3A] font-ui text-[17px] font-medium text-white hover:bg-[#1A1A1A] transition-colors">
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={!input}
+          className="flex-1 h-[56px] rounded-[12px] font-ui text-[17px] font-semibold text-white bg-[#CC0000] hover:bg-[#AA0000] disabled:opacity-40 transition-colors"
+        >
+          Confirm Level
+        </button>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -886,7 +837,7 @@ export function PIPPage() {
         {screenState === 'verifying' && labelData && (
           <>
                 <div className="flex flex-col mt-1">
-                  <DataRow label="Location">
+                  <DataRow label="Location" dense labelWidth={160}>
                     {labelData.location.id
                       ? (
                         <span className="inline-flex px-3 py-1 rounded-[10px] bg-[#CC0000]/10 border-2 border-[#CC0000]/40">
@@ -895,8 +846,8 @@ export function PIPPage() {
                       )
                       : <span className="text-[#9A9A9A]">—</span>}
                   </DataRow>
-                  <DataRow label="Item">{labelData.label.descShort}</DataRow>
-                  <DataRow label="DPCI"><LiveId type="dpci" id={labelData.label.dpci} /></DataRow>
+                  <DataRow label="Item" dense labelWidth={160}>{labelData.label.descShort}</DataRow>
+                  <DataRow label="DPCI" dense labelWidth={160}><LiveId type="dpci" id={labelData.label.dpci} /></DataRow>
                   <QtyTable
                     current={labelData.pallet.quantity}
                     pull={labelData.label.quantity}
@@ -947,42 +898,34 @@ export function PIPPage() {
       </div>
 
       {/* Right column — session history */}
-      <div className="w-[456px] flex flex-col border-l border-[#1C1C1C] overflow-hidden">
-        <div className="px-5 py-3 border-b border-[#1C1C1C]">
-          <span className="font-ui text-[14px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
-            Pull History
-          </span>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {history.length === 0 ? (
-            <p className="px-5 py-4 font-ui text-[15px] text-[#555]">No pulls this session</p>
-          ) : (
-            history.map((entry, i) => (
-              <div key={i} className="px-5 py-3 border-b border-[#111] flex flex-col gap-1">
-                <div className="flex items-center justify-between">
-                  <LiveId type="location" id={entry.location} className="!text-[24px] !font-bold !text-[#FF1A1A]" />
-                  <span className="font-data text-[12px] text-[#555]">
-                    {entry.timestamp.toLocaleTimeString()}
-                  </span>
-                </div>
-                <span className="font-data text-[15px] text-[#CFCFCF]">
-                  Pulled {fmtQty(entry.pulledQty)}
-                </span>
-                <span className="font-data text-[15px] text-[#CFCFCF]">
-                  {fmtQty(entry.updatedQty)} remaining
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      <SessionHistoryPanel
+        title="Pull History"
+        emptyMessage="No pulls this session"
+        entries={history}
+        keyFn={(_entry, i) => i}
+        width="w-[456px]"
+        renderRow={(entry) => (
+          <>
+            <div className="flex items-center justify-between">
+              <LiveId type="location" id={entry.location} className="!text-[24px] !font-bold !text-[#FF1A1A]" />
+              <span className="font-data text-[12px] text-[#555]">
+                {entry.timestamp.toLocaleTimeString()}
+              </span>
+            </div>
+            <span className="font-data text-[15px] text-[#CFCFCF]">
+              Pulled {fmtQty(entry.pulledQty)}
+            </span>
+            <span className="font-data text-[15px] text-[#CFCFCF]">
+              {fmtQty(entry.updatedQty)} remaining
+            </span>
+          </>
+        )}
+      />
 
       {holdOpen && labelData?.location.id && (
-        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 p-8">
-          <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-6 max-h-full overflow-y-auto">
-            <HoldPanel locationId={labelData.location.id} onDone={() => setHoldOpen(false)} showClose />
-          </div>
-        </div>
+        <ModalOverlay backdropClassName="p-8" padding="p-6" cardClassName="max-h-full overflow-y-auto" shadow={false}>
+          <HoldPanel locationId={labelData.location.id} onDone={() => setHoldOpen(false)} showClose />
+        </ModalOverlay>
       )}
 
       {levelMismatch && (

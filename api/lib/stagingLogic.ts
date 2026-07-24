@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { NOT_HELD_FILTER } from './zoneLogic.js';
 
 export interface StagingCandidate {
   aisle: number;
@@ -40,11 +41,7 @@ export async function findNextStagingLocation(
       aisle,
       status: 'EMPTY',
       contraction: false,
-      // See findNextLocation's comment on why this is an explicit OR, not `notIn`.
-      OR: [
-        { holdCategory: null },
-        { holdCategory: 'HOLD_OUT' },
-      ],
+      ...NOT_HELD_FILTER,
       ...(opts.storageCode && { storageCode: opts.storageCode }),
       ...(opts.size        && { size:        opts.size }),
       ...(opts.afterBin != null && {

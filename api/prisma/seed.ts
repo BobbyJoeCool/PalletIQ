@@ -2,31 +2,12 @@ import 'dotenv/config'
 import { PrismaClient } from '../generated/prisma/index.js'
 import { PrismaMssql } from '@prisma/adapter-mssql'
 import bcrypt from 'bcryptjs'
+import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genLid } from './demoUtils.js'
 
 const adapter = new PrismaMssql(process.env.DATABASE_URL!)
 const prisma = new PrismaClient({ adapter })
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Returns a random integer in the inclusive range [min, max]. */
-function randomInt(min: number, max: number) {
-  return Math.floor(Math.random() * (max - min + 1)) + min
-}
-
-/** Returns a random element from an array. */
-function randomFrom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]
-}
-
-/** Fisher-Yates shuffle, returning a new array (doesn't mutate the input). */
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
-}
 
 /** Returns a random Date within the last `daysBack` days (inclusive of today). */
 function randomDate(daysBack: number): Date {
@@ -38,41 +19,10 @@ function randomUnitWeight(): string {
   return (randomInt(10, 2500) / 100).toFixed(2)
 }
 
-/** How many cartons make up one full pallet of this quantity (Pallet.cartonsPerPallet,
- *  v1.6.11) — a flat +1 if there's any loose-SSP remainder at all, not a ratio-based
- *  calculation. Shared by every pallet-creation code path so the rule stays identical. */
-function cartonsPerPalletFor(cartons: number, looseSSPs: number): number {
-  return cartons + (looseSSPs > 0 ? 1 : 0)
-}
-
-/** Converts a Date to a Julian-style date int (YYYY + zero-padded day-of-year), e.g. 2026175. */
-function julianDate(d: Date): number {
-  const start = new Date(d.getFullYear(), 0, 0)
-  const diff = d.getTime() - start.getTime()
-  const oneDay = 86_400_000
-  const doy = Math.floor(diff / oneDay)
-  return d.getFullYear() * 1000 + doy
-}
-
-// Tracks pids already generated this run so genPid() never hands out a duplicate —
-// safe only because this script holds all state in memory for a single execution.
-const usedPids = new Set<number>()
-/** Generates a random 8-digit Pallet ID, retrying on collision against `usedPids`. */
-function genPid(): number {
-  let pid: number
-  do { pid = randomInt(10_000_000, 99_999_999) } while (usedPids.has(pid))
-  usedPids.add(pid)
-  return pid
-}
-
-/** Builds a Label ID string: store(4) + DPCI(9) + pid(8) + random(8) + batchDate. */
-function genLid(storeId: number, dept: number, cls: number, item: number, pid: number, batchDate: number): string {
-  const store = String(storeId).padStart(4, '0')
-  const dpci = String(dept).padStart(3, '0') + String(cls).padStart(2, '0') + String(item).padStart(4, '0')
-  const pidStr = String(pid).padStart(8, '0')
-  const rnd = Math.random().toString(36).substring(2, 10).padEnd(8, '0')
-  return store + dpci + pidStr + rnd + String(batchDate)
-}
+/** Generates a random 8-digit Pallet ID, retrying on collision against pids already
+ *  generated this run — safe only because this script holds all state in memory for a
+ *  single execution. */
+const genPid = makePidGenerator()
 
 // Zone: standard 128-bin aisles
 function getZone128(bin: number): number {
@@ -82,7 +32,7 @@ function getZone128(bin: number): number {
   return 1
 }
 
-// Zone: 192-bin aisles (301/302)
+// Zone: 192-bin, level-split XS overflow aisles (201/202/203/204)
 function getZone192(bin: number): number {
   if (bin <= 48) return 4
   if (bin <= 96) return 3
@@ -90,62 +40,110 @@ function getZone192(bin: number): number {
   return 1
 }
 
-const AISLE_PATTERN = ['L', 'L', 'M', 'S', 'L', 'M', 'HS'] as const
-type AisleType = typeof AISLE_PATTERN[number]
+/**
+ * CR/FD/BK/NR/NF aisle-numbering scheme: `aisle % 10` is a "pattern digit" (0-9) that
+ * determines the aisle's build, identically across all five storage codes — only the
+ * block prefix differs (CR 300-309, FD 310-319, BK 320-329, NR 100-109, NF 110-119).
+ * Digits 8/9 are "split" aisles — odd and even bins have different builds *and*
+ * different max levels within the same aisle, unlike every other digit (uniform across
+ * both parities).
+ */
+const AISLE_BLOCKS: { code: string; start: number }[] = [
+  { code: 'CR', start: 300 },
+  { code: 'FD', start: 310 },
+  { code: 'BK', start: 320 },
+  { code: 'NR', start: 100 },
+  { code: 'NF', start: 110 },
+]
 
-/** Maps an aisle number (304+) onto the repeating 7-aisle size pattern. */
-function getAisleType(aisle: number): AisleType {
-  return AISLE_PATTERN[(aisle - 304) % 7]
+/** Returns the CR/FD/BK/NR/NF storage code for a standard-range aisle (100-119, 300-329). */
+function getBlockStorageCode(aisle: number): string {
+  const block = AISLE_BLOCKS.find((b) => aisle >= b.start && aisle < b.start + 10)
+  if (!block) throw new Error(`getBlockStorageCode: aisle ${aisle} isn't in a known CR/FD/BK/NR/NF block`)
+  return block.code
 }
 
-/** Returns the highest physical level for an aisle, based on its special-case or type. */
-function getMaxLevel(aisle: number): number {
-  if (aisle === 301 || aisle === 302) return 13
-  if (aisle === 303 || aisle === 701 || aisle === 702) return 6
-  if (aisle === 801 || aisle === 802 || aisle === 803) return 10
-  const t = getAisleType(aisle)
-  return t === 'L' ? 5 : t === 'M' ? 6 : t === 'S' ? 8 : 10
+/** The 0-9 pattern digit — same meaning regardless of which storage code's block it's in. */
+function patternDigit(aisle: number): number {
+  return aisle % 10
 }
 
-/** Returns the LocationSize designation for a level, with per-aisle special cases. */
-function getSize(aisle: number, level: number): string {
-  if (aisle === 301 || aisle === 302 || aisle === 801 || aisle === 802 || aisle === 803) return 'XS'
-  if (aisle === 303) {
-    if (level === 1) return 'M'
-    if (level <= 3) return 'L'
-    if (level <= 5) return 'S'
-    return 'HS'
+/** Highest physical level for a pattern-digit aisle — differs by bin parity for the
+ *  split digits 8/9 only. */
+function patternMaxLevel(digit: number, bin: number): number {
+  const odd = bin % 2 === 1
+  switch (digit) {
+    case 0: case 1: return 6
+    case 2: case 3: return 5
+    case 4: return 8
+    case 5: return 10
+    case 6: return 6
+    case 7: return 6
+    case 8: return odd ? 6 : 8
+    case 9: return odd ? 10 : 5
+    default: throw new Error(`patternMaxLevel: unexpected digit ${digit}`)
   }
-  if (aisle === 701 || aisle === 702) {
-    if (level === 1) return 'M'
-    if (level === 2) return 'HS'
-    if (level === 3) return 'L'
-    if (level <= 5) return 'S'
-    return 'M'
-  }
-  const t = getAisleType(aisle)
-  if (t === 'L') return level === 1 ? 'M' : 'L'
-  if (t === 'S') return level === 1 ? 'M' : 'S'
-  if (t === 'HS') return level === 1 ? 'M' : 'HS'
-  return 'M' // Medium aisles all M
 }
 
-/** Returns the StorageCode for a location, with per-aisle and zone-based special cases. */
-function getStorageCode(aisle: number, bin: number, level: number): string {
-  if (aisle === 301) return level <= 9 ? 'CR' : 'FD'
-  if (aisle === 302) {
-    const z = getZone192(bin)
-    return z >= 3 ? (level <= 9 ? 'NR' : 'NF') : 'BK'
+/** LocationSize for a pattern-digit aisle at a given bin/level — see the Prod Functions
+ *  table in the aisle-scheme design for the per-digit build (0/1 Medium, 2/3 Large, 4
+ *  Small, 5 Half Small, 6 Medium/Small, 7 Large/Half Small, 8/9 odd-vs-even splits). */
+function patternSize(digit: number, level: number, bin: number): string {
+  const odd = bin % 2 === 1
+  switch (digit) {
+    case 0: case 1:
+      return 'M'
+    case 2: case 3:
+      return level === 1 ? 'M' : 'L'
+    case 4:
+      return level === 1 ? 'M' : 'S'
+    case 5:
+      return level === 1 ? 'M' : 'HS'
+    case 6:
+      if (level <= 3) return 'M'
+      if (level <= 5) return 'S'
+      return 'M' // level 6
+    case 7:
+      if (level === 1) return 'M'
+      if (level <= 3) return 'L'
+      if (level <= 5) return 'HS'
+      return 'M' // level 6
+    case 8:
+      if (odd) return 'M' // Odd side: Level 1-6 all Medium
+      return level === 1 ? 'M' : 'S' // Even side: Level 1 Medium, 2-8 Small
+    case 9:
+      if (odd) return level === 1 ? 'M' : 'HS' // Odd side: Level 1 Medium, 2-10 Half Small
+      return level === 1 ? 'M' : 'L' // Even side: Level 1 Medium, 2-5 Large
+    default:
+      throw new Error(`patternSize: unexpected digit ${digit}`)
   }
-  if (aisle === 303 || aisle === 803) return 'BS'
-  if (aisle === 701 || aisle === 801) return 'RF'
-  if (aisle === 702 || aisle === 802) return 'RS'
-  if (aisle >= 304 && aisle <= 310) return 'CR'
-  if (aisle >= 311 && aisle <= 317) return 'FD'
-  if (aisle >= 318 && aisle <= 324) return 'BK'
-  if (aisle >= 325 && aisle <= 331) return 'NR'
-  if (aisle >= 332 && aisle <= 338) return 'NF'
-  return 'CR'
+}
+
+/**
+ * Aisles 730 (RF/RS) and 200 (BS) share this "folded" shape: Zone 1 (bins 1-96) is XS at
+ * 13 levels; Zones 2-4 (bins 97-192, 32 each) are the "regular" Level 1 Medium / 2-3
+ * Large / 4 Small / 5 Half Small pattern. Zone 1 has 3x a normal zone's bin count since
+ * an XS location is 1/3 the width of a standard pallet slot — same physical footprint,
+ * just split into thirds. 730 replaces where "330" would otherwise have fallen next in
+ * the plain 3xx sequence (330 itself doesn't exist); 200 is BS's own aisle, both real
+ * and displayed (unlike 730/330, BS isn't Restricted freight, so it doesn't borrow that
+ * relabeling convention).
+ */
+function foldedZoneOf(bin: number): number {
+  if (bin <= 96) return 1
+  if (bin <= 128) return 2
+  if (bin <= 160) return 3
+  return 4
+}
+function foldedMaxLevel(bin: number): number {
+  return foldedZoneOf(bin) === 1 ? 13 : 5
+}
+function foldedSize(bin: number, level: number): string {
+  if (foldedZoneOf(bin) === 1) return 'XS'
+  if (level === 1) return 'M'
+  if (level <= 3) return 'L'
+  if (level === 4) return 'S'
+  return 'HS' // level 5
 }
 
 // ─── Lookup table data ────────────────────────────────────────────────────────
@@ -181,6 +179,46 @@ const PACKING_ZONES = [
   { id: 17, desc: 'Shoes' },
   { id: 18, desc: 'Seasonal' },
 ]
+
+// IRP Prod Functions goal rates, straight from DevNotes/DesignPrompts/IRP.md's Prod
+// Functions table. BK/BKP have no real pull flow yet (permanently greyed in IRP this
+// version) but are seeded anyway so future editing is additive, not a re-architecture.
+const PROD_GOAL_EFFECTIVE_DATE = new Date('2026-01-01')
+const PROD_GOALS = [
+  { functionCode: 'CA',  rate: 180, unit: 'cartons/hr',   rate2: null, unit2: null,       effectiveDate: PROD_GOAL_EFFECTIVE_DATE },
+  { functionCode: 'CF',  rate: 180, unit: 'cartons/hr',   rate2: null, unit2: null,       effectiveDate: PROD_GOAL_EFFECTIVE_DATE },
+  { functionCode: 'FP',  rate: 30,  unit: 'pallets/hr',   rate2: null, unit2: null,       effectiveDate: PROD_GOAL_EFFECTIVE_DATE },
+  { functionCode: 'BKP', rate: 180, unit: 'cartons/hr',   rate2: 200,  unit2: 'ssps/hr',  effectiveDate: PROD_GOAL_EFFECTIVE_DATE },
+  { functionCode: 'BK',  rate: 60,  unit: 'pallets/hr',   rate2: 300,  unit2: 'cartons/hr', effectiveDate: PROD_GOAL_EFFECTIVE_DATE },
+  { functionCode: 'RP',  rate: 45,  unit: 'puts/hr',      rate2: null, unit2: null,       effectiveDate: PROD_GOAL_EFFECTIVE_DATE },
+  { functionCode: 'HP',  rate: 60,  unit: 'locations/hr', rate2: null, unit2: null,       effectiveDate: PROD_GOAL_EFFECTIVE_DATE },
+  // GPM and CON have no goal per spec — no ProdGoal row for them; IRP treats a missing
+  // row as "no goal" the same way it treats BK/BKP as "no real data."
+]
+
+// Workstation groupings — which physical pick/put station owns which aisles (for later
+// use by ELA/PRQ, and displayed on LII). CR/FD/BK/NR/NF's 01/02 split (first-5/last-5 by
+// pattern digit) wasn't pinned down explicitly; this is a reasonable default, easy to
+// re-seed differently later since it's just local demo data. BS01/OS01/RS01 aisle
+// assignments were given directly.
+const WORKSTATIONS: { id: string; name: string; aisles: number[] }[] = [
+  { id: 'CR01', name: 'Conveyable Reserve 01', aisles: [300, 301, 302, 303, 304] },
+  { id: 'CR02', name: 'Conveyable Reserve 02', aisles: [305, 306, 307, 308, 309] },
+  { id: 'FD01', name: 'Conveyable Food 01', aisles: [310, 311, 312, 313, 314] },
+  { id: 'FD02', name: 'Conveyable Food 02', aisles: [315, 316, 317, 318, 319] },
+  { id: 'BK01', name: 'Breakpack 01', aisles: [320, 321, 322, 323, 324] },
+  { id: 'BK02', name: 'Breakpack 02', aisles: [325, 326, 327, 328, 329] },
+  { id: 'NR01', name: 'Non-Conveyable Reserve 01', aisles: [100, 101, 102, 103, 104] },
+  { id: 'NR02', name: 'Non-Conveyable Reserve 02', aisles: [105, 106, 107, 108, 109] },
+  { id: 'NF01', name: 'Non-Conveyable Food 01', aisles: [110, 111, 112, 113, 114] },
+  { id: 'NF02', name: 'Non-Conveyable Food 02', aisles: [115, 116, 117, 118, 119] },
+  { id: 'BS01', name: 'Security', aisles: [200] },
+  { id: 'OS01', name: 'Overflow Storage (XS)', aisles: [201, 202, 203, 204] },
+  { id: 'RS01', name: 'Restricted', aisles: [730] },
+]
+const WORKSTATION_AISLES = WORKSTATIONS.flatMap((w) =>
+  w.aisles.map((aisle) => ({ aisle, workstationId: w.id })),
+)
 
 const DEPARTMENTS = [
   { id: 'INB', name: 'Inbound' },
@@ -464,31 +502,32 @@ type LocationRow = {
 }
 
 /**
- * Contraction rules for seeded locations, per direct instruction:
- *   1. Every Level 1 location that isn't XS-size and isn't in a BS/RF/RS-storage-code
- *      aisle gets contracted. (XS is hand-put, always Carton Air regardless of level —
- *      same carve-out `assignPullFunction` and the pull-function table elsewhere in this
- *      app already use for that reason. BS/RF/RS only ever occur on aisles 303/701/702/
- *      801/802/803, none of which are part of the standard repeating-pattern range rules
- *      2/3 below apply to.)
- *   2. "Small" aisles — the repeating-pattern 'S' type (8 physical levels), standard
- *      304-338 range only — get their Level 8, odd-bin side contracted.
- *   3. "HS" aisles — the repeating-pattern 'HS' type (10 physical levels), standard
- *      304-338 range only — get Levels 7-10, even-bin side contracted.
- * Rules 2/3 are deliberately scoped to the 304-338 repeating-pattern range, where
- * `getAisleType`'s L/M/S/HS classification is actually meaningful (it isn't defined
- * outside that range) — 801/802/803 also have 10 physical levels but are a different,
- * always-XS special case already excluded by rule 1's XS carve-out.
+ * Contraction rules for the CR/FD/BK/NR/NF pattern-digit aisles only, per direct
+ * instruction:
+ *   1. Every Level 1 location contracts.
+ *   2. Level 8 contracts on **even** bins wherever Small exists — digit 4's uniform
+ *      Small (both sides), or digit 8's even side.
+ *   3. Levels 8-10 contract on **odd** bins wherever Half Small exists — digit 5's
+ *      uniform Half Small (both sides), or digit 9's odd side.
+ * The odd/even assignment in 2/3 is deliberately the *opposite* of which side each type
+ * happens to live on in the split digits (Small lives on digit 8's *even* side; Half
+ * Small on digit 9's *odd* side) — chosen so the same physical side always contracts the
+ * same way everywhere in the warehouse, whether the aisle is pure-type or split. Digit
+ * 6's shorter Small stretch (levels 4-5) and digit 7's shorter Half-Small stretch
+ * (levels 4-5) are never level 8/8-10, so they don't contract beyond rule 1 — the
+ * instruction only ever mentions level 8/8-10.
+ *
+ * BS/RF/RS (aisles 200/730) and the 201-204 XS-overflow aisles are untouched — the
+ * existing app already exempts BS/RF/RS from level-1 contraction, and these new rules
+ * are explicitly scoped to CR/FD/BK/NR/NF only, so that exemption is preserved as-is
+ * rather than extended.
  */
-function isContractedLocation(aisle: number, bin: number, level: number, size: string, storageCode: string): boolean {
-  if (level === 1 && size !== 'XS' && !['BS', 'RF', 'RS'].includes(storageCode)) return true
-
-  if (aisle >= 304 && aisle <= 338) {
-    const type = getAisleType(aisle)
-    if (type === 'S' && level === 8 && bin % 2 === 1) return true
-    if (type === 'HS' && level >= 7 && level <= 10 && bin % 2 === 0) return true
-  }
-
+function isContractedLocation(digit: number, bin: number, level: number): boolean {
+  if (level === 1) return true
+  const even = bin % 2 === 0
+  const odd = !even
+  if (level === 8 && even && (digit === 4 || digit === 8)) return true
+  if (level >= 8 && level <= 10 && odd && (digit === 5 || digit === 9)) return true
   return false
 }
 
@@ -519,23 +558,31 @@ function buildLocationsAndPallets() {
   const locations: LocationRow[] = []
   const pallets: PalletRow[] = []
 
-  /** Generates every (bin, level) Location in one aisle, plus a Pallet for stored ones. */
+  /** Generates every (bin, level) Location in one aisle, plus a Pallet for stored ones.
+   *  `maxLevelOf`/`sizeOf` take `bin` (not just `level`) since the split pattern digits
+   *  8/9 give odd and even bins different builds *and* different max levels within the
+   *  same aisle. `contractionOf` is passed in rather than always calling the new
+   *  CR/FD/BK/NR/NF-only `isContractedLocation` — the folded (200/730) and XS-overflow
+   *  (201-204) aisles have no contraction rule at all, so their call sites just pass
+   *  `() => false`. */
   function addAisle(
     aisle: number,
     bins: number[],
-    maxLevel: number,
+    maxLevelOf: (bin: number) => number,
     zoneOf: (bin: number) => number,
-    sizeOf: (level: number) => string,
+    sizeOf: (bin: number, level: number) => string,
     scOf: (bin: number, level: number) => string,
+    contractionOf: (bin: number, level: number) => boolean,
   ) {
     for (const bin of bins) {
+      const maxLevel = maxLevelOf(bin)
       for (let level = 1; level <= maxLevel; level++) {
         const zone = zoneOf(bin)
-        const size = sizeOf(level)
+        const size = sizeOf(bin, level)
         const storageCode = scOf(bin, level)
         const stored = Math.random() < 0.9
 
-        const contraction = isContractedLocation(aisle, bin, level, size, storageCode)
+        const contraction = contractionOf(bin, level)
         locations.push({ aisle, bin, level, zone, status: stored ? 'STORED' : 'EMPTY', holdTypeCode: null, storageCode, size, contraction })
 
         if (stored) {
@@ -571,61 +618,66 @@ function buildLocationsAndPallets() {
     }
   }
 
-  // Standard aisles 304-338
+  // Standard pattern-digit aisles: CR 300-309, FD 310-319, BK 320-329, NR 100-109,
+  // NF 110-119. `aisle % 10` is the pattern digit (0-9) determining the build.
   const stdBins = Array.from({ length: 128 }, (_, i) => i + 1)
-  for (let aisle = 304; aisle <= 338; aisle++) {
-    const maxLvl = getMaxLevel(aisle)
-    addAisle(aisle, stdBins, maxLvl,
+  const standardAisles = [300, 310, 320, 100, 110].flatMap((start) =>
+    Array.from({ length: 10 }, (_, i) => start + i),
+  )
+  for (const aisle of standardAisles) {
+    const digit = patternDigit(aisle)
+    const storageCode = getBlockStorageCode(aisle)
+    addAisle(aisle, stdBins,
+      (bin) => patternMaxLevel(digit, bin),
       getZone128,
-      (lvl) => getSize(aisle, lvl),
-      (_bin, lvl) => getStorageCode(aisle, 0, lvl),
+      (bin, lvl) => patternSize(digit, lvl, bin),
+      () => storageCode,
+      (bin, lvl) => isContractedLocation(digit, bin, lvl),
     )
   }
 
-  // Aisle 301 — XS, 192 bins, 13 levels
-  const bins192 = Array.from({ length: 192 }, (_, i) => i + 1)
-  addAisle(301, bins192, 13, getZone192,
-    () => 'XS',
-    (_b, lvl) => getStorageCode(301, _b, lvl),
+  // Aisle 730 — RF (odd bins) / RS (even bins), folded shape (Zone 1 = 96 XS bins at 13
+  // levels, Zones 2-4 = 32 "regular" bins each at 5 levels). Replaces where "330" would
+  // have fallen next in the plain 3xx sequence — 330 itself doesn't exist. No
+  // contraction rule applies (existing BS/RF/RS exemption, preserved as-is).
+  const bins1to192 = Array.from({ length: 192 }, (_, i) => i + 1)
+  addAisle(730, bins1to192,
+    foldedMaxLevel,
+    foldedZoneOf,
+    foldedSize,
+    (bin) => (bin % 2 === 1 ? 'RF' : 'RS'),
+    () => false,
   )
 
-  // Aisle 302 — XS, 192 bins, 13 levels, zone+level based SC
-  addAisle(302, bins192, 13, getZone192,
-    () => 'XS',
-    (b, lvl) => getStorageCode(302, b, lvl),
-  )
-
-  // Aisle 303 — bins 33-128, 6 levels, BS
-  const bins33to128 = Array.from({ length: 96 }, (_, i) => i + 33)
-  addAisle(303, bins33to128, 6, getZone128,
-    (lvl) => getSize(303, lvl),
+  // Aisle 200 — BS, same folded shape as 730 but no odd/even storage-code split (BS
+  // both sides). Real and displayed number both 200 — BS isn't Restricted freight, so
+  // it doesn't borrow 730's relabeling convention.
+  addAisle(200, bins1to192,
+    foldedMaxLevel,
+    foldedZoneOf,
+    foldedSize,
     () => 'BS',
+    () => false,
   )
 
-  // Aisle 701 — even bins 34-128, 6 levels, RF
-  const binsEven34to128 = Array.from({ length: 48 }, (_, i) => 34 + i * 2)
-  addAisle(701, binsEven34to128, 6, getZone128,
-    (lvl) => getSize(701, lvl),
-    () => 'RF',
-  )
-
-  // Aisle 702 — odd bins 33-127, 6 levels, RS
-  const binsOdd33to127 = Array.from({ length: 48 }, (_, i) => 33 + i * 2)
-  addAisle(702, binsOdd33to127, 6, getZone128,
-    (lvl) => getSize(702, lvl),
-    () => 'RS',
-  )
-
-  // Aisle 801 — 42 bins, 10 levels, RF, zone 1
-  const bins1to42 = Array.from({ length: 42 }, (_, i) => i + 1)
-  addAisle(801, bins1to42, 10, () => 1, () => 'XS', () => 'RF')
-
-  // Aisle 802 — 42 bins, 10 levels, RS, zone 1
-  addAisle(802, bins1to42, 10, () => 1, () => 'XS', () => 'RS')
-
-  // Aisle 803 — 84 bins, 10 levels, BS, zone 1
-  const bins1to84 = Array.from({ length: 84 }, (_, i) => i + 1)
-  addAisle(803, bins1to84, 10, () => 1, () => 'XS', () => 'BS')
+  // Aisles 201-204 — dedicated XS overflow for CR/FD/BK/NR/NF, 192 bins/13 levels each,
+  // storage code split purely by level (no zone dependency, no odd/even split). 201 and
+  // 202 are identical parallel aisles. No contraction (all XS).
+  const xsOverflowAisles: { aisle: number; scOf: (level: number) => string }[] = [
+    { aisle: 201, scOf: (lvl) => (lvl <= 9 ? 'CR' : 'FD') },
+    { aisle: 202, scOf: (lvl) => (lvl <= 9 ? 'CR' : 'FD') },
+    { aisle: 203, scOf: () => 'BK' },
+    { aisle: 204, scOf: (lvl) => (lvl <= 9 ? 'NR' : 'NF') },
+  ]
+  for (const { aisle, scOf } of xsOverflowAisles) {
+    addAisle(aisle, bins1to192,
+      () => 13,
+      getZone192,
+      () => 'XS',
+      (_bin, lvl) => scOf(lvl),
+      () => false,
+    )
+  }
 
   const staged = applyStaging(locations)
 
@@ -710,9 +762,9 @@ type StagedLocation = { aisle: number; bin: number; level: number; storageCode: 
 /**
  * Demo staging data: converts a portion of each designated aisle's EMPTY locations to
  * STAGED, so the STG/ELZ screens have something realistic to show out of the box. XS
- * aisles (301/302/801/802/803) are excluded — XS is always CA pull regardless of level
- * and isn't part of the staging workflow. One aisle (304) is staged 100% (fully staged);
- * the rest are staged at varied percentages for visual variety across a demo.
+ * aisles (201/202/203/204) are excluded — XS is always CA pull regardless of level and
+ * isn't part of the staging workflow. One aisle (302) is staged 100% (fully staged); the
+ * rest are staged at varied percentages for visual variety across a demo.
  *
  * Fill order matches `findNextStagingLocation` (api/lib/stagingLogic.ts) exactly — highest
  * bin first, then lowest level within a bin — since that's the real order a GPMer would
@@ -724,14 +776,14 @@ type StagedLocation = { aisle: number; bin: number; level: number; storageCode: 
  */
 function applyStaging(locations: LocationRow[]): StagedLocation[] {
   const STAGED_AISLES: Record<number, number> = {
-    304: 1.00, // L / CR — fully staged
-    306: 0.25, // M / CR
-    307: 0.40, // S / CR
-    310: 0.55, // HS / CR
-    313: 0.70, // M / FD
-    318: 0.85, // L / BK
-    303: 0.35, // mixed L/M/S/HS / BS
-    701: 0.60, // mixed / RF
+    302: 1.00, // CR, digit 2 (Large) — fully staged
+    300: 0.25, // CR, digit 0 (Medium)
+    304: 0.40, // CR, digit 4 (Small)
+    305: 0.55, // CR, digit 5 (Half Small)
+    311: 0.70, // FD, digit 1 (Medium)
+    323: 0.85, // BK, digit 3 (Large)
+    200: 0.35, // BS — mixed XS/Medium/Large/Small/Half Small
+    730: 0.60, // RF/RS — mixed
   }
 
   const staged: StagedLocation[] = []
@@ -814,6 +866,7 @@ async function main() {
   // Clear all tables in reverse FK order so the seed is safe to re-run
   console.log('Clearing existing data...')
   await prisma.activityLog.deleteMany()
+  await prisma.functionAssignment.deleteMany()
   await prisma.label.deleteMany()
   await prisma.reservation.deleteMany()
   await prisma.pallet.deleteMany()
@@ -825,6 +878,9 @@ async function main() {
   await prisma.department.deleteMany()
   await prisma.packingZone.deleteMany()
   await prisma.storageCode.deleteMany()
+  await prisma.prodGoal.deleteMany()
+  await prisma.workstationAisle.deleteMany()
+  await prisma.workstation.deleteMany()
 
   const PIN_HASH = await bcrypt.hash('1234', 10)
 
@@ -835,6 +891,9 @@ async function main() {
   await prisma.department.createMany({ data: DEPARTMENTS })
   await prisma.holdType.createMany({ data: HOLD_TYPES })
   await prisma.store.createMany({ data: STORES })
+  await prisma.prodGoal.createMany({ data: PROD_GOALS })
+  await prisma.workstation.createMany({ data: WORKSTATIONS.map(({ id, name }) => ({ id, name })) })
+  await prisma.workstationAisle.createMany({ data: WORKSTATION_AISLES })
 
   // 2. Users
   console.log('Seeding users...')

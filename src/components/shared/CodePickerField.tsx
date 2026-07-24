@@ -1,6 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { useNumpadField } from '../../lib/useNumpadField';
-import { useNumpad } from '../../context/NumpadContext';
+import { forwardRef, useImperativeHandle } from 'react';
+import { useCodePickerField } from '../../lib/useCodePickerField';
 import { INVALID_WASH } from '../../lib/invalidWash';
 
 export interface CodeOption { code: string; desc: string }
@@ -75,51 +74,11 @@ export interface CodePickerFieldHandle {
 export const CodePickerField = forwardRef<CodePickerFieldHandle, CodePickerFieldProps>(function CodePickerField({
   value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false, closeOnAutoSubmit = false, earlyCommit, strict = false, onInvalid, invalid = false,
 }, ref) {
-  const field = useNumpadField(panel, maxLength, undefined, earlyCommit);
-  const { hidePanel } = useNumpad();
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { field.set(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { field, open, setOpen, wrapperRef, focusField, selectOption } = useCodePickerField(value, onChange, options, {
+    panel, maxLength, transform, earlyCommit, disabled, strict, onInvalid, optionsLoading, closeOnAutoSubmit,
+  });
 
   useImperativeHandle(ref, () => ({ focus: focusField }));
-
-  // Tap-outside closes the popup — it's a lightweight anchored dropdown, not a modal, so
-  // it shouldn't need its own explicit dismiss control.
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(e: PointerEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [open]);
-
-  function focusField() {
-    if (disabled) return;
-    setOpen(false);
-    // explicit (a real OK/Enter, or a scan's trailing synthetic one) also closes the
-    // panel — the worker/scan said they're done with this field, no need to wait for
-    // them to tap elsewhere. A maxLength auto-submit (explicit=false) leaves the panel
-    // open, matching the field's prior behavior (issue #80's original "commits via the
-    // synthetic-Enter-on-refocus path" note) for a value that's merely full-length, not
-    // necessarily confirmed.
-    field.focus((v, explicit) => {
-      const trimmed = transform ? transform(v.trim()) : v.trim();
-      if (strict && trimmed && !optionsLoading && !options.some((o) => o.code === trimmed)) {
-        field.clear();
-        onInvalid?.(trimmed);
-      } else {
-        onChange(trimmed);
-      }
-      if (explicit || closeOnAutoSubmit) hidePanel();
-    });
-  }
-
-  function selectOption(code: string) {
-    setOpen(false);
-    onChange(code);
-  }
 
   const boxHeight = size === 'compact' ? 'h-[52px]' : 'h-[64px]';
   const textSize = size === 'compact' ? 'text-[20px]' : 'text-[26px]';

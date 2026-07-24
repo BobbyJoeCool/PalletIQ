@@ -3,6 +3,8 @@ import type { HttpRequest, InvocationContext } from '@azure/functions';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
+import { TERMINAL_LABEL_STATUSES } from '../lib/eligibility.js';
+import { NOT_HELD_FILTER } from '../lib/zoneLogic.js';
 
 /**
  * Returns a random label ID for the PIP screen's demo "Scan Label" buttons.
@@ -114,7 +116,7 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
         aisle,
         status: { in: ['EMPTY', 'STAGED'] },
         contraction: false,
-        OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }],
+        ...NOT_HELD_FILTER,
       },
       select: { storageCode: true, size: true },
       distinct: ['storageCode', 'size'],
@@ -138,7 +140,7 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
     : statusParam === 'no-cartons' ? { currentCartons: { lte: 0 } }
     : statusParam === 'canceled' ? { status: 'CANCELED' }
     : statusParam === 'pull-pending'
-      ? { labels: { some: { status: { notIn: ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'] } } } }
+      ? { labels: { some: { status: { notIn: TERMINAL_LABEL_STATUSES } } } }
     : {
         locationAisle: { not: null },
         ...(aislePairs && { OR: aislePairs.map((p) => ({ storageCode: p.storageCode, size: p.size })) }),

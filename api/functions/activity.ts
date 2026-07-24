@@ -4,6 +4,7 @@ import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
 import { parseLocationBarcode, formatLocationId } from '../lib/locationParser.js';
+import { parseDpci, formatDpci } from '../lib/dpci.js';
 
 /**
  * Filtered activity-log query — the shared read path every reporting screen (IRP, SAR,
@@ -60,11 +61,11 @@ async function getActivity(req: HttpRequest): Promise<unknown> {
   }
 
   if (dpciParam) {
-    const digits = dpciParam.replace(/-/g, '');
-    if (!/^\d{9}$/.test(digits)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-    where.dept = parseInt(digits.slice(0, 3), 10);
-    where.class = parseInt(digits.slice(3, 5), 10);
-    where.item = parseInt(digits.slice(5, 9), 10);
+    const parsed = parseDpci(dpciParam);
+    if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    where.dept = parsed.dept;
+    where.class = parsed.class;
+    where.item = parsed.item;
   }
 
   if (userParam) where.userId = userParam;
@@ -95,7 +96,7 @@ async function getActivity(req: HttpRequest): Promise<unknown> {
       ? formatLocationId(e.locationAisle, e.locationBin, e.locationLevel)
       : null,
     dpci: e.dept != null
-      ? `${String(e.dept).padStart(3, '0')}-${String(e.class).padStart(2, '0')}-${String(e.item).padStart(4, '0')}`
+      ? formatDpci(e.dept, e.class!, e.item!)
       : null,
     details: e.details ? JSON.parse(e.details) as unknown : null,
   }));

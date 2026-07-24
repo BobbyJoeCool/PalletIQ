@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { DataRow } from '../components/shared/DataRow';
 import { DemoPicker } from '../components/shared/DemoPicker';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { ZoneField } from '../components/shared/ZoneField';
@@ -16,7 +19,6 @@ import { type SDPDirectedResult, useSDP } from '../context/SDPContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
-import { INVALID_WASH } from '../lib/invalidWash';
 import { SIZE_NAMES } from '../lib/sizes';
 import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
 import { useNumpadField } from '../lib/useNumpadField';
@@ -42,18 +44,6 @@ interface HistoryEntry {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Single labeled data row in the directed-put data panel. */
-function DataRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
-      <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-        {label}
-      </span>
-      <div className="font-data text-[22px] text-white">{children}</div>
-    </div>
-  );
-}
 
 /**
  * Input display field driven by NumpadContext. Supports a `locked` state (in addition to
@@ -89,30 +79,18 @@ function FieldDisplay({
   size?: 'default' | 'large';
   invalid?: boolean;
 }) {
-  const boxHeight = size === 'large' ? 'h-[88px]' : 'h-[72px]';
-  const textSize  = size === 'large' ? 'text-[40px]' : 'text-[32px]';
-  const barHeight = size === 'large' ? 'h-[46px]' : 'h-[38px]';
   return (
-    <div className="flex flex-col gap-1">
-      <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-        {label}
-      </span>
-      <button
-        type="button"
-        onClick={onFocus}
-        disabled={disabled || locked}
-        className={`flex items-center ${boxHeight} px-5 rounded-[12px] border-2 disabled:opacity-40 transition-colors ${
-          invalid ? INVALID_WASH : active && !disabled && !locked ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
-        }`}
-      >
-        <span className={`font-data ${textSize} font-medium text-white tracking-[0.04em]`}>
-          {value || <span className="text-[#444]">—</span>}
-        </span>
-        {active && !disabled && !locked && (
-          <span className={`inline-block w-[3px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />
-        )}
-      </button>
-    </div>
+    <NumpadFieldBox
+      label={label}
+      value={value}
+      onFocus={onFocus}
+      active={active}
+      disabled={disabled || locked}
+      invalid={invalid}
+      boxClass={size === 'large' ? 'h-[88px] px-5 rounded-[12px]' : 'h-[72px] px-5 rounded-[12px]'}
+      valueClass={size === 'large' ? 'text-[40px] font-medium tracking-[0.04em]' : 'text-[32px] font-medium tracking-[0.04em]'}
+      caretClass={size === 'large' ? 'w-[3px] h-[46px]' : 'w-[3px] h-[38px]'}
+    />
   );
 }
 
@@ -1019,44 +997,38 @@ export function SDPPage() {
       </div>
 
       {/* Right column — history log */}
-      <div className="w-[456px] flex flex-col border-l border-[#1C1C1C] overflow-hidden">
-        <div className="px-5 py-3 border-b border-[#1C1C1C]">
-          <span className="font-ui text-[14px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
-            Put History
-          </span>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {history.length === 0 ? (
-            <p className="px-5 py-4 font-ui text-[15px] text-[#555]">No puts this session</p>
-          ) : (
-            history.map((entry) => {
-              const outcomeColor =
-                entry.outcome === 'PUT'      ? 'text-[#009900]' :
-                entry.outcome === 'MOVE'     ? 'text-[#0066CC]' :
-                entry.outcome === 'ASSIGNED' ? 'text-[#AA8800]' :
-                entry.outcome === 'RELEASED' ? 'text-[#555555]' :
-                                               'text-[#CC4400]'; // BLOCKED
-              const displayLoc = entry.finalLocation ?? entry.directedLocation;
-              return (
-                <div key={entry.reservationId} className="px-5 py-3 border-b border-[#111] flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <LiveId type="pallet" id={String(entry.palletId)} />
-                    <span className={`font-ui text-[12px] font-semibold ${outcomeColor}`}>
-                      {entry.outcome}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <LiveId type="location" id={displayLoc} />
-                    <span className="font-data text-[12px] text-[#555]">
-                      {entry.timestamp.toLocaleTimeString()}
-                    </span>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
+      <SessionHistoryPanel
+        title="Put History"
+        emptyMessage="No puts this session"
+        entries={history}
+        keyFn={(entry) => entry.reservationId}
+        width="w-[456px]"
+        renderRow={(entry) => {
+          const outcomeColor =
+            entry.outcome === 'PUT'      ? 'text-[#009900]' :
+            entry.outcome === 'MOVE'     ? 'text-[#0066CC]' :
+            entry.outcome === 'ASSIGNED' ? 'text-[#AA8800]' :
+            entry.outcome === 'RELEASED' ? 'text-[#555555]' :
+                                           'text-[#CC4400]'; // BLOCKED
+          const displayLoc = entry.finalLocation ?? entry.directedLocation;
+          return (
+            <>
+              <div className="flex items-center justify-between">
+                <LiveId type="pallet" id={String(entry.palletId)} />
+                <span className={`font-ui text-[12px] font-semibold ${outcomeColor}`}>
+                  {entry.outcome}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <LiveId type="location" id={displayLoc} />
+                <span className="font-data text-[12px] text-[#555]">
+                  {entry.timestamp.toLocaleTimeString()}
+                </span>
+              </div>
+            </>
+          );
+        }}
+      />
 
       {confirmBlock && directed && (
         <ConfirmDialog

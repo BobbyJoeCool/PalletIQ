@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DataRow } from '../components/shared/DataRow';
 import { HoldPanel } from '../components/shared/HoldPanel';
+import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveId } from '../components/ui/LiveId';
+import { ModalOverlay } from '../components/ui/ModalOverlay';
+import { DigitGrid, NumericReadout } from '../components/ui/NumericKeypad';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
@@ -10,6 +15,7 @@ import { type MNPScannedPallet, useMNP } from '../context/MNPContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
+import { useDigitInput } from '../lib/useDigitInput';
 import { useNumpadField } from '../lib/useNumpadField';
 import { fmtLocation } from '../lib/fmt';
 import { hasMinRole, type Role } from '@shared/index';
@@ -57,18 +63,6 @@ type GateState =
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Single labeled data row in the pallet detail panel. */
-function DataRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
-      <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-        {label}
-      </span>
-      <div className="font-data text-[22px] text-white">{children}</div>
-    </div>
-  );
-}
-
 /**
  * Input display field driven by NumpadContext.
  *
@@ -92,24 +86,16 @@ function FieldDisplay({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-        {label}
-      </span>
-      <button
-        type="button"
-        onClick={onFocus}
-        disabled={disabled}
-        className={`flex items-center h-[72px] px-5 rounded-[12px] bg-[#0D0D0D] border-2 disabled:opacity-40 transition-colors ${active && !disabled ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-      >
-        <span className="font-data text-[32px] font-medium text-white tracking-[0.04em]">
-          {value || <span className="text-[#444]">—</span>}
-        </span>
-        {active && !disabled && (
-          <span className="inline-block w-[3px] h-[38px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />
-        )}
-      </button>
-    </div>
+    <NumpadFieldBox
+      label={label}
+      value={value}
+      onFocus={onFocus}
+      active={active}
+      disabled={disabled}
+      boxClass="h-[72px] px-5 rounded-[12px]"
+      valueClass="text-[32px] font-medium tracking-[0.04em]"
+      caretClass="w-[3px] h-[38px]"
+    />
   );
 }
 
@@ -153,66 +139,29 @@ function LevelModal({
   onSelect: (level: number) => void;
   initialLevel?: number | null;
 }) {
-  const [input, setInput] = useState(initialLevel != null ? String(initialLevel) : '');
-
-  /** Appends a digit to the level input, capped at 2 digits. */
-  function pressDigit(d: string) {
-    setInput(v => (v.length >= 2 ? v : v + d));
-  }
-
-  /** Removes the last digit from the level input. */
-  function backspace() {
-    setInput(v => v.slice(0, -1));
-  }
+  const { input, pressDigit, backspace, reset } = useDigitInput(initialLevel != null ? String(initialLevel) : '');
 
   /** Validates the entered level is a positive number and reports it via onSelect. */
   function confirm() {
     const level = parseInt(input, 10);
     if (!input || isNaN(level) || level <= 0) return;
     onSelect(level);
-    setInput('');
+    reset();
   }
 
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
-
   return (
-    <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-8 w-[520px] shadow-2xl">
-        <h2 className="font-ui text-[26px] font-semibold text-white text-center mb-6">
-          What level was the pallet placed at?
-        </h2>
+    <ModalOverlay width="w-[520px]">
+      <h2 className="font-ui text-[26px] font-semibold text-white text-center mb-6">
+        What level was the pallet placed at?
+      </h2>
 
-        <div className="flex items-center justify-center h-[64px] mb-5 rounded-[12px] bg-[#0D0D0D] border-2 border-[#3A3A3A]">
-          <span className="font-data text-[36px] font-medium text-white tracking-[0.1em]">
-            {input || <span className="text-[#444]">—</span>}
-          </span>
-        </div>
+      <NumericReadout value={input} />
 
-        <div className="grid grid-cols-3 gap-3">
-          {keys.map(d => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => pressDigit(d)}
-              className="h-[80px] rounded-[14px] bg-[#1F1F1F] border border-[#2C2C2C] text-white font-data text-[34px] font-medium hover:border-[#555] transition-colors active:scale-95"
-            >
-              {d}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={backspace}
-            className="h-[80px] rounded-[14px] bg-[#1F1F1F] border border-[#2C2C2C] text-white font-ui text-[20px] font-medium hover:border-[#555] transition-colors active:scale-95"
-          >
-            ⌫
-          </button>
-          <button
-            type="button"
-            onClick={() => pressDigit('0')}
-            className="h-[80px] rounded-[14px] bg-[#1F1F1F] border border-[#2C2C2C] text-white font-data text-[34px] font-medium hover:border-[#555] transition-colors active:scale-95"
-          >
-            0
-          </button>
+      <DigitGrid
+        onDigit={pressDigit}
+        onBackspace={backspace}
+        keySize="large"
+        lastCell={
           <button
             type="button"
             onClick={confirm}
@@ -221,13 +170,13 @@ function LevelModal({
           >
             Enter
           </button>
-        </div>
+        }
+      />
 
-        <p className="font-ui text-[14px] text-[#555] text-center mt-5">
-          Enter the level where the pallet was placed
-        </p>
-      </div>
-    </div>
+      <p className="font-ui text-[14px] text-[#555] text-center mt-5">
+        Enter the level where the pallet was placed
+      </p>
+    </ModalOverlay>
   );
 }
 
@@ -258,93 +207,37 @@ function OccupiedLocationDialog({
     : `Pallet ${occupantPalletId ?? '—'} (DPCI ${occupantDpci ?? '—'}) is already stored here. Proceed anyway, flag it as empty, or cancel?`;
 
   return (
-    <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-8 w-[520px] shadow-2xl">
-        <h2 className="font-ui text-[24px] font-semibold text-white text-center mb-3">
-          Location Already Occupied
-        </h2>
-        <p className="font-ui text-[17px] text-[#9A9A9A] text-center mb-7">
-          {message}
-        </p>
-        <div className="flex flex-col gap-3">
-          <button
-            type="button"
-            onClick={onProceed}
-            className="h-[60px] rounded-[12px] font-ui text-[18px] font-semibold text-white bg-[#003366] hover:bg-[#004488] transition-colors"
-          >
-            Proceed Anyway
-          </button>
-          <button
-            type="button"
-            onClick={onHoldAndCancel}
-            className="h-[60px] rounded-[12px] font-ui text-[18px] font-semibold text-white bg-[#554400] hover:bg-[#665500] transition-colors"
-          >
-            Place Hold Both (Empty Location)
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="h-[52px] rounded-[12px] border border-[#3A3A3A] font-ui text-[17px] font-medium text-white hover:bg-[#1A1A1A] transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
+    <ModalOverlay width="w-[520px]">
+      <h2 className="font-ui text-[24px] font-semibold text-white text-center mb-3">
+        Location Already Occupied
+      </h2>
+      <p className="font-ui text-[17px] text-[#9A9A9A] text-center mb-7">
+        {message}
+      </p>
+      <div className="flex flex-col gap-3">
+        <button
+          type="button"
+          onClick={onProceed}
+          className="h-[60px] rounded-[12px] font-ui text-[18px] font-semibold text-white bg-[#003366] hover:bg-[#004488] transition-colors"
+        >
+          Proceed Anyway
+        </button>
+        <button
+          type="button"
+          onClick={onHoldAndCancel}
+          className="h-[60px] rounded-[12px] font-ui text-[18px] font-semibold text-white bg-[#554400] hover:bg-[#665500] transition-colors"
+        >
+          Place Hold Both (Empty Location)
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-[52px] rounded-[12px] border border-[#3A3A3A] font-ui text-[17px] font-medium text-white hover:bg-[#1A1A1A] transition-colors"
+        >
+          Cancel
+        </button>
       </div>
-    </div>
-  );
-}
-
-/**
- * Blocking popup for a DPCI-matching STORED occupant — offers to combine the two
- * pallets' quantities, or cancel back to destination entry. Combine is IM+ only; a
- * Worker sees only Cancel plus a note that an IM+ is needed, per product decision (no
- * "proceed without combining" option when the DPCI already matches).
- */
-function CombineDialog({
-  occupantPalletId,
-  canCombine,
-  onCombine,
-  onCancel,
-}: {
-  occupantPalletId: number | null;
-  canCombine: boolean;
-  onCombine: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-8 w-[480px] shadow-2xl">
-        <h2 className="font-ui text-[24px] font-semibold text-white text-center mb-3">
-          Same Item Already Stored Here
-        </h2>
-        <p className="font-ui text-[17px] text-[#9A9A9A] text-center mb-7">
-          Pallet {occupantPalletId ?? '—'} is already stored here with the same DPCI. Combine this pallet's quantity into it?
-        </p>
-        {!canCombine && (
-          <p className="font-ui text-[14px] text-[#AA6600] text-center mb-5">
-            Combining requires an Inventory Manager or above.
-          </p>
-        )}
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 h-[64px] rounded-[12px] border border-[#3A3A3A] font-ui text-[19px] font-medium text-white hover:bg-[#1A1A1A] active:bg-[#262626] transition-colors"
-          >
-            Cancel
-          </button>
-          {canCombine && (
-            <button
-              type="button"
-              onClick={onCombine}
-              className="flex-1 h-[64px] rounded-[12px] font-ui text-[19px] font-semibold text-white bg-[#003366] hover:bg-[#004488] transition-colors"
-            >
-              Combine Pallets
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -957,64 +850,58 @@ export function MNPPage() {
       </div>
 
       {/* Right column — history log */}
-      <div className="w-[456px] flex flex-col border-l border-[#1C1C1C] overflow-hidden">
-        <div className="px-5 py-3 border-b border-[#1C1C1C]">
-          <span className="font-ui text-[14px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
-            Put History
-          </span>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {history.length === 0 ? (
-            <p className="px-5 py-4 font-ui text-[15px] text-[#555]">No puts this session</p>
-          ) : (
-            history.map((entry) => {
-              const outcomeColor =
-                entry.outcome === 'SCANNED'      ? 'text-[#AA8800]' :
-                entry.outcome === 'MOVE'         ? 'text-[#0066CC]' :
-                entry.outcome === 'CONSOLIDATED' ? 'text-[#9933CC]' :
-                entry.outcome === 'CANCELED'     ? 'text-[#666666]' :
-                                                    'text-[#009900]';
-              return (
-                <div key={entry.key} className="px-5 py-3 border-b border-[#111] flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <LiveId type="pallet" id={String(entry.palletId)} />
-                    <div className="flex items-center gap-2">
-                      {entry.occupied && (
-                        <span className="font-ui text-[11px] text-[#AA6600] font-semibold">WAS OCCUPIED</span>
-                      )}
-                      {entry.staged && (
-                        <span className="font-ui text-[11px] text-[#AA6600] font-semibold">WAS STAGED</span>
-                      )}
-                      <span className={`font-ui text-[12px] font-semibold ${outcomeColor}`}>
-                        {entry.outcome}
-                      </span>
-                    </div>
-                  </div>
-                  {entry.location ? (
-                    <div className="flex items-center justify-between">
-                      <span className="font-data text-[17px] text-[#CFCFCF]">
-                        <LiveId type="location" id={entry.location} /> Lvl {entry.level}
-                      </span>
-                      <span className="font-data text-[12px] text-[#555]">
-                        {entry.timestamp.toLocaleTimeString()}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between">
-                      <span className="font-ui text-[13px] text-[#555] italic">
-                        {entry.outcome === 'CANCELED' ? 'canceled — no destination entered' : 'in progress…'}
-                      </span>
-                      <span className="font-data text-[12px] text-[#555]">
-                        {entry.timestamp.toLocaleTimeString()}
-                      </span>
-                    </div>
+      <SessionHistoryPanel
+        title="Put History"
+        emptyMessage="No puts this session"
+        entries={history}
+        keyFn={(entry) => entry.key}
+        width="w-[456px]"
+        renderRow={(entry) => {
+          const outcomeColor =
+            entry.outcome === 'SCANNED'      ? 'text-[#AA8800]' :
+            entry.outcome === 'MOVE'         ? 'text-[#0066CC]' :
+            entry.outcome === 'CONSOLIDATED' ? 'text-[#9933CC]' :
+            entry.outcome === 'CANCELED'     ? 'text-[#666666]' :
+                                                'text-[#009900]';
+          return (
+            <>
+              <div className="flex items-center justify-between">
+                <LiveId type="pallet" id={String(entry.palletId)} />
+                <div className="flex items-center gap-2">
+                  {entry.occupied && (
+                    <span className="font-ui text-[11px] text-[#AA6600] font-semibold">WAS OCCUPIED</span>
                   )}
+                  {entry.staged && (
+                    <span className="font-ui text-[11px] text-[#AA6600] font-semibold">WAS STAGED</span>
+                  )}
+                  <span className={`font-ui text-[12px] font-semibold ${outcomeColor}`}>
+                    {entry.outcome}
+                  </span>
                 </div>
-              );
-            })
-          )}
-        </div>
-      </div>
+              </div>
+              {entry.location ? (
+                <div className="flex items-center justify-between">
+                  <span className="font-data text-[17px] text-[#CFCFCF]">
+                    <LiveId type="location" id={entry.location} /> Lvl {entry.level}
+                  </span>
+                  <span className="font-data text-[12px] text-[#555]">
+                    {entry.timestamp.toLocaleTimeString()}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <span className="font-ui text-[13px] text-[#555] italic">
+                    {entry.outcome === 'CANCELED' ? 'canceled — no destination entered' : 'in progress…'}
+                  </span>
+                  <span className="font-data text-[12px] text-[#555]">
+                    {entry.timestamp.toLocaleTimeString()}
+                  </span>
+                </div>
+              )}
+            </>
+          );
+        }}
+      />
 
       {/* Level selection modal — State 3 (hidden once a confirm gate is pending) */}
       {screenState === 'level_modal' && !pendingGate && (
@@ -1044,20 +931,21 @@ export function MNPPage() {
       )}
 
       {pendingGate?.kind === 'combine' && (
-        <CombineDialog
-          occupantPalletId={pendingGate.occupantPalletId}
-          canCombine={hasMinRole(role, 'IM')}
-          onCombine={handleCombineConfirm}
+        <ConfirmDialog
+          title="Same Item Already Stored Here"
+          message={`Pallet ${pendingGate.occupantPalletId ?? '—'} is already stored here with the same DPCI. Combine this pallet's quantity into it?`}
+          confirmLabel="Combine Pallets"
+          showConfirm={hasMinRole(role, 'IM')}
+          note={!hasMinRole(role, 'IM') ? 'Combining requires an Inventory Manager or above.' : undefined}
+          onConfirm={handleCombineConfirm}
           onCancel={cancelToDestinationEntry}
         />
       )}
 
       {holdOpen && scannedPallet?.currentLocation && (
-        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 p-8">
-          <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-6 max-h-full overflow-y-auto">
-            <HoldPanel locationId={scannedPallet.currentLocation} onDone={() => setHoldOpen(false)} showClose />
-          </div>
-        </div>
+        <ModalOverlay backdropClassName="p-8" padding="p-6" cardClassName="max-h-full overflow-y-auto" shadow={false}>
+          <HoldPanel locationId={scannedPallet.currentLocation} onDone={() => setHoldOpen(false)} showClose />
+        </ModalOverlay>
       )}
     </div>
   );

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
 import { DemoPicker } from '../components/shared/DemoPicker';
 import { type DpciValue } from '../components/shared/DpciField';
+import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { LiveId } from '../components/ui/LiveId';
@@ -110,16 +111,17 @@ function useEditField(
  *  every other washed field. */
 function EditBox({ value, active, onFocus, width = 'w-[140px]', invalid = false }: { value: string; active: boolean; onFocus: () => void; width?: string; invalid?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onFocus}
-      className={`flex items-center justify-center h-[44px] ${width} px-3 rounded-[8px] border-2 transition-colors ${
-        invalid ? INVALID_WASH : active ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
-      }`}
-    >
-      <span className="font-data text-[20px] text-white">{value || <span className="text-[#444]">—</span>}</span>
-      {active && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-    </button>
+    <NumpadFieldBox
+      value={value}
+      onFocus={onFocus}
+      active={active}
+      invalid={invalid}
+      width={width}
+      centered
+      boxClass="h-[44px] px-3 rounded-[8px]"
+      valueClass="text-[20px]"
+      caretClass="w-[2px] h-[20px]"
+    />
   );
 }
 
@@ -235,8 +237,11 @@ export function PIIPage() {
     return table[month - 1] ?? 31;
   }
 
+  /** Registers the Month field's numpad handler, wired to handleMonthConfirm on confirm. */
   function focusMonthField() { monthField.focus(handleMonthConfirm); }
+  /** Registers the Day field's numpad handler, wired to handleDayConfirm on confirm. */
   function focusDayField() { dayField.focus(handleDayConfirm); }
+  /** Registers the Year field's numpad handler, wired to handleYearConfirm on confirm. */
   function focusYearField() { yearField.focus(handleYearConfirm); }
 
   /** Month field submit: validates the 1-12 range and advances to Day, same as PAR's chain. */

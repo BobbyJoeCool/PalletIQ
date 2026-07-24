@@ -9,6 +9,19 @@ export function sideOf(bin: number): 'odd' | 'even' {
   return bin % 2 === 0 ? 'even' : 'odd';
 }
 
+/**
+ * A location "not held" in the sense that blocks a put/stage — excludes HOLD_IN/
+ * HOLD_BOTH/HOLD_PERM but allows HOLD_OUT (outbound-only holds don't block putting
+ * something new there) and no hold at all. Explicit OR rather than
+ * `holdCategory: { notIn: [...] }` — `NOT IN` over a nullable column excludes NULL rows
+ * under standard SQL three-valued logic, which would wrongly exclude every location with
+ * no hold at all (the vast majority). Canonical definition; spread into a `where` clause
+ * alongside other conditions.
+ */
+export const NOT_HELD_FILTER: { OR: ({ holdCategory: null } | { holdCategory: string })[] } = {
+  OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }],
+};
+
 export interface EffectiveCriteria {
   size?: string;
   storageCode?: string;
@@ -94,13 +107,7 @@ export async function findNextLocation(
       where: {
         aisle,
         status,
-        // Explicit OR rather than `holdCategory: { notIn: [...] }` — `NOT IN` over a
-        // nullable column excludes NULL rows under standard SQL three-valued logic, which
-        // would wrongly exclude every location with no hold at all (the vast majority).
-        OR: [
-          { holdCategory: null },
-          { holdCategory: 'HOLD_OUT' },
-        ],
+        ...NOT_HELD_FILTER,
         contraction: false,
         ...(opts.size        && { size:        opts.size }),
         ...(opts.storageCode && { storageCode: opts.storageCode }),

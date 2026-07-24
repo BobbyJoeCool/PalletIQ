@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { DemoPicker } from '../components/shared/DemoPicker';
 import { HOLD_LABELS, type HoldCategory } from '../components/shared/HoldPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { SizeField } from '../components/shared/SizeField';
 import type { CodePickerFieldHandle } from '../components/shared/CodePickerField';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
@@ -60,22 +62,18 @@ function FieldBox({
   label, value, onFocus, active = false, invalid = false, width = 'w-[144px]', disabled = false,
 }: { label: string; value: string; onFocus: () => void; active?: boolean; invalid?: boolean; width?: string; disabled?: boolean }) {
   return (
-    <div className={`flex flex-col gap-1 ${width}`}>
-      {label && <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">{label}</span>}
-      <button
-        type="button"
-        onClick={onFocus}
-        disabled={disabled}
-        className={`flex items-center ${ENTRY_BOX_HEIGHT} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${
-          invalid ? INVALID_WASH : active ? 'border-[#CC0000] bg-[#0D0D0D]' : NORMAL_BG
-        }`}
-      >
-        <span className="font-data text-[20px] font-medium text-white">
-          {value || <span className="text-[#444]">—</span>}
-        </span>
-        {active && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-      </button>
-    </div>
+    <NumpadFieldBox
+      label={label}
+      value={value}
+      onFocus={onFocus}
+      active={active}
+      disabled={disabled}
+      invalid={invalid}
+      width={width}
+      boxClass={`${ENTRY_BOX_HEIGHT} px-4 rounded-[10px]`}
+      valueClass="text-[20px] font-medium"
+      caretClass="w-[2px] h-[20px]"
+    />
   );
 }
 
@@ -286,8 +284,11 @@ export function PARPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  /** Registers the Dept field's numpad handler, wired to handleDeptConfirm on confirm. */
   function focusDeptField() { deptField.focus(handleDeptConfirm); }
+  /** Registers the Class field's numpad handler, wired to handleClassConfirm on confirm. */
   function focusClassField() { classField.focus(handleClassConfirm); }
+  /** Registers the Item field's numpad handler, wired to handleItemConfirm on confirm. */
   function focusItemField() { itemField.focus(handleItemConfirm); }
 
   /** Dept field submit: advances to Class once exactly 3 digits are entered. */
@@ -398,8 +399,11 @@ export function PARPage() {
     setExpirationInvalid(parsed < oneMonthOut);
   }
 
+  /** Registers the Month field's numpad handler, wired to handleMonthConfirm on confirm. */
   function focusMonthField() { monthField.focus(handleMonthConfirm); }
+  /** Registers the Day field's numpad handler, wired to handleDayConfirm on confirm. */
   function focusDayField() { dayField.focus(handleDayConfirm); }
+  /** Registers the Year field's numpad handler, wired to handleYearConfirm on confirm. */
   function focusYearField() { yearField.focus(handleYearConfirm); }
 
   /** Month field submit: validates the 1-12 range (direct instruction — "I can put 24 in
@@ -538,7 +542,9 @@ export function PARPage() {
     if (mode === 'single') setTimeout(() => focusCartonsRef.current(), 50);
   }
 
+  /** Registers the VCP field's numpad handler, wired to handleVcpConfirm on confirm. */
   function focusVcp() { vcpField.focus(handleVcpConfirm); }
+  /** Registers the SSP field's numpad handler, wired to handleSspConfirm on confirm. */
   function focusSsp() { sspField.focus(handleSspConfirm); }
   // Keeps focusVcpRef current for loadByDpci/loadByUpc (declared above) to call — see
   // that ref's own declaration comment.
@@ -593,7 +599,9 @@ export function PARPage() {
     }
   }
 
+  /** Registers the Cartons field's numpad handler, wired to handleCartonsConfirm on confirm. */
   function focusCartons() { cartonsField.focus(handleCartonsConfirm); }
+  /** Registers the SSPs field's numpad handler, wired to handleSspsConfirm on confirm. */
   function focusSsps() { sspsField.focus(handleSspsConfirm); }
   // Keeps focusCartonsRef current for handleSspConfirm (declared above, in the VCP/SSP
   // section) to call — see that ref's own declaration comment.
@@ -1366,34 +1374,28 @@ export function PARPage() {
           (rendered by AppShell, not this page) overlays the bottom-right corner of the
           content area when open — same as it already does over PIP/MNP's own right-column
           logs. */}
-      <div className="w-[420px] flex flex-col border-l border-[#1C1C1C] overflow-hidden">
-        <div className="px-5 py-3 border-b border-[#1C1C1C] shrink-0">
-          <span className="font-ui text-[14px] font-semibold text-[#9A9A9A] uppercase tracking-wider">
-            Reinstate Log
-          </span>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {history.length === 0 ? (
-            <p className="px-5 py-4 font-ui text-[15px] text-[#555]">No reinstates this session</p>
-          ) : (
-            history.map((entry) => (
-              <div key={entry.key} className="px-5 py-3 border-b border-[#111] flex flex-col gap-1">
-                <div className="flex items-center justify-between">
-                  <LiveId type="pallet" id={String(entry.palletId)} className="!text-[22px] !font-bold" />
-                  <span className="font-data text-[12px] text-[#555]">
-                    {entry.timestamp.toLocaleTimeString()}
-                  </span>
-                </div>
-                <span className="font-data text-[15px] text-[#CFCFCF]">
-                  <LiveId type="dpci" id={entry.dpci} /> · {entry.cartons} cartons{entry.locationId
-                    ? <> · <LiveId type="location" id={entry.locationId} /></>
-                    : ' · PUT_PENDING'}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      <SessionHistoryPanel
+        title="Reinstate Log"
+        emptyMessage="No reinstates this session"
+        entries={history}
+        keyFn={(entry) => entry.key}
+        width="w-[420px]"
+        renderRow={(entry) => (
+          <>
+            <div className="flex items-center justify-between">
+              <LiveId type="pallet" id={String(entry.palletId)} className="!text-[22px] !font-bold" />
+              <span className="font-data text-[12px] text-[#555]">
+                {entry.timestamp.toLocaleTimeString()}
+              </span>
+            </div>
+            <span className="font-data text-[15px] text-[#CFCFCF]">
+              <LiveId type="dpci" id={entry.dpci} /> · {entry.cartons} cartons{entry.locationId
+                ? <> · <LiveId type="location" id={entry.locationId} /></>
+                : ' · PUT_PENDING'}
+            </span>
+          </>
+        )}
+      />
 
       {locationWarningPending && (
         <ConfirmDialog

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { hasMinRole, type Role } from '@shared/index';
 import { HOLD_LABELS, HoldPanel, type HoldCategory } from '../components/shared/HoldPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { LiveId } from '../components/ui/LiveId';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
@@ -29,17 +30,17 @@ function RangeNumBox({ label, field, onFocus }: {
   onFocus: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-1 w-[120px]">
-      <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">{label}</span>
-      <button
-        type="button"
-        onClick={onFocus}
-        className={`flex items-center h-[56px] px-4 rounded-[10px] bg-[#0D0D0D] border-2 transition-colors ${field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-      >
-        <span className="font-data text-[22px] font-medium text-white">{field.value || <span className="text-[#444]">—</span>}</span>
-        {field.isActive && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-      </button>
-    </div>
+    <NumpadFieldBox
+      label={label}
+      value={field.value}
+      onFocus={onFocus}
+      active={field.isActive}
+      width="w-[120px]"
+      labelClass="text-[13px]"
+      boxClass="h-[56px] px-4 rounded-[10px]"
+      valueClass="text-[22px] font-medium"
+      caretClass="w-[2px] h-[20px]"
+    />
   );
 }
 
@@ -123,12 +124,19 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
 
   const placeableTypes = (Object.keys(HOLD_LABELS) as HoldCategory[]).filter((t) => hasMinRole(role, HOLD_LABELS[t].placeRole));
 
+  /** Registers the Aisle field's numpad handler; on confirm (3 digits), advances to Start Bin. */
   function focusAisle() { aisleField.focus((v) => { if (v.trim().length === 3) startBinField.focus(handleStartBin); }); }
+  /** Registers the Start Bin field's numpad handler, wired to handleStartBin on confirm. */
   function focusStartBin() { startBinField.focus(handleStartBin); }
+  /** Registers the End Bin field's numpad handler, wired to handleEndBin on confirm. */
   function focusEndBin() { endBinField.focus(handleEndBin); }
+  /** Registers the Start Level field's numpad handler — no auto-advance chain, since the Level range is optional and either box may be filled independently. */
   function focusStartLevel() { startLevelField.focus(() => {}); }
+  /** Registers the End Level field's numpad handler — no auto-advance chain, same reasoning as focusStartLevel. */
   function focusEndLevel() { endLevelField.focus(() => {}); }
+  /** Start Bin field submit: advances to End Bin once exactly 3 digits are entered. */
   function handleStartBin(v: string) { if (v.trim().length === 3) { setTimeout(() => focusEndBin(), 50); } }
+  /** End Bin field submit: dismisses the numpad panel once exactly 3 digits are entered — the last field in the required chain. */
   function handleEndBin(v: string) { if (v.trim().length === 3) hidePanel(); }
 
   const aisle = aisleField.value ? parseInt(aisleField.value, 10) : NaN;
@@ -372,6 +380,7 @@ export function WLHPage() {
   // owned by RangeHoldPanel or HoldPanel individually.
   const [logEntries, setLogEntries] = useState<HoldLogEntry[]>([]);
   const logIdRef = useRef(0);
+  /** Prepends a new entry (current time + summary text) to the session Hold Log — shared by both Single and Range mode via HoldPanel's onAction / RangeHoldPanel's onLog. */
   const addLogEntry = useCallback((summary: string) => {
     logIdRef.current += 1;
     setLogEntries((prev) => [

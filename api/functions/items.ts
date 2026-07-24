@@ -3,6 +3,7 @@ import type { HttpRequest } from '@azure/functions';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
+import { parseDpci, formatDpci } from '../lib/dpci.js';
 
 interface ItemRecord {
   dept: number; class: number; item: number;
@@ -18,7 +19,7 @@ function serializeItem(item: ItemRecord) {
     dept: item.dept,
     class: item.class,
     item: item.item,
-    dpci: `${String(item.dept).padStart(3, '0')}-${String(item.class).padStart(2, '0')}-${String(item.item).padStart(4, '0')}`,
+    dpci: formatDpci(item.dept, item.class, item.item),
     upc: item.upc,
     name: item.name,
     desc: item.desc,
@@ -46,12 +47,10 @@ function serializeItem(item: ItemRecord) {
 async function getItemByDpci(req: HttpRequest): Promise<unknown> {
   await requireAuth(req);
 
-  const digits = (req.params.dpci ?? '').replace(/-/g, '');
-  if (!/^\d{9}$/.test(digits)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  const parsed = parseDpci(req.params.dpci ?? '');
+  if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const dept  = parseInt(digits.slice(0, 3), 10);
-  const cls   = parseInt(digits.slice(3, 5), 10);
-  const itm   = parseInt(digits.slice(5, 9), 10);
+  const { dept, class: cls, item: itm } = parsed;
 
   const item = await prisma.item.findUnique({ where: { DPCI: { dept, class: cls, item: itm } } });
   if (!item) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
@@ -130,12 +129,10 @@ async function buildItemLocations(item: { dept: number; class: number; item: num
 async function getItemLocations(req: HttpRequest): Promise<unknown> {
   await requireAuth(req);
 
-  const digits = (req.params.dpci ?? '').replace(/-/g, '');
-  if (!/^\d{9}$/.test(digits)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  const parsed = parseDpci(req.params.dpci ?? '');
+  if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const dept = parseInt(digits.slice(0, 3), 10);
-  const cls  = parseInt(digits.slice(3, 5), 10);
-  const itm  = parseInt(digits.slice(5, 9), 10);
+  const { dept, class: cls, item: itm } = parsed;
 
   const item = await prisma.item.findUnique({ where: { DPCI: { dept, class: cls, item: itm } }, select: { dept: true, class: true, item: true, descShort: true } });
   if (!item) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
@@ -181,7 +178,7 @@ async function sampleItem(req: HttpRequest): Promise<unknown> {
   const item = await prisma.item.findFirst({ skip, select: { dept: true, class: true, item: true, upc: true } });
 
   return {
-    dpci: `${String(item!.dept).padStart(3, '0')}-${String(item!.class).padStart(2, '0')}-${String(item!.item).padStart(4, '0')}`,
+    dpci: formatDpci(item!.dept, item!.class, item!.item),
     upc: item!.upc,
   };
 }

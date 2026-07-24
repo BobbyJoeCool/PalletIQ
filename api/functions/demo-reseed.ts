@@ -2,6 +2,9 @@ import { app } from '@azure/functions';
 import type { HttpRequest, InvocationContext } from '@azure/functions';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
+import { NOT_HELD_FILTER } from '../lib/zoneLogic.js';
+import { writeLog } from '../lib/activityLog.js';
+import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genLid } from '../prisma/demoUtils.js';
 
 /** The interactive-transaction client type, derived from `prisma.$transaction` itself
  *  rather than importing a `Prisma` namespace type — lets the worker-shift simulator
@@ -144,20 +147,19 @@ async function simulateCartonAirPulls(tx: TxClient, resumeFrom: Date, w: ShiftWi
       },
     });
 
-    await tx.activityLog.create({
-      data: {
-        userId: 'z002p21', actionType: 'PULL', timestamp: t,
-        palletId: label.pid,
-        locationAisle: pallet.locationAisle, locationBin: pallet.locationBin, locationLevel: pallet.locationLevel,
-        dept: label.dept, class: label.class, item: label.item,
-        details: JSON.stringify({
-          labelId: label.lid, pullFunction: 'CA',
-          pulled: { pallets: 0, cartons: label.quantity, ssps: label.sspQuantity },
-          remaining: { pallets: 0, cartons: newCartons, ssps: newSSPs },
-          verifiedVia: 'PID', wasScanned: true, workerLog: true,
-        }),
+    await writeLog({
+      userId: 'z002p21', actionType: 'PULL', timestamp: t,
+      palletId: label.pid,
+      locationAisle: pallet.locationAisle ?? undefined, locationBin: pallet.locationBin ?? undefined, locationLevel: pallet.locationLevel ?? undefined,
+      dept: label.dept, class: label.class, item: label.item,
+      functionCode: 'CA',
+      details: {
+        labelId: label.lid, pullFunction: 'CA',
+        pulled: { pallets: 0, cartons: label.quantity, ssps: label.sspQuantity },
+        remaining: { pallets: 0, cartons: newCartons, ssps: newSSPs },
+        verifiedVia: 'PID', wasScanned: true, workerLog: true,
       },
-    });
+    }, tx);
 
     pulled++;
     const minutesForThisPull = (label.quantity / RATE_CARTONS_PER_HOUR) * 60;
@@ -199,7 +201,7 @@ async function simulateRackPuts(tx: TxClient, resumeFrom: Date, w: ShiftWindow):
       ? await tx.location.findFirst({
           where: {
             status: 'EMPTY', contraction: false, storageCode,
-            OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }],
+            ...NOT_HELD_FILTER,
           },
           select: { aisle: true, bin: true, level: true, size: true, zone: true },
         })
@@ -228,17 +230,16 @@ async function simulateRackPuts(tx: TxClient, resumeFrom: Date, w: ShiftWindow):
       data: { status: 'STORED' },
     });
 
-    await tx.activityLog.create({
-      data: {
-        userId: 'z002p22', actionType: 'PUT', timestamp: t,
-        palletId: pallet.pid, locationAisle: dest.aisle, locationBin: dest.bin, locationLevel: dest.level,
-        dept: pallet.dept, class: pallet.class, item: pallet.item,
-        details: JSON.stringify({
-          cartons: pallet.currentCartons, pallets: pallet.currentPallets, ssps: pallet.currentSSPs,
-          method: 'SDP', workerLog: true,
-        }),
+    await writeLog({
+      userId: 'z002p22', actionType: 'PUT', timestamp: t,
+      palletId: pallet.pid, locationAisle: dest.aisle, locationBin: dest.bin, locationLevel: dest.level,
+      dept: pallet.dept, class: pallet.class, item: pallet.item,
+      functionCode: 'RP',
+      details: {
+        cartons: pallet.currentCartons, pallets: pallet.currentPallets, ssps: pallet.currentSSPs,
+        method: 'SDP', workerLog: true,
       },
-    });
+    }, tx);
 
     putCount++;
     const jitter = 0.7 + Math.random() * 0.6; // ±30%
@@ -279,7 +280,7 @@ async function simulateGpmStaging(tx: TxClient, resumeFrom: Date, w: ShiftWindow
   const pool = await tx.location.findMany({
     where: {
       status: 'EMPTY', contraction: false, size: { not: 'XS' },
-      OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }],
+      ...NOT_HELD_FILTER,
     },
     select: { aisle: true, bin: true, level: true, size: true, storageCode: true },
   });
@@ -322,13 +323,12 @@ async function simulateGpmStaging(tx: TxClient, resumeFrom: Date, w: ShiftWindow
         where: { LocationID: { aisle: loc.aisle, bin: loc.bin, level: loc.level } },
         data: { status: 'STAGED' },
       });
-      await tx.activityLog.create({
-        data: {
-          userId: 'z002p23', actionType: 'STAGE', timestamp: t,
-          locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
-          details: JSON.stringify({ storageCode: loc.storageCode, size: loc.size, seeded: true, workerLog: true }),
-        },
-      });
+      await writeLog({
+        userId: 'z002p23', actionType: 'STAGE', timestamp: t,
+        locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
+        functionCode: 'GPM',
+        details: { storageCode: loc.storageCode, size: loc.size, seeded: true, workerLog: true },
+      }, tx);
       locationsStaged++;
       stagedAisles.add(aisle);
       const list = byAisle.get(aisle)!;
@@ -377,13 +377,12 @@ async function simulateGpmStaging(tx: TxClient, resumeFrom: Date, w: ShiftWindow
           where: { LocationID: { aisle: loc.aisle, bin: loc.bin, level: loc.level } },
           data: { status: 'STAGED' },
         });
-        await tx.activityLog.create({
-          data: {
-            userId: 'z002p23', actionType: 'STAGE', timestamp: now,
-            locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
-            details: JSON.stringify({ storageCode: loc.storageCode, size: loc.size, seeded: true, workerLog: true }),
-          },
-        });
+        await writeLog({
+          userId: 'z002p23', actionType: 'STAGE', timestamp: now,
+          locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
+          functionCode: 'GPM',
+          details: { storageCode: loc.storageCode, size: loc.size, seeded: true, workerLog: true },
+        }, tx);
         locationsStaged++;
         stagedAisles.add(aisle);
         const list = byAisle.get(aisle)!;
@@ -411,7 +410,7 @@ async function seedOlderStagedLocations(tx: TxClient, now: Date): Promise<number
   const eligible = await tx.location.findMany({
     where: {
       status: 'EMPTY', contraction: false, size: { not: 'XS' },
-      OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }],
+      ...NOT_HELD_FILTER,
     },
     select: { aisle: true, bin: true, level: true, storageCode: true, size: true },
     take: 500,
@@ -426,13 +425,11 @@ async function seedOlderStagedLocations(tx: TxClient, now: Date): Promise<number
       where: { LocationID: { aisle: loc.aisle, bin: loc.bin, level: loc.level } },
       data: { status: 'STAGED' },
     });
-    await tx.activityLog.create({
-      data: {
-        userId: randomFrom(attributionUsers), actionType: 'STAGE', timestamp,
-        locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
-        details: JSON.stringify({ storageCode: loc.storageCode, size: loc.size, seeded: true }),
-      },
-    });
+    await writeLog({
+      userId: randomFrom(attributionUsers), actionType: 'STAGE', timestamp,
+      locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
+      details: { storageCode: loc.storageCode, size: loc.size, seeded: true },
+    }, tx);
   }
 
   return chosen.length;
@@ -458,13 +455,11 @@ async function simulateImWork(tx: TxClient, resumeFrom: Date, w: ShiftWindow, is
       const category = randomFrom(holdCategories);
       const placedAt = new Date(w.shiftStart.getTime() - randomInt(1, 14) * 3_600_000);
       await tx.location.update({ where: { LocationID: loc }, data: { holdCategory: category } });
-      await tx.activityLog.create({
-        data: {
-          userId: randomFrom(otherUsers), actionType: 'HOLD_PLACE', timestamp: placedAt,
-          locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
-          details: JSON.stringify({ holdCategory: category, seeded: true }),
-        },
-      });
+      await writeLog({
+        userId: randomFrom(otherUsers), actionType: 'HOLD_PLACE', timestamp: placedAt,
+        locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
+        details: { holdCategory: category, seeded: true },
+      }, tx);
     }
   }
 
@@ -484,13 +479,11 @@ async function simulateImWork(tx: TxClient, resumeFrom: Date, w: ShiftWindow, is
           where: { LocationID: { aisle: held.aisle, bin: held.bin, level: held.level } },
           data: { holdCategory: null },
         });
-        await tx.activityLog.create({
-          data: {
-            userId: 'z002p24', actionType: 'HOLD_CLEAR', timestamp: t,
-            locationAisle: held.aisle, locationBin: held.bin, locationLevel: held.level,
-            details: JSON.stringify({ previousHoldCategory: held.holdCategory, workerLog: true }),
-          },
-        });
+        await writeLog({
+          userId: 'z002p24', actionType: 'HOLD_CLEAR', timestamp: t,
+          locationAisle: held.aisle, locationBin: held.bin, locationLevel: held.level,
+          details: { previousHoldCategory: held.holdCategory, workerLog: true },
+        }, tx);
         holdsCleared++;
       }
     } else {
@@ -502,14 +495,12 @@ async function simulateImWork(tx: TxClient, resumeFrom: Date, w: ShiftWindow, is
         const delta = randomFrom([-2, -1, 1, 2]);
         const newCartons = Math.max(1, pallet.currentCartons + delta);
         await tx.pallet.update({ where: { pid: pallet.pid }, data: { currentCartons: newCartons } });
-        await tx.activityLog.create({
-          data: {
-            userId: 'z002p24', actionType: 'EDIT_PAL', timestamp: t,
-            palletId: pallet.pid, locationAisle: pallet.locationAisle, locationBin: pallet.locationBin, locationLevel: pallet.locationLevel,
-            dept: pallet.dept, class: pallet.class, item: pallet.item,
-            details: JSON.stringify({ field: 'currentCartons', before: pallet.currentCartons, after: newCartons, workerLog: true }),
-          },
-        });
+        await writeLog({
+          userId: 'z002p24', actionType: 'EDIT_PAL', timestamp: t,
+          palletId: pallet.pid, locationAisle: pallet.locationAisle ?? undefined, locationBin: pallet.locationBin ?? undefined, locationLevel: pallet.locationLevel ?? undefined,
+          dept: pallet.dept, class: pallet.class, item: pallet.item,
+          details: { field: 'currentCartons', before: pallet.currentCartons, after: newCartons, workerLog: true },
+        }, tx);
         palletsEdited++;
       }
     }
@@ -605,18 +596,17 @@ async function simulateConsolidation(tx: TxClient, resumeFrom: Date, w: ShiftWin
             where: { LocationID: { aisle: misplaced.locationAisle!, bin: misplaced.locationBin!, level: misplaced.locationLevel! } },
             data: { status: 'EMPTY' },
           });
-          await tx.activityLog.create({
-            data: {
-              userId: 'z002p25', actionType: 'CONSOLID', timestamp: t,
-              palletId: misplaced.pid, locationAisle: misplaced.locationAisle, locationBin: misplaced.locationBin, locationLevel: misplaced.locationLevel,
-              dept: misplaced.dept, class: misplaced.class, item: misplaced.item,
-              details: JSON.stringify({
-                targetPalletId: target.pid, sourcePalletId: misplaced.pid,
-                cartons: misplaced.currentCartons, pallets: misplaced.currentPallets, ssps: misplaced.currentSSPs,
-                method: 'MNP', misplacedFoodCorrection: true, workerLog: true,
-              }),
+          await writeLog({
+            userId: 'z002p25', actionType: 'CONSOLID', timestamp: t,
+            palletId: misplaced.pid, locationAisle: misplaced.locationAisle ?? undefined, locationBin: misplaced.locationBin ?? undefined, locationLevel: misplaced.locationLevel ?? undefined,
+            dept: misplaced.dept, class: misplaced.class, item: misplaced.item,
+            functionCode: 'CON',
+            details: {
+              targetPalletId: target.pid, sourcePalletId: misplaced.pid,
+              cartons: misplaced.currentCartons, pallets: misplaced.currentPallets, ssps: misplaced.currentSSPs,
+              method: 'MNP', misplacedFoodCorrection: true, workerLog: true,
             },
-          });
+          }, tx);
           count++;
           handled = true;
         }
@@ -660,18 +650,17 @@ async function simulateConsolidation(tx: TxClient, resumeFrom: Date, w: ShiftWin
           where: { LocationID: { aisle: source.locationAisle!, bin: source.locationBin!, level: source.locationLevel! } },
           data: { status: 'EMPTY' },
         });
-        await tx.activityLog.create({
-          data: {
-            userId: 'z002p25', actionType: 'CONSOLID', timestamp: t,
-            palletId: source.pid, locationAisle: source.locationAisle, locationBin: source.locationBin, locationLevel: source.locationLevel,
-            dept: source.dept, class: source.class, item: source.item,
-            details: JSON.stringify({
-              targetPalletId: target.pid, sourcePalletId: source.pid,
-              cartons: source.currentCartons, pallets: source.currentPallets, ssps: source.currentSSPs,
-              method: 'MNP', workerLog: true,
-            }),
+        await writeLog({
+          userId: 'z002p25', actionType: 'CONSOLID', timestamp: t,
+          palletId: source.pid, locationAisle: source.locationAisle ?? undefined, locationBin: source.locationBin ?? undefined, locationLevel: source.locationLevel ?? undefined,
+          dept: source.dept, class: source.class, item: source.item,
+          functionCode: 'CON',
+          details: {
+            targetPalletId: target.pid, sourcePalletId: source.pid,
+            cartons: source.currentCartons, pallets: source.currentPallets, ssps: source.currentSSPs,
+            method: 'MNP', workerLog: true,
           },
-        });
+        }, tx);
         count++;
         handled = true;
         break;
@@ -698,54 +687,6 @@ interface LabelRow {
   destinationStore: number;
   status: string;
   pullFunction: string;
-}
-
-/** Returns a random integer in the inclusive range [min, max]. */
-function randomInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-/** Returns a random element from an array. */
-function randomFrom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-/** How many cartons make up one full pallet of this quantity (Pallet.cartonsPerPallet,
- *  v1.6.11) — a flat +1 if there's any loose-SSP remainder, matching seed.ts's own copy
- *  of this rule. */
-function cartonsPerPalletFor(cartons: number, looseSSPs: number): number {
-  return cartons + (looseSSPs > 0 ? 1 : 0);
-}
-
-/** Fisher-Yates shuffle, returning a new array (doesn't mutate the input). */
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-/** Converts a Date to a Julian-style date int (YYYY + zero-padded day-of-year), e.g. 2026175. */
-function julianDate(d: Date): number {
-  const start = new Date(d.getFullYear(), 0, 0);
-  const diff = d.getTime() - start.getTime();
-  return d.getFullYear() * 1000 + Math.floor(diff / 86_400_000);
-}
-
-/** Builds a Label ID string: store(4) + DPCI(9) + pid(8) + random(8) + batchDate. */
-function genLid(storeId: number, dept: number, cls: number, item: number, pid: number, batchDate: number): string {
-  const rnd = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
-  return (
-    String(storeId).padStart(4, '0') +
-    String(dept).padStart(3, '0') +
-    String(cls).padStart(2, '0') +
-    String(item).padStart(4, '0') +
-    String(pid).padStart(8, '0') +
-    rnd +
-    String(batchDate)
-  );
 }
 
 /** Pull Functions table from Documentation/outline.md: XS is always CA; level 1 non-XS non-emptying is CF; a non-XS pull that empties the location is FP; anything else non-XS is CA. Level 0 (Bulk) is out of scope for this demo. */
@@ -840,15 +781,9 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
       distinct: ['storageCode', 'size'],
     });
 
-    const existingPids = new Set((await tx.pallet.findMany({ select: { pid: true } })).map((p) => p.pid));
-    function genPid(): number {
-      let pid: number;
-      do {
-        pid = randomInt(10_000_000, 99_999_999);
-      } while (existingPids.has(pid));
-      existingPids.add(pid);
-      return pid;
-    }
+    const genPid = makePidGenerator(
+      new Set((await tx.pallet.findMany({ select: { pid: true } })).map((p) => p.pid)),
+    );
 
     const itemCache = new Map<string, { dept: number; class: number; item: number }[]>();
     async function getItems(storageCode: string) {
@@ -1009,6 +944,45 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     if (isFreshDay) {
       await tx.location.updateMany({ where: { status: 'STAGED' }, data: { status: 'EMPTY' } });
       await tx.activityLog.deleteMany({ where: { actionType: { in: ['STAGE', 'STAGE_SUM', 'RESTAGE'] } } });
+    }
+
+    // FunctionAssignment stub (IRP hard dependency — no in-app assignment UI exists yet;
+    // that's owned by the paired lead web app, out of scope here). One full-shift block
+    // per simulated worker, matching the function they're actually shown doing below.
+    // z002p24 (IM work: holds/pallet edits) isn't an IRP prod function, so gets no row.
+    // z002p23 (Marcus Webb, the only LEAD-role demo user) is assignedByZ for all of them.
+    // Uses the *intended* shift end (4pm), not shiftWindow.shiftEnd (which is capped at
+    // "now") — IRP itself caps time-in-function display at the current moment, the
+    // assignment block should reflect what was actually scheduled.
+    const assignmentDate = new Date(
+      shiftWindow.shiftStart.getFullYear(), shiftWindow.shiftStart.getMonth(), shiftWindow.shiftStart.getDate(),
+    );
+    const shiftEndCap = new Date(
+      shiftWindow.shiftStart.getFullYear(), shiftWindow.shiftStart.getMonth(), shiftWindow.shiftStart.getDate(), 16, 0, 0, 0,
+    );
+    const FUNCTION_ASSIGNMENTS: { workerZ: string; functionCode: string }[] = [
+      { workerZ: 'z002p21', functionCode: 'CA' },
+      { workerZ: 'z002p22', functionCode: 'RP' },
+      { workerZ: 'z002p23', functionCode: 'GPM' },
+      { workerZ: 'z002p25', functionCode: 'CON' },
+    ];
+    for (const a of FUNCTION_ASSIGNMENTS) {
+      const exists = await tx.functionAssignment.findFirst({
+        where: { workerZ: a.workerZ, functionCode: a.functionCode, date: assignmentDate },
+        select: { id: true },
+      });
+      if (!exists) {
+        await tx.functionAssignment.create({
+          data: {
+            workerZ: a.workerZ,
+            functionCode: a.functionCode,
+            date: assignmentDate,
+            startTime: shiftWindow.shiftStart,
+            endTime: shiftEndCap,
+            assignedByZ: 'z002p23',
+          },
+        });
+      }
     }
 
     const cartonAirPullResume = await getShiftResumePoint(tx, 'z002p21', shiftWindow);

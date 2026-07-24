@@ -204,9 +204,10 @@ component with no per-caller divergence left.
   contracted at once, not just one zone-side/level cell at a time) is not yet built —
   today Contraction is per zone-side/level cell only, requiring 8 separate marks to
   contract a whole level.
-- No screen-specific open fix-list items remain — all 3 of ELZ's `tasks.md` items shipped
-  in v1.6.5 (two of them via a combined approach rather than literally as originally
-  scoped — see Change Log). See `DevNotes/Fixes/MASTER-CHECKLIST.md`'s ELZ section.
+- No screen-specific open fix-list items remain — all 3 of ELZ's original `tasks.md`
+  items shipped in v1.6.5 (two of them via a combined approach rather than literally as
+  originally scoped — see Change Log). `tasks.md`/`MASTER-CHECKLIST.md` were retired
+  2026-07-24 — remaining open ELZ-tagged work (e.g. #88) is tracked as a GitHub Issue.
 - **App-wide (cross-cutting, not ELZ-specific):** the App-Wide screen-persistence item
   has since landed — ELZ's own Aisle/Storage Code filter now persists across navigation
   away and back via `ELZContext` (see Behind the Scenes above).

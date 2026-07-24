@@ -156,7 +156,7 @@ flowchart TD
 
 - [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — scanning an unknown Pallet ID crashes with a 500 instead of a 404 on the Manual/SDP put screens; PIP's own Pallet ID mismatch path (`PALLET_MISMATCH`) was not reported as affected, but the same non-numeric-input class of bug is worth re-checking against PIP's `handlePidVerify` path given it shares patterns with SDP/MNP.
 - [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — bad Contraction data on RS/RF/BS/some HS locations; not a PIP-specific bug, but a location a worker pulls from could carry incorrect Contraction flags that don't otherwise gate a pull today.
-- No PIP-specific "Known Limitation" note currently open in `CHANGELOG.md` beyond the items above — the screen's own fix backlog (`DevNotes/Fixes/tasks.md`'s PIP section) has been fully worked through as of v1.6.1.
+- No PIP-specific "Known Limitation" note currently open in `CHANGELOG.md` beyond the items above — the screen's original fix backlog (formerly `DevNotes/Fixes/tasks.md`'s PIP section, retired 2026-07-24) was fully worked through as of v1.6.1; any further PIP work is tracked as a GitHub Issue.
 
 ## Change Log
 

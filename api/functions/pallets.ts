@@ -6,6 +6,8 @@ import { requireAuth, requireRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { generateUniquePid } from '../lib/palletId.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
+import { TERMINAL_LABEL_STATUSES } from '../lib/eligibility.js';
+import { parseDpci, formatDpci } from '../lib/dpci.js';
 
 /**
  * Retrieves all fields of a pallet, including item UPC/description, current location,
@@ -198,7 +200,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   if (dpciChanging) {
     // Block the DPCI change if any labels are still open (not terminal).
     const pendingCount = await prisma.label.count({
-      where: { pid, status: { notIn: ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'] } },
+      where: { pid, status: { notIn: TERMINAL_LABEL_STATUSES } },
     });
     if (pendingCount > 0) {
       throw Object.assign(new Error('BLOCKED_BY_PENDING_PULL'), { status: 409 });
@@ -218,7 +220,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   if (quantityChanging) {
     // Sum up quantities already committed to open labels so we can enforce a floor.
     const pending = await prisma.label.aggregate({
-      where: { pid, status: { notIn: ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'] } },
+      where: { pid, status: { notIn: TERMINAL_LABEL_STATUSES } },
       _sum: { quantity: true, sspQuantity: true },
     });
     const pendingCartons = pending._sum.quantity    ?? 0;
@@ -435,11 +437,9 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   // reverse), but either one is enough to key the new row(s) off dept/class/item.
   let dept: number, cls: number, itm: number, requiresExpirationDate: boolean;
   if (body.dpci) {
-    const digits = body.dpci.replace(/-/g, '');
-    if (!/^\d{9}$/.test(digits)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-    dept = parseInt(digits.slice(0, 3), 10);
-    cls  = parseInt(digits.slice(3, 5), 10);
-    itm  = parseInt(digits.slice(5, 9), 10);
+    const parsed = parseDpci(body.dpci);
+    if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    ({ dept, class: cls, item: itm } = parsed);
     const item = await prisma.item.findUnique({ where: { DPCI: { dept, class: cls, item: itm } } });
     if (!item) throw Object.assign(new Error('DPCI_NOT_FOUND'), { status: 404 });
     requiresExpirationDate = item.requiresExpirationDate;
@@ -640,7 +640,7 @@ async function sampleReinstate(req: HttpRequest): Promise<unknown> {
   const item = await prisma.item.findFirst({ where, skip, select: { dept: true, class: true, item: true, upc: true } });
 
   return {
-    dpci: `${String(item!.dept).padStart(3, '0')}-${String(item!.class).padStart(2, '0')}-${String(item!.item).padStart(4, '0')}`,
+    dpci: formatDpci(item!.dept, item!.class, item!.item),
     upc: item!.upc,
     vcp: 12,
     ssp: 12,
