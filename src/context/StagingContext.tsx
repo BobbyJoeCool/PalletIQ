@@ -7,6 +7,15 @@ export interface StackState {
   quantity: string;
   locations: string[];
   shortfall: number;
+  /** Per-field override of Master Control's inherited value (issue #99). When false, the
+   *  field's own raw value here is unused — the effective value is always Master Control's
+   *  current one (see `effectiveStack` below). Stored directly on the stack (not indexed by
+   *  queue position elsewhere) so an active override travels with its stack through
+   *  `compactStacks`/`resetStackAfterStage` for free — it's just another field on the object
+   *  being moved. */
+  aisleOverride: boolean;
+  storageCodeOverride: boolean;
+  sizeOverride: boolean;
 }
 
 export interface StagingLogEntry {
@@ -16,9 +25,13 @@ export interface StagingLogEntry {
   timestamp: Date;
 }
 
-/** Returns a fresh, fully-cleared StackState — used to initialize and pad the stack queue. */
+/** Returns a fresh, fully-cleared StackState — used to initialize and pad the stack queue.
+ *  Overrides always start off, so a fresh slot inherits Master Control's current values live. */
 function emptyStack(): StackState {
-  return { aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0 };
+  return {
+    aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0,
+    aisleOverride: false, storageCodeOverride: false, sizeOverride: false,
+  };
 }
 
 /** A stack with no Aisle/StorageCode/Size/Quantity entered — the "not yet in use" state that compaction filters out. */
@@ -111,25 +124,34 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
   const resetStackAfterStage = useCallback(() => {
     setStacks((prev) => {
       const staged = prev[0];
-      const sharedField = (field: 'aisle' | 'storageCode' | 'size') =>
-        prev[0][field] !== '' && prev[0][field] === prev[1][field] && prev[1][field] === prev[2][field]
+      // Only a field actively overridden identically on all 3 stacks counts as "shared" —
+      // a field no stack overrides is already shared automatically (all 3 live-inherit the
+      // same Master Control value with no code needed here), so this only ever needs to
+      // carry forward a genuine, deliberate override (issue #99).
+      const sharedOverride = (field: 'aisle' | 'storageCode' | 'size', overrideKey: 'aisleOverride' | 'storageCodeOverride' | 'sizeOverride') =>
+        prev[0][overrideKey] && prev[1][overrideKey] && prev[2][overrideKey]
+          && prev[0][field] !== '' && prev[0][field] === prev[1][field] && prev[1][field] === prev[2][field]
           ? prev[0][field]
           : null;
-      const sharedAisle = sharedField('aisle');
-      const sharedStorageCode = sharedField('storageCode');
-      const sharedSize = sharedField('size');
+      const sharedAisle = sharedOverride('aisle', 'aisleOverride');
+      const sharedStorageCode = sharedOverride('storageCode', 'storageCodeOverride');
+      const sharedSize = sharedOverride('size', 'sizeOverride');
 
       const compacted = compactStacks([emptyStack(), prev[1], prev[2]]);
       if (isEmptyStack(compacted[0])) {
-        compacted[0] = { ...compacted[0], aisle: staged.aisle, storageCode: staged.storageCode, size: staged.size };
+        compacted[0] = {
+          ...compacted[0],
+          aisle: staged.aisle, storageCode: staged.storageCode, size: staged.size,
+          aisleOverride: staged.aisleOverride, storageCodeOverride: staged.storageCodeOverride, sizeOverride: staged.sizeOverride,
+        };
       } else if (sharedAisle != null || sharedStorageCode != null || sharedSize != null) {
         for (let i = 0; i < 3; i++) {
           if (!isEmptyStack(compacted[i])) continue;
           compacted[i] = {
             ...compacted[i],
-            ...(sharedAisle != null && { aisle: sharedAisle }),
-            ...(sharedStorageCode != null && { storageCode: sharedStorageCode }),
-            ...(sharedSize != null && { size: sharedSize }),
+            ...(sharedAisle != null && { aisle: sharedAisle, aisleOverride: true }),
+            ...(sharedStorageCode != null && { storageCode: sharedStorageCode, storageCodeOverride: true }),
+            ...(sharedSize != null && { size: sharedSize, sizeOverride: true }),
           };
         }
       }

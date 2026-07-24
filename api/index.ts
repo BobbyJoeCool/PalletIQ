@@ -12,3 +12,4 @@ import './functions/reservationTimer.js';
 import './functions/activity.js';
 import './functions/items.js';
 import './functions/reporting.js';
+import './functions/irp.js';

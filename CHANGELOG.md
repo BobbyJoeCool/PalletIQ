@@ -4,7 +4,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 ## Table of Contents
 
-- [Future Versions — Major Features](#future-versions--major-features)
+- [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
 - [1.7.0 — 2026-07-21](#170--2026-07-21)
 - [1.6.10 — 2026-07-20](#1610--2026-07-20)
@@ -53,31 +53,84 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 ---
 
-## Future Versions — Major Features
+## Roadmap — Planned Versions
 
-Not yet designed or scheduled to a phase — placeholder codes reserved in `HomePage.tsx`/
-`App.tsx` (rendering as `PlaceholderPage` today) or newly proposed. Each gets its own design
-conversation and build plan when picked up.
+Target versions below are milestones, not single build steps — each bundled feature or
+issue still ships in its own smaller version along the way (matching this project's
+usual one-screen/one-fix cadence); the milestone version number just marks the point
+where everything listed under it has actually landed.
 
-- **IRP — Individual Reporting.** Personal productivity dashboard for the logged-in worker:
-  pull/put performance by function (units, units/hour, time in function, goal progress), or a
-  staging summary for GPMers. Leads/Managers get a separate cross-worker reporting screen; IRP
-  always shows only the logged-in user's own data.
-- **PRQ — Pull Request by Label.** Not yet designed.
-- **Bulk Pull.** Not yet designed — will let a location hold multiple full pallets plus a
-  partial at once (the underlying data-model concept already exists — see this doc's own
-  Quantity granularity note — but no pull flow accounts for it yet). Flagged
-  ([#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89)) as needing a PII Edit Mode
-  amendment once it ships: today's Edit Mode edits one Pallet's Full Pallets/Cartons/SSPs
-  as one blended set, which won't distinguish "correct the full-pallet count" from "correct
-  the partial's loose cartons/SSPs" once multiple pallets can share a location.
+### v1.8.0 — IRP, PRQ, CII + open-issue cleanup
+
+- **IRP — Individual Reporting.** Built (`DevNotes/Logs/V1.7/version-1_7_1.md`), pending
+  ship. Personal productivity dashboard for the logged-in worker: pull/put performance
+  by function (units, units/hour, time in function, goal progress), or a staging summary
+  for GPMers. Leads/Managers get a separate cross-worker reporting screen; IRP always
+  shows only the logged-in user's own data.
+- **PRQ — Pull Request by Label.** Designed (`DevNotes/DesignPrompts/PRQ.md`), not yet
+  built. Needs `Label`'s proposed `palletQuantity`/`cartonQuantity`/`sspQuantity` split
+  (see `schema-additions.prisma`) and uses the `Workstation`/`WorkstationAisle` lookup
+  (built this session) for its Workstation filter.
+- **CII — Container ID Inquiry.** Designed (`DevNotes/DesignPrompts/CII.md`), not yet
+  built. Needs `LabelEvent` (see `schema-additions.prisma`).
+- Most currently open issues target this milestone too: #100, #99, #96, #95, #94, #93,
+  #92, #91, #86, #85, #84, #83. (#89 is held for v1.9.0 instead, since it explicitly
+  depends on Bulk Pull shipping — see below. #90 isn't assigned to a milestone yet.)
+
+### v1.9.0 — Bulk Pull + OCC
+
+- **Bulk Pull.** Will let a location hold multiple full pallets plus a partial at once
+  (the underlying data-model concept already exists — see this doc's own Quantity
+  granularity note — but no pull flow accounts for it yet). Touches PIP, SDP, MNP, PII,
+  LII, IID, IRP, ELA, and others. Design is well underway across three docs in
+  `DevNotes/DesignPrompts/`:
+  - `Bulk-Pull-design.md` — original starting doc (schema baseline, groundwork already
+    in the app, open questions).
+  - `Bulk-Pull-Design-Prompt-v2.md` (+ its own `Bulk-Pull-Session-Log.md`) — Session 2,
+    settling scope/identity (a general storage-code-agnostic capability, not just `BK`),
+    the storage-code cross-reference (CR→CB, FD→FB, NR→NB, NF→VB, BK→KB, BS→SB, RS→RB,
+    RF→TB), the master/child consolidation model (applies to bulk *and* rack alike), and
+    full Receiving/PIP/SDP/MNP/PII behavior. **Not yet covered:** LII, IID, IRP, ELA.
+  - `Shared-Infrastructure-Design-Spec.md` (+ its own
+    `Shared-Infrastructure-Session-Log.md`) — a **blocking prerequisite** surfaced by
+    Session 2: the **Logic Gate** (a single shared function owning every `Location`/
+    `Pallet` status write via named intents, replacing ad hoc per-screen status logic),
+    the **SDP Verify-Put Modal** redesign (a shared blocking popup shell for Rack/Hand/
+    Bulk Put, replacing today's screen-locking behavior), and `statusExpiry` (lazy
+    reservation-timeout enforcement on `Location`). Both blocking items are now designed;
+    a **Consolidation Guard audit** against the current `manualConfirm` code is still
+    outstanding before Bulk Pull can be built.
+  - Also resolves [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) as a natural
+    consequence of the Logic Gate's `CLEAR_LOCATION` intent (always checks for a
+    remaining occupant before writing `EMPTY`) — no independent fix needed once built.
+  - Still flagged ([#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89)) as needing
+    a PII Edit Mode amendment: today's Edit Mode edits one Pallet's Full Pallets/Cartons/
+    SSPs as one blended set, which won't distinguish "correct the full-pallet count"
+    from "correct the partial's loose cartons/SSPs" once multiple pallets can share a
+    location — whether this is in-scope for the Bulk build itself or a separate fix is
+    still an open question per `Bulk-Pull-Design-Prompt-v2.md`.
+- **OCC — Overpack Carton Create.** New — lets an IM+ worker remove individual SSPs or
+  "eaches" (partials of an SSP) from inventory, either by forcing them into an
+  "Overpack" container or by "Damaging" them out of inventory entirely. Needs its own
+  design spec — see `DevNotes/DesignPrompts/OCC-design.md`. Not yet touched by the Bulk
+  Pull Session 2 conversation.
+
+### v2.0.0 — Handheld screens
+
+A handheld (phone-sized, modeled on an iPhone 16 Pro Max, with a full keyboard) version
+of every screen that gets one, alongside today's tablet (iPad Pro-sized) version. Not
+yet designed.
+
+### Not yet assigned to a milestone
+
 - **Per-record audit trail (PII/LII/Container ID).** Not yet designed
   ([#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90)) — a scoped activity history
   for one specific Pallet ID, Location ID, or (new, undesigned) Container ID, distinct from
   the header's own rolling 12-hour Activity overlay. Container ID needs its own product
   conversation first — a reusable label representing a carton, SSP, or outbound pallet,
   possibly overlapping with the already-reserved-but-unbuilt CII ("label cancellation")
-  jump code referenced in `Documentation/ScreenSpecs/LOG.md`.
+  jump code referenced in `Documentation/ScreenSpecs/LOG.md`. Flagging the possible CII
+  overlap rather than assuming which milestone this belongs to.
 
 ---
 
@@ -87,6 +140,7 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Major/Important
 
+- [#92](https://github.com/BobbyJoeCool/PalletIQ/issues/92) — MNP: `manualConfirm` doesn't check the destination location for a hold
 - [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) — `placePallet` clears a pallet's old location to EMPTY without checking for a second occupant pallet (MNP/SDP)
 - [#85](https://github.com/BobbyJoeCool/PalletIQ/issues/85) — SDP: most of the Pallet ID Directed Put e2e flow fails — demo scans land in the Aisle field instead
 - [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) — Reason codes should be a database table with per-department/role restrictions (needs a product conversation first)
@@ -94,7 +148,9 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Minor
 
-No issues currently open in this category.
+- [#95](https://github.com/BobbyJoeCool/PalletIQ/issues/95) — Status bar: error message persists after a subsequent successful scan
+- [#93](https://github.com/BobbyJoeCool/PalletIQ/issues/93) — SDP: Reservation confirm/unassign and the expiry timer can race on the same row
+- [#91](https://github.com/BobbyJoeCool/PalletIQ/issues/91) — ELA/ELZ: empty-location counts include held/contracted locations
 
 ### Nice-to-have/Cosmetic
 
@@ -102,9 +158,13 @@ No issues currently open in this category.
 
 ### Needs Triage
 
-- [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — Bad Contraction data: every RS/RF/BS location, plus some HS locations on Levels 2-9, incorrectly flagged as contracted
-- [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) — PII Edit Mode will need per-pallet-vs-partial quantity editing once Bulk Pull ships (post-v1.7.0)
-- [#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90) — Add per-record audit trail to PII, LII, and a future Container ID screen (post-v1.7.0)
+- [#100](https://github.com/BobbyJoeCool/PalletIQ/issues/100) — Numpad: add a 4th column (Backspace/Tab/Back Tab/Enter), a Clear button, and rename OK to Enter
+- [#99](https://github.com/BobbyJoeCool/PalletIQ/issues/99) — STG: per-pallet override of master control values (size/aisle/storage code)
+- [#96](https://github.com/BobbyJoeCool/PalletIQ/issues/96) — Add a generic status-timer/expiration mechanism for status-bearing tables, with an overdue-records report
+- [#94](https://github.com/BobbyJoeCool/PalletIQ/issues/94) — Harden Pallet CA_PULL_PEND/FP_PULL_PEND status coupling before a real label-creation endpoint ships
+- [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) — PII Edit Mode will need per-pallet-vs-partial quantity editing once Bulk Pull ships (targets v1.9.0)
+- [#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90) — Add per-record audit trail to PII, LII, and a future Container ID screen (not yet milestone-assigned)
+- [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — Bad Contraction data: every RS/RF/BS location, plus some HS locations on Levels 2-9, incorrectly flagged as contracted — **worth re-checking**: the aisle-renumbering work (v1.7.3) rewrote the contraction logic entirely and preserved BS/RF/RS's existing level-1 exemption, which may already resolve this; not closed here since that work wasn't done under this issue number
 
 ### Distant Future
 

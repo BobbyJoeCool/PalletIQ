@@ -64,6 +64,7 @@ const SEVERITY_COLORS: Record<Severity, string> = {
   error: 'text-[#FF4444]',
 };
 
+/** Looks up the Tailwind text color class for a given severity (see SEVERITY_COLORS above). */
 export function severityColorClass(severity: Severity): string {
   return SEVERITY_COLORS[severity];
 }
@@ -128,10 +129,12 @@ export type DetailToken = string | DetailIdToken;
 /** One rendered line of an entry's detail text; an entry can produce more than one. */
 export type DetailLine = DetailToken[];
 
+/** Wraps a pallet ID as a tappable <LiveId> token, or null if this entry has none. */
 function palletToken(palletId: number | null): DetailIdToken | null {
   return palletId != null ? { id: String(palletId), type: 'pallet' } : null;
 }
 
+/** Wraps a location string as a tappable <LiveId> token, or null if this entry has none. */
 function locationToken(location: string | null): DetailIdToken | null {
   return location ? { id: location, type: 'location' } : null;
 }
@@ -182,6 +185,11 @@ const EDIT_FIELD_LABELS: Record<string, string> = {
 };
 const EDIT_FIELD_ORDER = ['dpci', 'vcp', 'ssp', 'currentPallets', 'currentCartons', 'currentSSPs'];
 
+/**
+ * Formats one EDIT_PAL field's old/new value for the diff line. Every field but `dpci`
+ * is already a display-ready primitive (number/string); `dpci` alone arrives as an
+ * object ({ dept, class, item }) and needs the same zero-padded dash format as fmtDpci.
+ */
 function fmtEditValue(field: string, value: unknown): string {
   if (field === 'dpci' && value && typeof value === 'object') {
     const v = value as { dept: number; class: number; item: number };

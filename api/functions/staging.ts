@@ -71,6 +71,9 @@ async function stageLocations(req: HttpRequest): Promise<unknown> {
         locationAisle: aisle,
         locationBin: bin,
         locationLevel: level,
+        // IRP GPM Staging count — deliberately not set on restageAisle's RESTAGE
+        // entries below/elsewhere, since GPM Staging must exclude mass restage.
+        functionCode: 'GPM',
         details: { storageCode: body.storageCode, size: body.size },
       });
     }

@@ -18,6 +18,8 @@ import { ELAPage } from './pages/ELAPage';
 import { ELZPage } from './pages/ELZPage';
 import { HomePage } from './pages/HomePage';
 import { IIDPage } from './pages/IIDPage';
+import { IRPHourlyPage } from './pages/IRPHourlyPage';
+import { IRPPage } from './pages/IRPPage';
 import { ISIPage } from './pages/ISIPage';
 import { LIIPage } from './pages/LIIPage';
 import { LoginPage } from './pages/LoginPage';
@@ -90,7 +92,8 @@ export default function App() {
           <Route path="/empty/aisle"             element={<ELAPage />} />
           <Route path="/empty/zone"              element={<ELZPage />} />
           <Route path="/stage"                   element={<STGPage />} />
-          <Route path="/reporting/individual"    element={<PlaceholderPage code="IRP" />} />
+          <Route path="/reporting/individual"    element={<IRPPage />} />
+          <Route path="/reporting/individual/:functionCode" element={<IRPHourlyPage />} />
           <Route path="/reporting/pull-request"  element={<PlaceholderPage code="PRQ" />} />
         </Route>
       </Route>

@@ -302,6 +302,8 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
     locationAisle: reservation.locationAisle,
     locationBin:   reservation.locationBin,
     locationLevel: reservation.locationLevel,
+    // IRP: this is a Rack Put (System Directed Put) — MNP's own PUT write below is HP.
+    functionCode: 'RP',
     details: {
       reservationId,
       wasMove,
@@ -735,6 +737,7 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
         locationAisle: parsed.aisle,
         locationBin:   parsed.bin,
         locationLevel: body.level,
+        functionCode: 'CON',
         details: {
           targetPalletId: occupant.pid,
           sourcePalletId: pallet.pid,
@@ -772,6 +775,8 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     locationAisle: parsed.aisle,
     locationBin:   parsed.bin,
     locationLevel: body.level,
+    // IRP: this is a Hand Put (Manual Put) — SDP's own PUT write above is RP.
+    functionCode: 'HP',
     details: {
       wasMove, clearedLocation, destinationWasOccupied, destinationWasStaged, method: 'MNP',
       wasContracted: destLocation.contraction,

@@ -251,6 +251,9 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
     dept: pallet.dept,
     class: pallet.class,
     item: pallet.item,
+    // IRP: CA/CF/FP counts are read straight off this pullFunction (BK included for
+    // completeness, though nothing produces a real BK pull today).
+    functionCode: body.pullFunction,
     details: {
       labelId: label.lid,
       pullFunction: body.pullFunction,

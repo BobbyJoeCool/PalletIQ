@@ -361,40 +361,102 @@ Realistic Target-style items. 20–25 items per storage code, no items seeded fo
 
 ---
 
-## Location (~36,600 rows)
+## Workstation (13 rows) / WorkstationAisle (65 rows)
 
-Locations are generated programmatically for every bin/level combination across all aisles. Approximately 90% are seeded as `STORED`; the remaining ~10% are `EMPTY`. All locations start with `holdTypeCode = null`.
+Groups aisles into the physical pick/put station that owns them (for later use by
+ELA/PRQ, and displayed on LII). A workstation can be a non-contiguous set of aisles, so
+this is a plain per-aisle lookup (`WorkstationAisle.aisle` is the primary key, one row
+per assigned aisle) rather than a start/end range — `aisle` is validated against
+`Location` at the application layer, not a DB foreign key (`Location`'s primary key is
+the composite `(aisle, bin, level)`, so `aisle` alone isn't unique there and no true FK
+is possible).
 
-### Location counts by aisle group
+| Workstation | Aisles |
+| --- | --- |
+| CR01 | 300, 301, 302, 303, 304 |
+| CR02 | 305, 306, 307, 308, 309 |
+| FD01 | 310, 311, 312, 313, 314 |
+| FD02 | 315, 316, 317, 318, 319 |
+| BK01 | 320, 321, 322, 323, 324 |
+| BK02 | 325, 326, 327, 328, 329 |
+| NR01 | 100, 101, 102, 103, 104 |
+| NR02 | 105, 106, 107, 108, 109 |
+| NF01 | 110, 111, 112, 113, 114 |
+| NF02 | 115, 116, 117, 118, 119 |
+| BS01 | 200 |
+| OS01 | 201, 202, 203, 204 |
+| RS01 | 730 |
 
-| Aisles | Bins | Levels | Locations |
-|--------|------|--------|-----------|
-| 304–310 (CR, 7 aisles) | 128 × 7 | 5–10 per type | varies |
-| 311–317 (FD, 7 aisles) | 128 × 7 | 5–10 per type | varies |
-| 318–324 (BK, 7 aisles) | 128 × 7 | 5–10 per type | varies |
-| 325–331 (NR, 7 aisles) | 128 × 7 | 5–10 per type | varies |
-| 332–338 (NF, 7 aisles) | 128 × 7 | 5–10 per type | varies |
-| 301 | 192 | 13 | 2,496 |
-| 302 | 192 | 13 | 2,496 |
-| 303 | 96 (bins 33–128) | 6 | 576 |
-| 701 | 48 (even 34–128) | 6 | 288 |
-| 702 | 48 (odd 33–127) | 6 | 288 |
-| 801 | 42 | 10 | 420 |
-| 802 | 42 | 10 | 420 |
-| 803 | 84 | 10 | 840 |
-
-### Level counts by aisle type (standard aisles)
-
-| Type | Levels | Size pattern |
-|------|--------|--------------|
-| Large (L) | 5 | L1: M · L2–5: L |
-| Medium (M) | 6 | L1–6: M |
-| Small (S) | 8 | L1: M · L2–8: S |
-| Half Small (HS) | 10 | L1: M · L2–10: HS |
+The CR/FD/BK/NR/NF 01/02 split (first-5/last-5 by pattern digit) is a seed-side
+default, not a fixed rule — easy to re-seed differently since it's local demo data.
 
 ---
 
-## Pallet (~33,000 rows)
+## Location (~56,000 rows)
+
+Locations are generated programmatically for every bin/level combination across all
+aisles. Approximately 90% are seeded as `STORED`; the remaining ~10% are `EMPTY`. All
+locations start with `holdTypeCode = null`.
+
+### Aisle-numbering scheme
+
+CR/FD/BK/NR/NF each get a 10-aisle block; `aisle % 10` is a "pattern digit" (0-9) that
+determines the aisle's build, identically across all five storage codes:
+
+| Storage Code | Aisles |
+| --- | --- |
+| CR | 300-309 |
+| FD | 310-319 |
+| BK | 320-329 |
+| NR | 100-109 |
+| NF | 110-119 |
+
+| Digit | Type | Levels |
+| --- | --- | --- |
+| 0, 1 | Medium | 1-6 all M |
+| 2, 3 | Large | L1 M, 2-5 L |
+| 4 | Small | L1 M, 2-8 S |
+| 5 | Half Small | L1 M, 2-10 HS |
+| 6 | Medium/Small | 1-3 M, 4-5 S, 6 M |
+| 7 | Large/Half Small | L1 M, 2-3 L, 4-5 HS, 6 M |
+| 8 | **Split** | Odd bins: 1-6 all M. Even bins: L1 M, 2-8 S |
+| 9 | **Split** | Odd bins: L1 M, 2-10 HS. Even bins: L1 M, 2-5 L |
+
+Digits 8/9 are "split" aisles — odd and even bins have different builds *and* different
+max levels within the same aisle.
+
+**Contraction** (CR/FD/BK/NR/NF only): Level 1 always contracts; Level 8 contracts on
+**even** bins wherever Small exists (digit 4, or digit 8's even side); Levels 8-10
+contract on **odd** bins wherever Half Small exists (digit 5, or digit 9's odd side).
+Digit 6/7's shorter Small/Half-Small stretches (levels 4-5) don't contract beyond the
+Level-1 rule.
+
+### Special aisles
+
+- **730** — RF (odd bins) / RS (even bins), a "folded" aisle: Zone 1 (96 bins) is XS at
+  13 levels; Zones 2-4 (32 bins each) are Level 1 Medium / 2-3 Large / 4 Small / 5 Half
+  Small. Zone 1 has 3× a normal zone's bin count since an XS location is 1/3 the width
+  of a standard pallet slot — same physical footprint. Replaces where "330" would have
+  fallen next in the plain 3xx sequence (330 itself doesn't exist). No contraction rule
+  (existing BS/RF/RS exemption preserved).
+- **200** — BS, the same folded shape as 730, but no odd/even storage-code split (BS
+  both sides). Real and displayed number both 200 — BS isn't Restricted freight.
+- **201, 202** — 192 bins/13 levels, Levels 1-9 CR / 10-13 FD (both aisles identical).
+- **203** — 192 bins/13 levels, all BK.
+- **204** — 192 bins/13 levels, Levels 1-9 NR / 10-13 NF.
+
+### Location counts by aisle group
+
+| Aisles | Bins | Locations |
+| --- | --- | --- |
+| 300-309 / 310-319 / 320-329 / 100-109 / 110-119 (5 blocks × 10 aisles) | 128 | 8,512 per block (42,560 total) |
+| 730 | 192 (96 XS + 96 regular) | 1,728 |
+| 200 | 192 (96 XS + 96 regular) | 1,728 |
+| 201, 202, 203, 204 | 192 each | 2,496 each (9,984 total) |
+
+---
+
+## Pallet (~50,000 rows)
 
 One pallet per STORED location. Each pallet is randomly assigned an item from the pool matching that location's storage code.
 

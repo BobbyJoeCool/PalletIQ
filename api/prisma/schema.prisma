@@ -46,6 +46,26 @@ model Store {
   labels Label[]
 }
 
+// Grouping of aisles into a physical pick/put workstation (e.g. "CR01"). A workstation
+// can be a non-contiguous set of aisles, so this is a plain lookup keyed by aisle, not a
+// start/end range. `aisle` isn't a true FK to Location (Location's PK is the composite
+// (aisle, bin, level) — aisle alone isn't unique there, so no DB-level FK is possible);
+// validity is checked at the application layer instead, the same way every other screen
+// already validates an aisle against Location (a live existence query, not a constraint).
+model Workstation {
+  id   String @id @db.NVarChar(4)
+  name String @db.NVarChar(60)
+
+  aisles WorkstationAisle[]
+}
+
+model WorkstationAisle {
+  aisle         Int         @id
+  workstationId String      @db.NVarChar(4)
+
+  workstation Workstation @relation(fields: [workstationId], references: [id])
+}
+
 // ─── Core models ─────────────────────────────────────────────────────────────
 
 model Item {
@@ -130,6 +150,10 @@ model User {
   pulledPallets   Pallet[]      @relation("PalletLastPulledBy")
   reservations    Reservation[]
   activityLogs    ActivityLog[]
+
+  // IRP: who was assigned to which prod function, when, and by whom.
+  functionAssignmentsAsWorker   FunctionAssignment[] @relation("AssignmentWorker")
+  functionAssignmentsAsAssigner FunctionAssignment[] @relation("AssignmentAssignedBy")
 }
 
 model Pallet {
@@ -268,9 +292,54 @@ model ActivityLog {
   class         Int?
   item          Int?
   details       String?  @db.NVarChar(Max)
+  // IRP prod-function code (CA/CF/FP/RP/HP/GPM/CON), set only on the rows that
+  // represent one of IRP's countable actions (see writeLog() call sites in
+  // pulls.ts/puts.ts/staging.ts). Null for every other actionType (RESERVE,
+  // HOLD_PLACE, STAGE_SUM, RESTAGE, etc.) — those aren't IRP-countable events.
+  functionCode  String?  @db.NVarChar(3)
 
   user     User      @relation(fields: [userId], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
   pallet   Pallet?   @relation(fields: [palletId], references: [pid], onDelete: NoAction, onUpdate: NoAction)
   location Location? @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
   itemRef  Item?     @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([userId, functionCode, timestamp])
+}
+
+// IRP hard dependency: who was assigned to which prod function, when, and by whom.
+// No in-app assignment UI exists yet (the paired lead web app that will own this is
+// out of scope for this build) — rows are stubbed via demo-reseed.ts, same precedent
+// PRQ uses to stand in for real label creation.
+model FunctionAssignment {
+  id           Int      @id @default(autoincrement())
+  workerZ      String   @db.NVarChar(7)
+  // CA, CF, FP, BKP, BK, RP, HP, GPM, CON
+  functionCode String   @db.NVarChar(3)
+  date         DateTime @db.Date
+  startTime    DateTime
+  endTime      DateTime
+  assignedByZ  String   @db.NVarChar(7)
+
+  worker     User @relation("AssignmentWorker", fields: [workerZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  assignedBy User @relation("AssignmentAssignedBy", fields: [assignedByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([workerZ, date])
+  @@index([functionCode, date])
+}
+
+// IRP stub: goal rates as data, not hardcoded constants (see IRP.md's Prod Functions
+// table for the seeded values). Not editable by this app yet — manager-facing goal
+// editing is deferred to the paired lead web app — but the table exists now so future
+// editing is additive rather than a re-architecture.
+// Bulk and Breakpack are blended (two independently-rated components summed as
+// "hours of work" — see IRP.md's Blended Goal Calculation); rate2/unit2 hold the
+// second component and are null for every single-rate function.
+model ProdGoal {
+  functionCode  String   @id @db.NVarChar(3)
+  rate          Decimal  @db.Decimal(10, 2)
+  // e.g. "cartons/hr", "pallets/hr", "puts/hr", "locations/hr"
+  unit          String   @db.NVarChar(20)
+  rate2         Decimal? @db.Decimal(10, 2)
+  unit2         String?  @db.NVarChar(20)
+  effectiveDate DateTime @db.Date
 }
