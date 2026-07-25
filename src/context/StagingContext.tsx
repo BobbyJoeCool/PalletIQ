@@ -16,6 +16,12 @@ export interface StackState {
   aisleOverride: boolean;
   storageCodeOverride: boolean;
   sizeOverride: boolean;
+  /** Zone override (issue #99 follow-up) — unlike Aisle/StorageCode/Size, Master Control has
+   *  no Zone field to inherit from; overriding this restricts the stack's own destination
+   *  search to a specific zone (1-4) instead of searching the whole aisle. Off means "no zone
+   *  restriction," not "inherit," since there's nothing to inherit. */
+  zone: string;
+  zoneOverride: boolean;
 }
 
 export interface StagingLogEntry {
@@ -31,6 +37,7 @@ function emptyStack(): StackState {
   return {
     aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0,
     aisleOverride: false, storageCodeOverride: false, sizeOverride: false,
+    zone: '', zoneOverride: false,
   };
 }
 
@@ -128,7 +135,7 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
       // a field no stack overrides is already shared automatically (all 3 live-inherit the
       // same Master Control value with no code needed here), so this only ever needs to
       // carry forward a genuine, deliberate override (issue #99).
-      const sharedOverride = (field: 'aisle' | 'storageCode' | 'size', overrideKey: 'aisleOverride' | 'storageCodeOverride' | 'sizeOverride') =>
+      const sharedOverride = (field: 'aisle' | 'storageCode' | 'size' | 'zone', overrideKey: 'aisleOverride' | 'storageCodeOverride' | 'sizeOverride' | 'zoneOverride') =>
         prev[0][overrideKey] && prev[1][overrideKey] && prev[2][overrideKey]
           && prev[0][field] !== '' && prev[0][field] === prev[1][field] && prev[1][field] === prev[2][field]
           ? prev[0][field]
@@ -136,6 +143,7 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
       const sharedAisle = sharedOverride('aisle', 'aisleOverride');
       const sharedStorageCode = sharedOverride('storageCode', 'storageCodeOverride');
       const sharedSize = sharedOverride('size', 'sizeOverride');
+      const sharedZone = sharedOverride('zone', 'zoneOverride');
 
       const compacted = compactStacks([emptyStack(), prev[1], prev[2]]);
       if (isEmptyStack(compacted[0])) {
@@ -143,8 +151,9 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
           ...compacted[0],
           aisle: staged.aisle, storageCode: staged.storageCode, size: staged.size,
           aisleOverride: staged.aisleOverride, storageCodeOverride: staged.storageCodeOverride, sizeOverride: staged.sizeOverride,
+          zone: staged.zone, zoneOverride: staged.zoneOverride,
         };
-      } else if (sharedAisle != null || sharedStorageCode != null || sharedSize != null) {
+      } else if (sharedAisle != null || sharedStorageCode != null || sharedSize != null || sharedZone != null) {
         for (let i = 0; i < 3; i++) {
           if (!isEmptyStack(compacted[i])) continue;
           compacted[i] = {
@@ -152,6 +161,7 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
             ...(sharedAisle != null && { aisle: sharedAisle, aisleOverride: true }),
             ...(sharedStorageCode != null && { storageCode: sharedStorageCode, storageCodeOverride: true }),
             ...(sharedSize != null && { size: sharedSize, sizeOverride: true }),
+            ...(sharedZone != null && { zone: sharedZone, zoneOverride: true }),
           };
         }
       }

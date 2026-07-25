@@ -12,10 +12,12 @@ import type { StackState } from '../context/StagingContext';
 export function effectiveStack(
   stack: StackState,
   master: { aisle: string; storageCode: string; size: string },
-): { aisle: string; storageCode: string; size: string } {
+): { aisle: string; storageCode: string; size: string; zone: string } {
   return {
     aisle: stack.aisleOverride ? stack.aisle : master.aisle,
     storageCode: stack.storageCodeOverride ? stack.storageCode : master.storageCode,
     size: stack.sizeOverride ? stack.size : master.size,
+    // No Master Control equivalent to inherit from — off just means "no zone restriction."
+    zone: stack.zoneOverride ? stack.zone : '',
   };
 }

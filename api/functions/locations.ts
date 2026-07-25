@@ -5,7 +5,7 @@ import { withHandler } from '../lib/response.js';
 import { requireAuth, requireRole, hasMinRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
-import { sideOf } from '../lib/zoneLogic.js';
+import { sideOf, NOT_HELD_FILTER } from '../lib/zoneLogic.js';
 import { formatDpci } from '../lib/dpci.js';
 import type { Role } from '../lib/jwt.js';
 
@@ -117,6 +117,24 @@ async function getStorageCodes(req: HttpRequest): Promise<unknown> {
 }
 
 /**
+ * Full Workstation reference list (GitHub #124/#125) — every `{id, name}` pair, e.g.
+ * `{ id: "CR01", name: "Conveyable Reserve 01" }`. Feeds ELA's Workstation restrict-to
+ * picker and its exclude-bubble popup.
+ *
+ * @returns `{ id: string; name: string }[]`, sorted alphabetically by id
+ */
+async function getWorkstations(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+
+  const workstations = await prisma.workstation.findMany({
+    select: { id: true, name: true },
+    orderBy: { id: 'asc' },
+  });
+
+  return workstations;
+}
+
+/**
  * Empty Locations by Aisle (ELA). Returns, per aisle, the count of EMPTY and STAGED
  * locations for every size present in that aisle at the given Storage Code — the GPMer's
  * primary space-finding tool before bringing pallet stacks into the building. See
@@ -137,10 +155,20 @@ async function getStorageCodes(req: HttpRequest): Promise<unknown> {
  * only" state): when omitted, an aisle qualifies if *any* size has a non-zero empty or
  * staged count, rather than requiring one specific queried size to be non-zero.
  *
- * @param req - HTTP request with query param `storageCode` (required) and `size` (optional)
+ * `aisleStart`/`aisleEnd`, `workstation`, and `excludeWorkstations` (GitHub #124/#125)
+ * are all optional additional narrowing filters, independent of each other and of
+ * storageCode/size: an aisle range, a single workstation to restrict to, and a set of
+ * workstations to exclude, respectively. `workstation` and `excludeWorkstations` are
+ * resolved against `WorkstationAisle` into concrete aisle numbers and combined into one
+ * `aisle` where-clause alongside the range.
+ *
+ * @param req - HTTP request with query param `storageCode` (required); `size`,
+ *   `aisleStart`, `aisleEnd`, `workstation`, `excludeWorkstations` (comma-separated
+ *   workstation ids) all optional
  * @returns Array of `{ aisle, totalEmpty, sizes: [{ size, empty, staged }] }`, sizes sorted
  *   per SIZE_ORDER
- * @throws 400 INVALID_INPUT if `storageCode` is missing
+ * @throws 400 INVALID_INPUT if `storageCode` is missing, or `aisleStart`/`aisleEnd` are
+ *   given but non-numeric
  */
 async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
   await requireAuth(req);
@@ -154,15 +182,50 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
   const storageCode = storageCodeParam.toUpperCase();
   const size = sizeParam ? sizeParam.toUpperCase() : null;
 
+  const aisleStartParam = params.get('aisleStart');
+  const aisleEndParam = params.get('aisleEnd');
+  const aisleStart = aisleStartParam ? parseInt(aisleStartParam, 10) : null;
+  const aisleEnd = aisleEndParam ? parseInt(aisleEndParam, 10) : null;
+  if ((aisleStartParam && isNaN(aisleStart!)) || (aisleEndParam && isNaN(aisleEnd!))) {
+    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  }
+
+  const workstationParam = params.get('workstation');
+  const excludeWorkstationsParam = params.get('excludeWorkstations');
+  const excludeWorkstationIds = excludeWorkstationsParam
+    ? excludeWorkstationsParam.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  const [restrictToAisles, excludedAisles] = await Promise.all([
+    workstationParam
+      ? prisma.workstationAisle.findMany({ where: { workstationId: workstationParam }, select: { aisle: true } })
+        .then((rows) => rows.map((r) => r.aisle))
+      : Promise.resolve(null),
+    excludeWorkstationIds.length > 0
+      ? prisma.workstationAisle.findMany({ where: { workstationId: { in: excludeWorkstationIds } }, select: { aisle: true } })
+        .then((rows) => rows.map((r) => r.aisle))
+      : Promise.resolve(null),
+  ]);
+
+  const aisleFilter: { gte?: number; lte?: number; in?: number[]; notIn?: number[] } = {};
+  if (aisleStart != null) aisleFilter.gte = aisleStart;
+  if (aisleEnd != null) aisleFilter.lte = aisleEnd;
+  if (restrictToAisles != null) aisleFilter.in = restrictToAisles;
+  if (excludedAisles != null) aisleFilter.notIn = excludedAisles;
+  const aisleWhere = Object.keys(aisleFilter).length > 0 ? { aisle: aisleFilter } : {};
+
+  // GitHub #91: match the same eligibility filter findNextLocation/findNextStagingLocation
+  // apply before actually offering a candidate — a held (Inbound/Both/Permanent) or
+  // contracted location shouldn't count as available capacity here either.
   const [empties, stageds] = await Promise.all([
     prisma.location.groupBy({
       by: ['aisle', 'size'],
-      where: { storageCode, status: 'EMPTY' },
+      where: { storageCode, status: 'EMPTY', contraction: false, ...NOT_HELD_FILTER, ...aisleWhere },
       _count: { _all: true },
     }),
     prisma.location.groupBy({
       by: ['aisle', 'size'],
-      where: { storageCode, status: 'STAGED' },
+      where: { storageCode, status: 'STAGED', contraction: false, ...NOT_HELD_FILTER, ...aisleWhere },
       _count: { _all: true },
     }),
   ]);
@@ -274,13 +337,16 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
     .map(([level, cells]) => ({ level, cells: [...cells.values()] }));
 
   // Zone summary: EMPTY/STAGED counts by StorageCode-Size, independently narrowed by
-  // storageCode and/or size when either is provided, excluding contracted locations.
+  // storageCode and/or size when either is provided, excluding contracted or held
+  // locations (GitHub #91 — matches findNextLocation/findNextStagingLocation's own
+  // eligibility filter: Hold Outbound doesn't block, everything else does).
   interface Breakdown { storageCode: string; size: string; empty: number; staged: number }
   const zoneMap = new Map<number, Map<string, Breakdown>>();
   for (const loc of locations) {
     if (storageCode && loc.storageCode.toUpperCase() !== storageCode) continue;
     if (size && loc.size.toUpperCase() !== size) continue;
     if (loc.contraction) continue;
+    if (loc.holdCategory != null && loc.holdCategory !== 'HOLD_OUT') continue;
     if (loc.status !== 'EMPTY' && loc.status !== 'STAGED') continue;
     if (!zoneMap.has(loc.zone)) zoneMap.set(loc.zone, new Map());
     const breakdown = zoneMap.get(loc.zone)!;
@@ -767,6 +833,13 @@ app.http('getStorageCodes', {
   authLevel: 'anonymous',
   route: 'storage-codes',
   handler: withHandler(getStorageCodes),
+});
+
+app.http('getWorkstations', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'workstations',
+  handler: withHandler(getWorkstations),
 });
 
 app.http('getLocationsEmptyByAisle', {

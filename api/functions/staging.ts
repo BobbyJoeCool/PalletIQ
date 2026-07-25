@@ -22,8 +22,10 @@ async function requireAisleExists(aisle: number): Promise<void> {
  * that no longer qualify are silently skipped and counted in `shortfall` rather than
  * failing the whole request, since a partial stage is still useful progress.
  *
- * @param req - HTTP request with body `{ aisle, storageCode, size, locationIds: string[] }`
- *   where each locationId is an 8-digit aisle+bin+level string
+ * @param req - HTTP request with body `{ aisle, storageCode, size, zone?, locationIds:
+ *   string[] }` where each locationId is an 8-digit aisle+bin+level string. `zone`
+ *   (optional) is only used for the trailing next-location look-ahead below — the
+ *   `locationIds` themselves were already resolved by the caller before this call.
  * @returns `{ staged: string[]; shortfall: number; nextLocation: string | null }`
  * @throws 400 INVALID_INPUT for missing fields or a malformed locationId;
  *   404 NOT_FOUND if the aisle has no location records
@@ -35,6 +37,7 @@ async function stageLocations(req: HttpRequest): Promise<unknown> {
     aisle: number;
     storageCode: string;
     size: string;
+    zone?: number;
     locationIds: string[];
   };
 
@@ -96,6 +99,7 @@ async function stageLocations(req: HttpRequest): Promise<unknown> {
   const next = await findNextStagingLocation(body.aisle, {
     storageCode: body.storageCode,
     size: body.size,
+    zone: body.zone,
     afterBin: last?.bin,
     afterLevel: last?.level,
   });
@@ -278,8 +282,9 @@ async function restageAisle(req: HttpRequest): Promise<unknown> {
  * indexed query on its own).
  *
  * @param req - HTTP request with query params `aisle`, `storageCode`, `size` (all
- *   required), optional `afterBin`, `afterLevel`, and optional `count` (default 1, the
- *   number of locations to return in one call)
+ *   required), optional `zone` (1-4, restricts the search to that zone only), optional
+ *   `afterBin`, `afterLevel`, and optional `count` (default 1, the number of locations
+ *   to return in one call)
  * @returns `{ locations: string[] }` — 0 to `count` location IDs, walking forward;
  *   shorter than `count` if the aisle runs out of eligible locations first
  * @throws 400 INVALID_INPUT if any required query param is missing or non-numeric
@@ -297,6 +302,10 @@ async function getNextStagingLocation(req: HttpRequest): Promise<unknown> {
   const aisle = parseInt(aisleParam, 10);
   if (isNaN(aisle)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
+  const zoneParam = params.get('zone');
+  const zone = zoneParam ? parseInt(zoneParam, 10) : undefined;
+  if (zoneParam && isNaN(zone!)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
   const afterBinParam = params.get('afterBin');
   const afterLevelParam = params.get('afterLevel');
   let afterBin = afterBinParam ? parseInt(afterBinParam, 10) : undefined;
@@ -310,6 +319,7 @@ async function getNextStagingLocation(req: HttpRequest): Promise<unknown> {
     const next = await findNextStagingLocation(aisle, {
       storageCode: storageCode.toUpperCase(),
       size: size.toUpperCase(),
+      zone,
       afterBin,
       afterLevel,
     });

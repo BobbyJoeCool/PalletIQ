@@ -34,7 +34,7 @@ export interface StagingCandidate {
  */
 export async function findNextStagingLocation(
   aisle: number,
-  opts: { storageCode?: string; size?: string; afterBin?: number; afterLevel?: number },
+  opts: { storageCode?: string; size?: string; zone?: number; afterBin?: number; afterLevel?: number },
 ): Promise<StagingCandidate | null> {
   const location = await prisma.location.findFirst({
     where: {
@@ -44,6 +44,7 @@ export async function findNextStagingLocation(
       ...NOT_HELD_FILTER,
       ...(opts.storageCode && { storageCode: opts.storageCode }),
       ...(opts.size        && { size:        opts.size }),
+      ...(opts.zone != null && { zone: opts.zone }),
       ...(opts.afterBin != null && {
         AND: [
           {

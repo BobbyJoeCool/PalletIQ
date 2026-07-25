@@ -61,8 +61,10 @@ async function fetchStagingLocations(
   storageCode: string,
   size: string,
   count: number,
+  zone?: string,
 ): Promise<string[]> {
   const params = new URLSearchParams({ aisle, storageCode, size, count: String(count) });
+  if (zone) params.set('zone', zone);
   const { locations } = await apiFetch<{ locations: string[] }>(
     `/api/staging/next-location?${params.toString()}`,
     token,
@@ -128,21 +130,33 @@ function PalletBox({
   );
 }
 
-/** Non-interactive display of a field currently inheriting Master Control's value (issue
- *  #99) — same visual chrome as PalletBox (so swapping between this and the real entry
- *  field on override-toggle never shifts layout) but with no button/tap/active-caret
- *  behavior, since there's nothing to edit while a field is following Master Control. */
-function InheritedDisplay({ label, value }: { label: string; value: string }) {
+/** Display of a field currently inheriting Master Control's value (issue #99) — same
+ *  visual chrome as PalletBox (so swapping between this and the real entry field on
+ *  override-toggle never shifts layout). Tapping it activates that field's override
+ *  directly (STG fix — previously required tapping the separate OVERRIDE toggle first).
+ *  `reserveToggleSpace` reserves the same trailing width `PalletCodePicker`'s own popup
+ *  toggle button occupies (STG fix — Storage/Size/Zone's box was narrower than Aisle's
+ *  while overridden, since only they have that extra button eating into their row's
+ *  shared space; reserving the same space here keeps the box itself a fixed width
+ *  whether the field is overridden or not). */
+function InheritedDisplay({ label, value, onActivate, reserveToggleSpace = false }: { label: string; value: string; onActivate: () => void; reserveToggleSpace?: boolean }) {
   return (
-    <div className="relative flex-1 flex items-center justify-between px-2 rounded-[5px] border-2 border-[#3A3A3A] bg-[#0D0D0D] min-h-0">
-      <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
-      <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
-      <span className="relative font-ui font-medium uppercase tracking-wider text-[#9A9A9A] text-[9px]">
-        {label}
-      </span>
-      <span className="relative font-data font-semibold text-white text-[15px]">
-        {value || <span className="text-[#444]">—</span>}
-      </span>
+    <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
+      <button
+        type="button"
+        onClick={onActivate}
+        className="relative flex-1 min-w-0 flex items-center justify-between px-2 rounded-[5px] border-2 border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555] transition-colors"
+      >
+        <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
+        <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
+        <span className="relative font-ui font-medium uppercase tracking-wider text-[#9A9A9A] text-[9px]">
+          {label}
+        </span>
+        <span className="relative font-data font-semibold text-white text-[15px]">
+          {value || <span className="text-[#444]">—</span>}
+        </span>
+      </button>
+      {reserveToggleSpace && <span className="shrink-0 w-[20px]" aria-hidden />}
     </div>
   );
 }
@@ -328,6 +342,10 @@ function RejectHoldDialog({ locationId, onClose, onHeld }: { locationId: string;
 
 const STACK_LABELS = ['Staging', 'Next', 'On Deck'] as const;
 
+/** Fixed zone options (1-4) for the per-stack Zone override's dropdown-helper popup — a
+ *  small known set, unlike Storage Code/Size which depend on the stack's own aisle. */
+const ZONE_OPTIONS: CodeOption[] = ['1', '2', '3', '4'].map((z) => ({ code: z, desc: `Zone ${z}` }));
+
 /**
  * One of the three stack-entry boxes riding the forks (issue #81 — restores the three-
  * independent-stacks layout that #77 had collapsed to one, but keeps #77's rule that only
@@ -392,6 +410,10 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
     playAlert('error');
     setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Size - Invalid Entry` });
   }, [index, setMessage]);
+  const handleInvalidZone = useCallback(() => {
+    playAlert('error');
+    setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Zone - Invalid Entry` });
+  }, [index, setMessage]);
 
   /** Validates a confirmed Aisle entry actually exists (the other open STG validation-
    *  checklist item), mirroring SDP's own `handleAisleConfirm` — clears the field and
@@ -444,14 +466,20 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   const toggleSizeOverride = useCallback(() => {
     updateStack(index, stack.sizeOverride ? { sizeOverride: false, size: '' } : { sizeOverride: true, size: master.size });
   }, [index, stack.sizeOverride, master.size, updateStack]);
+  // Zone has no Master Control field to pre-fill from (unlike Aisle/Storage/Size) — arming
+  // just starts it blank, disarming clears it back out the same as the others.
+  const toggleZoneOverride = useCallback(() => {
+    updateStack(index, stack.zoneOverride ? { zoneOverride: false, zone: '' } : { zoneOverride: true, zone: '' });
+  }, [index, stack.zoneOverride, updateStack]);
 
-  /** Clears this one stack's Aisle/Storage/Size/Qty (and any active overrides on them) and
-   *  any computed locations/shortfall — the single-slot version of `clearForks()`'s own
+  /** Clears this one stack's Aisle/Storage/Size/Zone/Qty (and any active overrides on them)
+   *  and any computed locations/shortfall — the single-slot version of `clearForks()`'s own
    *  logic, independent of the other two stacks (mirrors STG#06's per-stack scoping). */
   const clearStack = useCallback(() => {
     updateStack(index, {
       aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0,
       aisleOverride: false, storageCodeOverride: false, sizeOverride: false,
+      zone: '', zoneOverride: false,
     });
   }, [index, updateStack]);
 
@@ -479,13 +507,37 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
       <div className="flex-1 min-h-0 flex flex-col-reverse gap-[3px]">
         {/* Aisle — a non-interactive display of Master Control's current value while not
          *  overridden, the normal editable box once it is (issue #99). Override toggle sits
-         *  to the *left* of the field per direct instruction. */}
+         *  to the *left* of the field per direct instruction. Tapping the display itself
+         *  also arms the override directly (STG fix — no longer requires tapping OVERRIDE
+         *  first). */}
         <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
           <OverrideToggle active={stack.aisleOverride} onClick={toggleAisleOverride} ariaLabel={`${STACK_LABELS[index]} Aisle override`} />
           {stack.aisleOverride ? (
             <PalletBox label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} tinted />
           ) : (
-            <InheritedDisplay label="Aisle" value={master.aisle} />
+            <InheritedDisplay label="Aisle" value={master.aisle} onActivate={toggleAisleOverride} />
+          )}
+        </div>
+        {/* Zone — override-only, no Master Control equivalent to inherit from (unlike
+         *  Aisle/Storage/Size); off just means "no zone restriction" on this stack's
+         *  destination search. Same OverrideToggle-plus-field pattern as the others for
+         *  visual/interaction consistency. */}
+        <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
+          <OverrideToggle active={stack.zoneOverride} onClick={toggleZoneOverride} ariaLabel={`${STACK_LABELS[index]} Zone override`} />
+          {stack.zoneOverride ? (
+            <PalletCodePicker
+              label="Zone"
+              ariaLabel={`${STACK_LABELS[index]} Zone`}
+              value={stack.zone}
+              onChange={(v) => updateStack(index, { zone: v })}
+              options={ZONE_OPTIONS}
+              maxLength={1}
+              strict
+              onInvalid={handleInvalidZone}
+              tinted
+            />
+          ) : (
+            <InheritedDisplay label="Zone" value="" onActivate={toggleZoneOverride} reserveToggleSpace />
           )}
         </div>
         <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
@@ -504,7 +556,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               tinted
             />
           ) : (
-            <InheritedDisplay label="Storage" value={master.storageCode} />
+            <InheritedDisplay label="Storage" value={master.storageCode} onActivate={toggleStorageOverride} reserveToggleSpace />
           )}
         </div>
         <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
@@ -524,7 +576,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               tinted
             />
           ) : (
-            <InheritedDisplay label="Size" value={master.size} />
+            <InheritedDisplay label="Size" value={master.size} onActivate={toggleSizeOverride} reserveToggleSpace />
           )}
         </div>
         {/* Clear (this one stack's local entry only, never Master Control) + Qty, combined
@@ -623,7 +675,7 @@ function LocationsPanel({ height }: { height?: number }) {
       return;
     }
     let cancelled = false;
-    fetchStagingLocations(token!, frontEffective.aisle, frontEffective.storageCode, frontEffective.size, qty)
+    fetchStagingLocations(token!, frontEffective.aisle, frontEffective.storageCode, frontEffective.size, qty, frontEffective.zone)
       .then((locations) => {
         if (cancelled) return;
         if (expectingSuggestionRef.current) {
@@ -639,7 +691,7 @@ function LocationsPanel({ height }: { height?: number }) {
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frontEffective.aisle, frontEffective.storageCode, frontEffective.size, front.quantity, dataVersion]);
+  }, [frontEffective.aisle, frontEffective.storageCode, frontEffective.size, frontEffective.zone, front.quantity, dataVersion]);
 
   const qty = parseInt(front.quantity, 10) || 0;
   const canStage = !!frontEffective.aisle && !!frontEffective.storageCode && !!frontEffective.size && qty > 0 && front.locations.length > 0;
@@ -655,6 +707,7 @@ function LocationsPanel({ height }: { height?: number }) {
           aisle: parseInt(frontEffective.aisle, 10),
           storageCode: frontEffective.storageCode,
           size: frontEffective.size,
+          ...(frontEffective.zone && { zone: parseInt(frontEffective.zone, 10) }),
           locationIds: front.locations,
         }),
       });

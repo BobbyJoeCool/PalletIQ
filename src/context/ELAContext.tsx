@@ -9,6 +9,26 @@ interface ELAContextValue {
    *  buttons), or null if none is selected. */
   selected: number | null;
   setSelected: (aisle: number | null) => void;
+  /** Aisle Range filter (GitHub #124) — restricts results to aisles within
+   *  [aisleStart, aisleEnd] inclusive. Either end alone is a valid open-ended range. */
+  aisleStart: string;
+  setAisleStart: (v: string) => void;
+  aisleEnd: string;
+  setAisleEnd: (v: string) => void;
+  /** Workstation restrict-to filter (GitHub #124) — single workstation id; when set,
+   *  narrows results to just that workstation's aisles. Independent of the
+   *  exclude-bubble Workstation filter below (both can be active at once). */
+  workstation: string;
+  setWorkstation: (v: string) => void;
+  /** Workstation exclude filter (GitHub #125) — the filter-button's own on/off state,
+   *  independent of which workstations are marked for exclusion below (turning this off
+   *  disables the exclusion without losing the marked set). */
+  workstationFilterActive: boolean;
+  setWorkstationFilterActive: (v: boolean) => void;
+  /** Workstation ids currently marked "excluded" in the filter's popup (red bubbles) —
+   *  only actually applied to the search when `workstationFilterActive` is also true. */
+  excludedWorkstations: string[];
+  setExcludedWorkstations: (v: string[]) => void;
 }
 
 const ELAContext = createContext<ELAContextValue | null>(null);
@@ -29,8 +49,21 @@ export function ELAProvider({ children }: { children: React.ReactNode }) {
   const [storageCode, setStorageCode] = useState('');
   const [size, setSize] = useState('');
   const [selected, setSelected] = useState<number | null>(null);
+  const [aisleStart, setAisleStart] = useState('');
+  const [aisleEnd, setAisleEnd] = useState('');
+  const [workstation, setWorkstation] = useState('');
+  const [workstationFilterActive, setWorkstationFilterActive] = useState(false);
+  const [excludedWorkstations, setExcludedWorkstations] = useState<string[]>([]);
   return (
-    <ELAContext.Provider value={{ storageCode, setStorageCode, size, setSize, selected, setSelected }}>
+    <ELAContext.Provider
+      value={{
+        storageCode, setStorageCode, size, setSize, selected, setSelected,
+        aisleStart, setAisleStart, aisleEnd, setAisleEnd,
+        workstation, setWorkstation,
+        workstationFilterActive, setWorkstationFilterActive,
+        excludedWorkstations, setExcludedWorkstations,
+      }}
+    >
       {children}
     </ELAContext.Provider>
   );
