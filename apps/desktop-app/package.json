@@ -1,0 +1,10 @@
+{
+  "name": "palletiq-desktop-app",
+  "private": true,
+  "version": "1.0.0",
+  "description": "PalletIQ Manager Desktop — Electron-bundled web app for DESKTOP-bucket screens (DPCI Setup Edit, Embedded Floor App, Hung Pallet/Location Resolution, Job/Function Assignment, Location Setup Edit, Prod Goal/Ramping/Daily Plan, Team Prod Summary, Universal Audit Tool). Shares ../../api and ../../shared with the floor-app; versioned and changelogged independently. See DevNotes/DesignPrompts/Desktop/ for the design docs this was scaffolded from, and DevNotes/Logs/Desktop/V1.0/version-1_0_0.md for what's been done so far.",
+  "type": "module",
+  "scripts": {},
+  "dependencies": {},
+  "devDependencies": {}
+}

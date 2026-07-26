@@ -6,12 +6,17 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 import prettier from 'eslint-config-prettier'
 
+// Note: ESLint's flat config can only govern files inside this config's own directory
+// tree — ../../shared/ (used by this app, api/, and apps/desktop-app/) can't be linted
+// from here even via a `files` pattern reaching outside it. It's still fully
+// type-checked as part of `npm run build` via the `@shared/*` tsconfig path; it just
+// isn't covered by any project's `npm run lint` as a side effect of each app owning
+// its own config independently.
 export default defineConfig([
-  globalIgnores(['dist', 'api/dist']),
+  globalIgnores(['dist']),
 
-  // Frontend — src/ and shared/
   {
-    files: ['src/**/*.{ts,tsx}', 'shared/**/*.ts'],
+    files: ['src/**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
@@ -21,19 +26,6 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: globals.browser,
-    },
-  },
-
-  // Backend — api/
-  {
-    files: ['api/**/*.ts'],
-    extends: [
-      js.configs.recommended,
-      tseslint.configs.recommended,
-      prettier,
-    ],
-    languageOptions: {
-      globals: globals.node,
     },
   },
 ])

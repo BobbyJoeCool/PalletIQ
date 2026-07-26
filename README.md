@@ -1,144 +1,35 @@
 # PalletIQ
 
-## Table of Contents
+A warehouse inventory/pallet-tracking system, built as a portfolio piece from 20 years of real warehouse operations and retail management experience — see [`apps/floor-app/README.md`](apps/floor-app/README.md) for the full story of why this exists and what it does.
 
-- [Why This Exists](#why-this-exists)
-- [What It Does](#what-it-does)
-- [What's Deliberately Left Out](#whats-deliberately-left-out)
-- [Tech Stack](#tech-stack)
-- [Architecture](#architecture)
-- [How This Was Built](#how-this-was-built)
-- [Project Structure](#project-structure)
-- [Documentation](#documentation)
-- [Status](#status)
+This repository is a **monorepo of independently-versioned pieces**, each with its own `package.json` and `CHANGELOG.md`:
 
----
+| Piece | What it is | Own docs |
+|---|---|---|
+| [`api/`](api/) | Shared backend — Azure Functions + Prisma/MySQL, used by both apps below | [`api/CHANGELOG.md`](api/CHANGELOG.md) |
+| [`apps/floor-app/`](apps/floor-app/) | The original PalletIQ app — runs on the SYMBOL tablet | [`apps/floor-app/README.md`](apps/floor-app/README.md), [`apps/floor-app/CHANGELOG.md`](apps/floor-app/CHANGELOG.md) |
+| [`apps/desktop-app/`](apps/desktop-app/) | Manager-facing desktop app (Electron), covering DPCI/Location Setup, Job/Function Assignment, Team Prod Summary, and more — **scaffold only so far** | [`apps/desktop-app/README.md`](apps/desktop-app/README.md), [`apps/desktop-app/CHANGELOG.md`](apps/desktop-app/CHANGELOG.md) |
 
-## Why This Exists
+`shared/` (repo root) holds TypeScript types and constants imported by all three — a `Pallet` or a `Location` is defined once, so a data-shape change is a compile error everywhere it's used, not a runtime surprise.
 
-I spent 20 years in warehouse operations and retail management — including inventory control and quality assurance at Target Distribution, and five years as a store manager in convenience retail. PalletIQ is built from that experience, specifically the operational middle layer of a warehouse that most WMS demo projects skip over: not receiving, not shipping, but everything that happens to a pallet between those two events.
+## Database query failing unexpectedly?
 
-Most portfolio inventory projects model inventory at the item level — "we have 40 units of SKU 12345" — and stop there. That's not how a real warehouse works. A real warehouse tracks inventory **by location**, handles partial cartons and loose units alongside full pallets, and has to account for things like a pallet getting moved mid-shift, a location going bad, or a worker needing to override a system suggestion because they can see something the system can't.
+This project migrated off Azure SQL Server to a self-hosted MySQL instance (see GitHub #139). Check [`Documentation/Flowcharts-ERDs/database.mmd`](Documentation/Flowcharts-ERDs/database.mmd)'s "TROUBLESHOOTING" comment block first — a checklist for whether something didn't carry over correctly in that engine switch, before assuming the query logic itself is wrong.
 
-PalletIQ is designed as a focused improvement on a real system I used for years. It keeps the parts that worked, fixes the friction points that didn't, and adds one genuinely new feature (Stage Aisle) that the original system never had.
+## Where things live
 
----
+- **Functional spec, screen specs, ERDs:** [`Documentation/`](Documentation/) — currently floor-app-focused (the desktop app's design docs live separately, see below), shared across the monorepo the same way `shared/` and `DevNotes/` are.
+- **Design docs / dev session logs:** [`DevNotes/`](DevNotes/) — `DevNotes/DesignPrompts/Desktop/` and `DevNotes/Logs/Desktop/` hold the desktop app's own design history; everything else there is the floor-app/API's.
+- **GitHub Issues** track all bugs and feature work — see each app's own `README.md` for how issues are organized for that piece.
 
-## What It Does
+## Getting started
 
-PalletIQ covers four core functions:
-
-- **Pull** — a single screen handling every pull type (Carton Air, Full Pallet, Bulk, Carton Floor), driven by pull labels and confirmed through independent Pallet ID, UPC, or Location verification fields — any one completing the pull.
-- **Put** — both directed put-away (the system tells you where to go, with zone logic that respects how aisles actually get staged) and manual put (you tell the system where you put it, with safety checks).
-- **Pallet ID and Location ID lookup** — full detail screens for any pallet or any location, reachable by tapping any pallet or location reference anywhere in the app.
-- **Empty Locations** — both an aisle-level summary and a visual, zone-by-zone map of an aisle's open locations, built for the person physically staging that aisle.
-
-It's also built around a few opinionated design decisions that came directly from warehouse floor experience:
-
-- **No blocking pop-ups.** Workers are moving fast and scanning constantly — the system gives feedback through a persistent message bar and audio alerts, not modal dialogs that have to be dismissed.
-- **Tap anything.** Every pallet ID and location ID rendered anywhere in the app is a live link to that thing's detail screen.
-- **Numeric input first.** There's no physical keyboard on the device, so almost everything — pallet IDs, locations, quantities — is entered on an on-screen numpad rather than a full keyboard.
-- **A real permission hierarchy.** Four roles (Worker, Inventory Manager, Lead Worker, System Admin), strictly inheriting upward, with field-level and action-level gating rather than hiding whole screens from people who can't use every feature on them.
-
-The full functional specification lives in [`outline.md`](Documentation/outline.md).
-
----
-
-## What's Deliberately Left Out
-
-This is intentionally **not** a full WMS. It excludes inbound receiving, outbound shipping, vendor and customer management, procurement, and multi-warehouse support — those are different systems with different concerns, and bolting them on would dilute what this project is actually trying to demonstrate.
-
-Warehouse setup (creating aisles and locations) and user account management are also out of scope for the same reason — they're administrative CRUD that doesn't showcase the interesting domain logic, so this project seeds that data directly instead of building screens for it.
-
-See the **Explicitly Out of Scope** section of [`outline.md`](Documentation/outline.md) for the full list, including a couple of forward-looking notes on what the data model intentionally leaves room for later.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | React 18, TypeScript, Vite, TailwindCSS |
-| API | Azure Functions (TypeScript / Node.js) |
-| Hosting | Local (developer laptop, LAN-served to demo devices — see GitHub #139) |
-| Database | Self-hosted MySQL, local demo phase (see GitHub #139) |
-| ORM | Prisma |
-| Auth | Badge + PIN login, custom DB-backed flow issuing signed JWTs (Azure AD B2C is not used) |
-
-> **Database query failing unexpectedly?** This app migrated off Azure SQL Server to
-> self-hosted MySQL (GitHub #139). Check `Documentation/Flowcharts-ERDs/database.mmd`'s
-> "TROUBLESHOOTING" comment block first — it's a checklist for whether something didn't
-> carry over correctly in that engine switch, before assuming the query logic is wrong.
-
-This is an intentionally all-TypeScript stack. A `shared/` package defines types once — a `Pallet` or a `Location` — and both the React frontend and the Azure Functions backend import the same definitions. A change to a data shape is a compile error in both places at once, not a runtime surprise.
-
----
-
-## Architecture
-
-The project is a single monorepo with three top-level pieces:
-
-- **`src/`** — the React app, built with Vite.
-- **`api/`** — Azure Functions, one per route, sharing a Prisma client singleton against a self-hosted MySQL instance (local demo phase — see GitHub #139).
-- **`shared/`** — TypeScript types and constants imported by both of the above.
-
-The React app and the Azure Functions API run locally on the developer's laptop for the demo phase (see GitHub #139), the API served over the LAN to the tablet. Azure Static Web Apps hosting/deploy is not currently wired up (its GitHub Actions workflow was removed alongside this migration); re-pointing at Azure SWA and/or Azure SQL remains straightforward if this goes to a hosted deployment later.
-
-A few architectural decisions worth calling out for anyone reviewing this as a portfolio piece:
-
-- **Location-level inventory**, not item-level. The `Pallet` model holds a nullable Aisle/Bin/Level reference to the `Location` it's stored at (not the reverse), so a pallet's location is always found by reading that pallet's own FK — guaranteeing a pallet can never appear to exist in two places at once. A single `Location` can hold more than one `Pallet` at a time (e.g. Bulk storage), which is why the relationship is one-to-many, not the other way around. Quantities are tracked in three units simultaneously (Pallets, Cartons, SSPs) because real warehouse locations can hold any combination of full pallets, full cartons, and loose units.
-- **Reservation locking with server-side timeout cleanup.** When a worker is directed to a put-away location, that location is locked (`Reserved`) and the worker's screen is locked to that transaction. A timer-triggered Azure Function clears stale reservations after five minutes, so a dropped connection or a worker walking away doesn't permanently strand a location.
-- **An activity log designed for queries, not just storage.** Every meaningful transaction (puts, pulls, moves, holds, pallet edits) writes to a database table rather than a flat log file, specifically so it can be filtered by location, pallet, item, or user — and so a logged reference can link back to the live record it describes.
-- **Pallet quantity units.** The `Pallet` table carries a `cartonsPerPallet` field — the number of cartons that make up one full pallet of that specific load, fixed at creation (receiving or Pallet Reinstate) and backfilled onto every pre-existing row — used to convert between pallet-count and carton-count for bulk locations holding multiple complete pallets (added v1.6.11).
-
----
-
-## How This Was Built
-
-This project was designed and built in close collaboration with Claude (Anthropic), working through the functional design conversationally before any code was written — starting from the existing Target System's behavior, identifying what to keep and what to improve, and only then translating that into a tech stack, a data model, and a build plan. The full design conversation is reflected in [`outline.md`](Documentation/outline.md), which was written before implementation began.
-
----
-
-## Project Structure
+Each piece installs and runs independently from its own folder:
 
 ```
-palletiq/
-├── src/                  React app (Vite)
-│   ├── components/
-│   ├── pages/
-│   ├── hooks/
-│   ├── services/         Typed API client calls
-│   ├── context/          Auth, global state
-│   └── types/
-├── api/                  Azure Functions (Node/TypeScript)
-│   ├── src/
-│   │   ├── functions/    One file per route
-│   │   ├── lib/          Prisma client, shared helpers
-│   │   └── middleware/   Auth, validation
-│   └── host.json
-├── shared/               Types and constants used by both src/ and api/
-│   ├── types/
-│   └── constants/
-├── staticwebapp.config.json
-└── vite.config.ts
+cd apps/floor-app && npm install && npm run dev     # floor app (Vite dev server)
+cd api && npm install && npm start                   # backend (Azure Functions Core Tools)
+cd apps/desktop-app                                  # desktop app — scaffold only, nothing to run yet
 ```
 
----
-
-## Documentation
-
-- [`Documentation/outline.md`](Documentation/outline.md) — the full functional specification: every screen, every rule, every edge case
-- [`Documentation/Development/initialBuildTasks.md`](Documentation/Development/initialBuildTasks.md) — the original 11-phase build plan, archived as of v1.0.0. There's no live `tasks.md` — ongoing work (bug fixes, feature-change requests) is tracked directly in [`CHANGELOG.md`](CHANGELOG.md)'s `Unreleased — Reported Issues` section instead
-- [`Documentation/Flowcharts-ERDs/database.mmd`](Documentation/Flowcharts-ERDs/database.mmd) — entity-relationship diagram
-- [`Documentation/Flowcharts-ERDs/uiFlow.mmd`](Documentation/Flowcharts-ERDs/uiFlow.mmd) — top-level screen-to-screen navigation map
-- [`Documentation/Flowcharts-ERDs/auth-flow.mmd`](Documentation/Flowcharts-ERDs/auth-flow.mmd), [`mnp-flow.mmd`](Documentation/Flowcharts-ERDs/mnp-flow.mmd), [`sdp-flow.mmd`](Documentation/Flowcharts-ERDs/sdp-flow.mmd), [`pip-flow.mmd`](Documentation/Flowcharts-ERDs/pip-flow.mmd) — task-lifecycle flow diagrams for login, manual put, directed put, and pull
-- [`Documentation/Flowcharts-ERDs/enums.mmd`](Documentation/Flowcharts-ERDs/enums.mmd) — enum/status value reference
-- [`Documentation/ScreenSpecs/`](Documentation/ScreenSpecs/) — one functional design doc per screen (ELA, ELZ, IID, IRP, ISI, LII, MNP, PAR, PII, PIP, SAR, SDP, STG, WLH built; PRQ reserved code not yet built — see each doc's own status note). This superseded the older `DevNotes/Screen-Specs/` as of v1.6.7 — that location is retired/historical, kept only as a record of the pre-v1.6.7 format
-- [`Documentation/seed-reference.md`](Documentation/seed-reference.md) — demo seed data reference
-- [`Documentation/UI_Wireframes/UI_Design_Guide.md`](Documentation/UI_Wireframes/UI_Design_Guide.md) — UI design conventions
-
----
-
-## Status
-
-**v1.0.0 — feature-complete.** All 11 phases of the original build plan are done: every core screen is built, the app is deployed to Azure Static Web Apps, and the audio alert system (the last open item) shipped in this release. `Documentation/Development/initialBuildTasks.md` is kept as a historical record of that build plan; it's no longer updated. Ongoing work — bugs and feature-change requests surfaced during testing — is tracked in [`CHANGELOG.md`](CHANGELOG.md)'s `Unreleased — Reported Issues` section, grouped by screen.
+See each folder's own `README.md`/`package.json` for the full set of scripts.
