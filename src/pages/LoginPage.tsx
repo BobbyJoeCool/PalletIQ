@@ -16,7 +16,7 @@ import { useMessageBar } from '../context/MessageBarContext';
  * Uses its own MessageBarProvider (provided by LoginPage) so error messages don't bleed into
  * the shell's message bar.
  */
-/** Matches the connectTimeout bump on the Azure SQL connection string (see local.settings.azure.json) — a cold serverless resume can take close to this long. */
+/** Matched the connectTimeout bump on the old Azure SQL connection string — a cold serverless resume could take close to this long. Kept as the wait window for the local MySQL setup's connectivity check too (GitHub #139), since a plain health-check timeout still needs some ceiling. */
 const WAKE_TIMEOUT_SECONDS = 60;
 
 function LoginContent() {
@@ -73,6 +73,8 @@ function LoginContent() {
    * Hits the health-check endpoint to force Azure SQL out of auto-pause before the worker
    * attempts to log in. A cold resume can take up to a minute, so this is offered as an
    * optional pre-warm step rather than something the login flow waits on automatically.
+   * No-op-equivalent on the local MySQL setup (GitHub #139), which doesn't auto-pause —
+   * kept as a plain pre-login connectivity check.
    */
   const handleWakeDatabase = async () => {
     if (wakeStatus === 'waking') return;

@@ -1,6 +1,7 @@
 // Shared cross-cutting TypeScript types consumed by both src/ and api/.
 
-// ─── String unions (enum equivalents for SQL Server) ─────────────────────────
+// ─── String unions (enum equivalents, kept as plain strings across the SQL Server →
+//     MySQL migration, GitHub #139, rather than switching to native Prisma enums) ─────
 
 export type Role = 'ADMIN' | 'MANAGER' | 'LEAD' | 'IM' | 'WORKER';
 

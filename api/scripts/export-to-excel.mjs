@@ -6,32 +6,36 @@
  * Output: scripts/palletiq-export-<YYYY-MM-DD>.xlsx
  */
 
-import sql from 'mssql';
+import 'dotenv/config';
+import mariadb from 'mariadb';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Reads DATABASE_URL from api/.env (via dotenv/config) rather than hardcoding
+// credentials in this git-tracked script — see GitHub #139 (Azure SQL -> MySQL migration).
+// Parsed into a plain config object since the `mariadb` package's own URL parsing only
+// accepts a `mariadb://` scheme, not the `mysql://` scheme Prisma's DATABASE_URL uses.
+const dbUrl = new URL(process.env.DATABASE_URL);
 const DB_CONFIG = {
-  server:   'palletiq.database.windows.net',
-  database: 'palletiq-db',
-  user:     'z002p25',
-  password: 'NukeUm85',
-  options: {
-    encrypt: true,
-    trustServerCertificate: false,
-  },
+  host: dbUrl.hostname,
+  port: Number(dbUrl.port) || 3306,
+  user: decodeURIComponent(dbUrl.username),
+  password: decodeURIComponent(dbUrl.password),
+  database: dbUrl.pathname.replace(/^\//, ''),
 };
 
-// Tables in the order we want them as sheets
+// Tables in the order we want them as sheets. `User` is a reserved word in MySQL
+// (backtick-quoted below), unlike the old SQL Server `[User]` bracket quoting.
 const TABLES = [
   'StorageCode',
   'PackingZone',
   'Department',
   'HoldType',
   'Store',
-  '[User]',
+  'User',
   'Item',
   'Location',
   'Pallet',
@@ -40,12 +44,12 @@ const TABLES = [
 ];
 
 function sheetName(table) {
-  return table.replace(/[\[\]]/g, '');
+  return table;
 }
 
 async function main() {
   console.log('Connecting to database…');
-  const pool = await sql.connect(DB_CONFIG);
+  const conn = await mariadb.createConnection(DB_CONFIG);
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'PalletIQ Export';
@@ -53,18 +57,15 @@ async function main() {
 
   for (const table of TABLES) {
     process.stdout.write(`  Exporting ${sheetName(table)}… `);
-    let result;
+    let rows;
     try {
-      result = await pool.request().query(`SELECT * FROM ${table}`);
+      rows = await conn.query(`SELECT * FROM \`${table}\``);
     } catch (err) {
       console.log(`SKIP (${err.message})`);
       continue;
     }
 
-    const rows = result.recordset;
-    const cols = result.recordset.columns
-      ? Object.keys(result.recordset.columns)
-      : rows.length ? Object.keys(rows[0]) : [];
+    const cols = rows.length ? Object.keys(rows[0]) : [];
 
     const sheet = workbook.addWorksheet(sheetName(table));
 
@@ -106,7 +107,7 @@ async function main() {
     console.log(`${rows.length} rows`);
   }
 
-  await pool.close();
+  await conn.end();
 
   const today = new Date().toISOString().slice(0, 10);
   const outPath = path.join(__dirname, `palletiq-export-${today}.xlsx`);

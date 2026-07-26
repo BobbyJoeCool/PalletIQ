@@ -1,28 +1,57 @@
 erDiagram
 
     %% ============================================================
+    %% TROUBLESHOOTING — read this first if a DB query fails unexpectedly
+    %% ============================================================
+    %% This app migrated its database engine from Azure SQL Server to a self-hosted
+    %% MySQL instance (GitHub #139). If a database query starts failing that wasn't
+    %% failing before — a type mismatch, a missing table/column, a broken query, an
+    %% auth/connection error — the FIRST thing to check is whether something didn't
+    %% get carried over correctly in that engine switch, before assuming the query
+    %% logic itself is wrong. Specifically check:
+    %%   - `api/prisma/schema.prisma`'s `datasource` provider is `mysql` (not `sqlserver`)
+    %%     and every field's `@db.*` type is a MySQL type (VarChar/Text/Decimal/Date),
+    %%     not a leftover SQL-Server-only type (NVarChar, etc.).
+    %%   - `api/prisma/migrations/` only contains MySQL-provider migrations
+    %%     (`migration_lock.toml` should read `provider = "mysql"`) — if SQL-Server-era
+    %%     migrations ever reappear or get mixed in, the migration history is corrupted.
+    %%   - `DATABASE_URL` (in `api/.env` and `api/local.settings.json`) points at the
+    %%     local MySQL instance (`mysql://...@localhost:3306/PalletIQ_DB`), not the old
+    %%     Azure SQL connection string.
+    %%   - Every Prisma client instantiation uses `@prisma/adapter-mariadb`'s
+    %%     `PrismaMariaDb`, not the old `@prisma/adapter-mssql`'s `PrismaMssql` — check
+    %%     `api/lib/prisma.ts` and any one-off scripts under `api/prisma/`/`api/scripts/`
+    %%     that create their own Prisma/DB client instead of importing the shared one.
+    %%   - Any raw SQL (`$queryRaw`/`$executeRaw`, or a direct driver query like
+    %%     `api/scripts/export-to-excel.mjs` used to run) uses MySQL syntax/identifier
+    %%     quoting (backticks, not SQL Server's square brackets), and doesn't rely on a
+    %%     SQL-Server-only function/keyword.
+    %% Full migration details, what was checked, and what changed: GitHub issue #139.
+    %% ============================================================
     %% COMPOSITE PRIMARY KEYS (Prisma @@id — not expressible in ERD)
     %% ============================================================
     %% Item:     @@id([dept, class, item], name: "DPCI")
     %% Location: @@id([aisle, bin, level], name: "LocationID")
     %% ============================================================
-    %% ENUMS — stored as NVarChar strings (Prisma v7 SQL Server does not support enum blocks)
-    %% LocationStatus: EMPTY, STORED, PULL_PENDING, RESERVED, STAGED                                           → NVarChar(15)
-    %% HoldCategory:   HOLD_IN, HOLD_OUT, HOLD_BOTH, HOLD_PERM (Location.holdCategory, independent of status)   → NVarChar(10)
-    %% LocationSize:   XS, HS, S, M, L                                                                         → NVarChar(2)
-    %% PalletStatus:   PUT_PENDING, STORED, CA_PULL_PEND, FP_PULL_PEND, PULLED, CANCELED, CONSOLIDATED         → NVarChar(15)
-    %% LabelStatus:    AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                  → NVarChar(15)
-    %% PullFunction:   CA (Carton Air), CF (Carton Floor), FP (Full Pallet), BK (Bulk/level-0, not in demo)   → NVarChar(2)
-    %% Role:           ADMIN, MANAGER, LEAD, IM, WORKER                                                        → NVarChar(10)
+    %% ENUMS — stored as VarChar strings by design continuity (MySQL's Prisma provider does
+    %% support native enum blocks, but these stayed as plain strings across the SQL Server → MySQL
+    %% migration, GitHub #139, rather than expanding scope)
+    %% LocationStatus: EMPTY, STORED, PULL_PENDING, RESERVED, STAGED                                           → VarChar(15)
+    %% HoldCategory:   HOLD_IN, HOLD_OUT, HOLD_BOTH, HOLD_PERM (Location.holdCategory, independent of status)   → VarChar(10)
+    %% LocationSize:   XS, HS, S, M, L                                                                         → VarChar(2)
+    %% PalletStatus:   PUT_PENDING, STORED, CA_PULL_PEND, FP_PULL_PEND, PULLED, CANCELED, CONSOLIDATED         → VarChar(15)
+    %% LabelStatus:    AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                  → VarChar(15)
+    %% PullFunction:   CA (Carton Air), CF (Carton Floor), FP (Full Pallet), BK (Bulk/level-0, not in demo)   → VarChar(2)
+    %% Role:           ADMIN, MANAGER, LEAD, IM, WORKER                                                        → VarChar(10)
     %% ActionType:     EDIT_PAL, PULL, RESERVE, PUT, UNASSIGN, BLOCK_PUT, RES_TMOUT, MNP_SCAN, STAGE, RESTAGE,
-    %%                 HOLD_PLACE, HOLD_CLEAR, REINSTATE, CONSOLID, MNP_CANCEL                                 → NVarChar(10)
+    %%                 HOLD_PLACE, HOLD_CLEAR, REINSTATE, CONSOLID, MNP_CANCEL                                 → VarChar(10)
     %% ============================================================
     %% BUSINESS RULES
     %% SSP must be a factor of VCP (enforced in app logic, not schema)
-    %% LID format: {storeCode(1-4)}{DPCI(9)}{pid(8)}{random(8)}{batchDate(7)} = NVarChar(36)
+    %% LID format: {storeCode(1-4)}{DPCI(9)}{pid(8)}{random(8)}{batchDate(7)} = VarChar(36)
     %% DPCI(9) is zero-padded: dept(3) + class(2) + item(4)
     %% pid: app-generated 8-digit Int with collision check
-    %% zNumber format: z###x## (z + 3 digits + 1 letter + 2 digits) = NVarChar(7)
+    %% zNumber format: z###x## (z + 3 digits + 1 letter + 2 digits) = VarChar(7)
     %% PurgeDate defaults to 7 days after batchDate, set at label creation in app logic
     %% Status change to PURGED triggered in app logic on purge date
     %% ActionType enum must be defined and expanded as features are built
@@ -34,14 +63,14 @@ erDiagram
         int dept PK "3 digits"
         int class PK "2 digits"
         int item PK "4 digits"
-        string upc "unique NVarChar(12)"
-        string name "NVarChar(50)"
-        string desc "NVarChar(Max)"
-        string descShort "NVarChar(155)"
+        string upc "unique VarChar(12)"
+        string name "VarChar(50)"
+        string desc "Text"
+        string descShort "VarChar(155)"
         decimal retailPrice "Decimal(10,2)"
         decimal cost "Decimal(10,2)"
         int packingZoneCode FK "→ PackingZone"
-        string storageCode FK "NVarChar(2) → StorageCode"
+        string storageCode FK "VarChar(2) → StorageCode"
         boolean conveyable "default: true"
         boolean requiresExpirationDate "default: false, v1.6.7 — per-DPCI setting, seeded true for food Storage Codes (FD/NF/RF); not derived from storageCode at runtime"
         decimal unitWeight "nullable, Decimal(10,2), v1.6.8 — pounds, displayed on IID"
@@ -49,22 +78,22 @@ erDiagram
 
     PackingZone {
         int id PK "2-digit int"
-        string desc "NVarChar(60)"
+        string desc "VarChar(60)"
     }
 
     StorageCode {
-        string id PK "NVarChar(2)"
-        string desc "NVarChar(60)"
+        string id PK "VarChar(2)"
+        string desc "VarChar(60)"
     }
 
     Workstation {
-        string id PK "NVarChar(4), e.g. CR01"
-        string name "NVarChar(60)"
+        string id PK "VarChar(4), e.g. CR01"
+        string name "VarChar(60)"
     }
 
     WorkstationAisle {
         int aisle PK "not a true FK to Location — aisle isn't unique there (Location's PK is aisle+bin+level); validated at the app layer instead"
-        string workstationId FK "NVarChar(4) → Workstation"
+        string workstationId FK "VarChar(4) → Workstation"
     }
 
     Location {
@@ -72,17 +101,17 @@ erDiagram
         int bin PK "3 digits"
         int level PK "2 digits"
         int zone "raw int, set by aisle"
-        string status "NVarChar(15), LocationStatus values"
-        string holdTypeCode FK "nullable, NVarChar(3) → HoldType — reason code; unused, see comment below"
-        string holdCategory "nullable, NVarChar(10), HoldCategory values — independent of status, added Phase 10"
-        string storageCode FK "NVarChar(2) → StorageCode"
-        string size "NVarChar(2), LocationSize values"
+        string status "VarChar(15), LocationStatus values"
+        string holdTypeCode FK "nullable, VarChar(3) → HoldType — reason code; unused, see comment below"
+        string holdCategory "nullable, VarChar(10), HoldCategory values — independent of status, added Phase 10"
+        string storageCode FK "VarChar(2) → StorageCode"
+        string size "VarChar(2), LocationSize values"
         boolean contraction "default: false, set by Lead+ via Aisle Setup (out of scope) — read-only in this app"
     }
 
     HoldType {
-        string code PK "NVarChar(3) → 1 letter (Department) 2 numbers (Reason)"
-        string desc "NVarChar(20)"
+        string code PK "VarChar(3) → 1 letter (Department) 2 numbers (Reason)"
+        string desc "VarChar(20)"
     }
 
     Pallet {
@@ -99,26 +128,26 @@ erDiagram
         int cartonsPerPallet "v1.6.11 — cartons making up ONE full pallet, fixed snapshot at creation (not live like currentCartons); every pallet gets this, not just PAR-created; rounding rule wholeCartons+(looseSSPs>0?1:0)"
         int vcp "Vendor Case Pack, eaches per carton"
         int ssp "Store Ship Pack, must be factor of vcp"
-        string status "NVarChar(15), PalletStatus values"
+        string status "VarChar(15), PalletStatus values"
         int locationAisle FK "nullable → Location"
         int locationBin FK "nullable → Location"
         int locationLevel FK "nullable → Location"
-        string storageCode FK "nullable, NVarChar(2) → StorageCode — inherited from wherever currently STORED, null if PUT_PENDING"
-        string size "nullable, NVarChar(2) — inherited from wherever currently STORED, null if PUT_PENDING"
+        string storageCode FK "nullable, VarChar(2) → StorageCode — inherited from wherever currently STORED, null if PUT_PENDING"
+        string size "nullable, VarChar(2) — inherited from wherever currently STORED, null if PUT_PENDING"
         int zone "nullable — inherited from wherever currently STORED, null if PUT_PENDING"
-        string receivedByZ FK "NVarChar(7) → User"
+        string receivedByZ FK "VarChar(7) → User"
         datetime receivedAt
-        string putByZ FK "nullable, NVarChar(7) → User"
+        string putByZ FK "nullable, VarChar(7) → User"
         datetime putAt "nullable"
-        string lastPulledByZ FK "nullable, NVarChar(7) → User"
+        string lastPulledByZ FK "nullable, VarChar(7) → User"
         datetime lastPulledAt "nullable"
-        string poNumber "nullable, NVarChar(20), v1.6.7 — receiving-side identifier, null on a PAR-reinstated pallet, read-only from every screen"
-        string apptNumber "nullable, NVarChar(20), v1.6.7 — receiving-side identifier, same null/read-only rules as poNumber"
+        string poNumber "nullable, VarChar(20), v1.6.7 — receiving-side identifier, null on a PAR-reinstated pallet, read-only from every screen"
+        string apptNumber "nullable, VarChar(20), v1.6.7 — receiving-side identifier, same null/read-only rules as poNumber"
         date expirationDate "nullable, db.Date, v1.6.7 — editable via PII Edit Mode (IM+); 1-month floor / 3-month confirm gate enforced in app logic"
     }
 
     Label {
-        string lid PK "NVarChar(36), app-generated composite"
+        string lid PK "VarChar(36), app-generated composite"
         int pid FK "→ Pallet"
         int dept FK "composite FK → Item"
         int class FK "composite FK → Item"
@@ -128,26 +157,26 @@ erDiagram
         int batchDate "Julian date e.g. 2026175"
         date purgeDate "db.Date, default 7 days after batchDate"
         int destinationStore FK "→ Store"
-        string status "NVarChar(15), LabelStatus values"
-        string pullFunction "NVarChar(2), PullFunction values, default CA"
+        string status "VarChar(15), LabelStatus values"
+        string pullFunction "VarChar(2), PullFunction values, default CA"
     }
 
     Store {
         int id PK "4-digit store code"
-        string name "NVarChar(40)"
+        string name "VarChar(40)"
     }
 
     User {
-        string zNumber PK "NVarChar(7), format z###x##"
-        string firstName "NVarChar(50)"
-        string lastName "NVarChar(50)"
-        string pinHash "NVarChar(60)"
-        string role "NVarChar(10), Role values"
-        string departmentId FK "NVarChar(3) → Department"
+        string zNumber PK "VarChar(7), format z###x##"
+        string firstName "VarChar(50)"
+        string lastName "VarChar(50)"
+        string pinHash "VarChar(60)"
+        string role "VarChar(10), Role values"
+        string departmentId FK "VarChar(3) → Department"
     }
 
     Department {
-        string id PK "NVarChar(3)"
+        string id PK "VarChar(3)"
         string name "INB, OUT, WHS, BKP, SEC, IQA"
     }
 
@@ -157,10 +186,10 @@ erDiagram
         int locationBin FK "→ Location"
         int locationLevel FK "→ Location"
         int palletId FK "→ Pallet"
-        string workerZ FK "NVarChar(7) → User"
+        string workerZ FK "VarChar(7) → User"
         int targetAisle "original search aisle"
-        string targetSize "nullable, NVarChar(2)"
-        string targetStorage "nullable, NVarChar(2)"
+        string targetSize "nullable, VarChar(2)"
+        string targetStorage "nullable, VarChar(2)"
         int targetZone "nullable"
         boolean consolidating "default: false, preserved for Blocked Put re-search"
         boolean pidWasScanned "nullable — Scan vs Enter verification-method tracking, see ActivityLog.details.verification"
@@ -171,8 +200,8 @@ erDiagram
     ActivityLog {
         int id PK "autoincrement"
         datetime timestamp "auto-set on creation"
-        string userId FK "NVarChar(7) → User"
-        string actionType "NVarChar(10), ActionType values, TBD"
+        string userId FK "VarChar(7) → User"
+        string actionType "VarChar(10), ActionType values, TBD"
         int palletId FK "nullable → Pallet"
         int locationAisle FK "nullable → Location"
         int locationBin FK "nullable → Location"
@@ -180,26 +209,26 @@ erDiagram
         int dept FK "nullable → Item"
         int class FK "nullable → Item"
         int item FK "nullable → Item"
-        string details "nullable, NVarChar(Max), free JSON notes"
-        string functionCode "nullable, NVarChar(3) — IRP prod-function code (CA/CF/FP/RP/HP/GPM/CON), set only on IRP-countable rows"
+        string details "nullable, Text, free JSON notes"
+        string functionCode "nullable, VarChar(3) — IRP prod-function code (CA/CF/FP/RP/HP/GPM/CON), set only on IRP-countable rows"
     }
 
     FunctionAssignment {
         int id PK "autoincrement"
-        string workerZ FK "NVarChar(7) → User"
-        string functionCode "NVarChar(3) — CA/CF/FP/BKP/BK/RP/HP/GPM/CON"
+        string workerZ FK "VarChar(7) → User"
+        string functionCode "VarChar(3) — CA/CF/FP/BKP/BK/RP/HP/GPM/CON"
         date date "the assignment's calendar date"
         datetime startTime "block start"
         datetime endTime "block end"
-        string assignedByZ FK "NVarChar(7) → User"
+        string assignedByZ FK "VarChar(7) → User"
     }
 
     ProdGoal {
-        string functionCode PK "NVarChar(3)"
+        string functionCode PK "VarChar(3)"
         decimal rate "Decimal(10,2)"
-        string unit "NVarChar(20), e.g. cartons/hr"
+        string unit "VarChar(20), e.g. cartons/hr"
         decimal rate2 "nullable, Decimal(10,2) — second blended component (Bulk/Breakpack only)"
-        string unit2 "nullable, NVarChar(20) — second blended component's unit"
+        string unit2 "nullable, VarChar(20) — second blended component's unit"
         date effectiveDate "when this rate took effect"
     }
 

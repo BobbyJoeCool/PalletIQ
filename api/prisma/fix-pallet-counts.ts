@@ -7,9 +7,9 @@
  */
 import 'dotenv/config'
 import { PrismaClient } from '../generated/prisma/index.js'
-import { PrismaMssql } from '@prisma/adapter-mssql'
+import { PrismaMariaDb } from '@prisma/adapter-mariadb'
 
-const adapter = new PrismaMssql(process.env.DATABASE_URL!)
+const adapter = new PrismaMariaDb(process.env.DATABASE_URL!)
 const prisma = new PrismaClient({ adapter })
 
 /** Entry point: zeroes out currentPallets/receivedPallets on every pallet in the table. */

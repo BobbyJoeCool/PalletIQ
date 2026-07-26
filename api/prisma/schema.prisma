@@ -1,5 +1,5 @@
 datasource db {
-  provider = "sqlserver"
+  provider = "mysql"
 }
 
 generator client {
@@ -10,8 +10,8 @@ generator client {
 // ─── Lookup tables ───────────────────────────────────────────────────────────
 
 model StorageCode {
-  id   String @id @db.NVarChar(2)
-  desc String @db.NVarChar(60)
+  id   String @id @db.VarChar(2)
+  desc String @db.VarChar(60)
 
   items     Item[]
   locations Location[]
@@ -19,29 +19,29 @@ model StorageCode {
 }
 
 model Department {
-  id   String @id @db.NVarChar(3)
-  name String @db.NVarChar(60)
+  id   String @id @db.VarChar(3)
+  name String @db.VarChar(60)
 
   users User[]
 }
 
 model HoldType {
-  code String @id @db.NVarChar(3)
-  desc String @db.NVarChar(20)
+  code String @id @db.VarChar(3)
+  desc String @db.VarChar(20)
 
   locations Location[]
 }
 
 model PackingZone {
   id   Int    @id
-  desc String @db.NVarChar(60)
+  desc String @db.VarChar(60)
 
   items Item[]
 }
 
 model Store {
   id   Int    @id
-  name String @db.NVarChar(40)
+  name String @db.VarChar(40)
 
   labels Label[]
 }
@@ -53,15 +53,15 @@ model Store {
 // validity is checked at the application layer instead, the same way every other screen
 // already validates an aisle against Location (a live existence query, not a constraint).
 model Workstation {
-  id   String @id @db.NVarChar(4)
-  name String @db.NVarChar(60)
+  id   String @id @db.VarChar(4)
+  name String @db.VarChar(60)
 
   aisles WorkstationAisle[]
 }
 
 model WorkstationAisle {
-  aisle         Int         @id
-  workstationId String      @db.NVarChar(4)
+  aisle         Int    @id
+  workstationId String @db.VarChar(4)
 
   workstation Workstation @relation(fields: [workstationId], references: [id])
 }
@@ -72,14 +72,14 @@ model Item {
   dept                   Int
   class                  Int
   item                   Int
-  upc                    String   @unique @db.NVarChar(12)
-  name                   String   @db.NVarChar(50)
-  desc                   String   @db.NVarChar(Max)
-  descShort              String   @db.NVarChar(155)
+  upc                    String   @unique @db.VarChar(12)
+  name                   String   @db.VarChar(50)
+  desc                   String   @db.Text
+  descShort              String   @db.VarChar(155)
   retailPrice            Decimal  @db.Decimal(10, 2)
   cost                   Decimal  @db.Decimal(10, 2)
   packingZoneCode        Int
-  storageCode            String   @db.NVarChar(2)
+  storageCode            String   @db.VarChar(2)
   conveyable             Boolean  @default(true)
   // Per-DPCI setting (not derived from Storage Code) — food items are seeded true, but this
   // is meant to be configurable per item rather than a blanket category rule. Drives PII's
@@ -105,15 +105,15 @@ model Location {
   bin          Int
   level        Int
   zone         Int
-  status       String  @db.NVarChar(15)
+  status       String  @db.VarChar(15)
   // holdTypeCode is a reason-code FK (1-letter dept + 2-digit reason, e.g. "B05" — see
   // HoldType below), not the hold category. Left unpopulated per WLH.md, which states
   // twice that the reason code is written only to the ActivityLog, not stored as a
   // column — kept in the schema as inherited, currently-unused infrastructure rather
   // than removed outright (Phase 10, see phase-10 log).
-  holdTypeCode String? @db.NVarChar(3)
-  storageCode  String  @db.NVarChar(2)
-  size         String  @db.NVarChar(2)
+  holdTypeCode String? @db.VarChar(3)
+  storageCode  String  @db.VarChar(2)
+  size         String  @db.VarChar(2)
   // Contraction is set at zone-side+level granularity by Lead+ via Aisle Setup (out of
   // scope for this demo — see ELZ.md); stored per-location and expected to be uniform
   // across every location sharing a zone-side/level group. Read-only in this app.
@@ -123,7 +123,7 @@ model Location {
   // Status"). Added Phase 10 — `status` briefly (Phase 6's blockPut) doubled as the hold
   // indicator, which destroys the location's real operational state (EMPTY vs STORED)
   // the moment a hold is placed; fixed to use this field instead. See phase-10 log.
-  holdCategory String? @db.NVarChar(10)
+  holdCategory String? @db.VarChar(10)
 
   holdType   HoldType?   @relation(fields: [holdTypeCode], references: [code])
   storageRef StorageCode @relation(fields: [storageCode], references: [id])
@@ -136,12 +136,12 @@ model Location {
 }
 
 model User {
-  zNumber      String @id @db.NVarChar(7)
-  firstName    String @db.NVarChar(50)
-  lastName     String @db.NVarChar(50)
-  pinHash      String @db.NVarChar(60)
-  role         String @db.NVarChar(10)
-  departmentId String @db.NVarChar(3)
+  zNumber      String @id @db.VarChar(7)
+  firstName    String @db.VarChar(50)
+  lastName     String @db.VarChar(50)
+  pinHash      String @db.VarChar(60)
+  role         String @db.VarChar(10)
+  departmentId String @db.VarChar(3)
 
   department Department @relation(fields: [departmentId], references: [id])
 
@@ -157,16 +157,16 @@ model User {
 }
 
 model Pallet {
-  pid             Int       @id
-  dept            Int
-  class           Int
-  item            Int
-  receivedPallets Int
-  currentPallets  Int
-  receivedCartons Int
-  currentCartons  Int
-  receivedSSPs    Int
-  currentSSPs     Int
+  pid              Int       @id
+  dept             Int
+  class            Int
+  item             Int
+  receivedPallets  Int
+  currentPallets   Int
+  receivedCartons  Int
+  currentCartons   Int
+  receivedSSPs     Int
+  currentSSPs      Int
   // How many cartons make up ONE full pallet of this quantity — a fixed snapshot taken at
   // creation (receiving or PAR reinstate), never updated afterward as currentCartons
   // depletes. Added for PAR's v1.6.11 redesign as groundwork for Bulk locations (multiple
@@ -176,13 +176,13 @@ model Pallet {
   // any loose-SSP remainder, not a fractional/ratio-based calculation. `editPallet`'s
   // INSUFFICIENT_QUANTITY check previously used receivedCartons as a stand-in for this
   // exact concept (see that handler's own comment) — now reads this field directly instead.
-  cartonsPerPallet Int      @default(0)
-  vcp             Int
-  ssp             Int
-  status          String    @db.NVarChar(15)
-  locationAisle   Int?
-  locationBin     Int?
-  locationLevel   Int?
+  cartonsPerPallet Int       @default(0)
+  vcp              Int
+  ssp              Int
+  status           String    @db.VarChar(15)
+  locationAisle    Int?
+  locationBin      Int?
+  locationLevel    Int?
   // The pallet's own Storage Code/Size/Zone — always copied from wherever it's currently
   // STORED (set in placePallet, every time a put/move completes), null while PUT_PENDING
   // (never stored, nothing to inherit from). This is the source of truth Directed Put's
@@ -191,26 +191,26 @@ model Pallet {
   // that exact zone has no eligible location — see zoneLogic.ts). Denormalized from
   // Location rather than joined live, since a pallet's put history (and thus its most
   // recent location) can't be reconstructed from Location alone once it moves again.
-  storageCode     String?   @db.NVarChar(2)
-  size            String?   @db.NVarChar(2)
-  zone            Int?
-  receivedByZ     String    @db.NVarChar(7)
-  receivedAt      DateTime
-  putByZ          String?   @db.NVarChar(7)
-  putAt           DateTime?
-  lastPulledByZ   String?   @db.NVarChar(7)
-  lastPulledAt    DateTime?
+  storageCode      String?   @db.VarChar(2)
+  size             String?   @db.VarChar(2)
+  zone             Int?
+  receivedByZ      String    @db.VarChar(7)
+  receivedAt       DateTime
+  putByZ           String?   @db.VarChar(7)
+  putAt            DateTime?
+  lastPulledByZ    String?   @db.VarChar(7)
+  lastPulledAt     DateTime?
   // Receiving-side identifiers (PO = Product Order, Appointment = the trailer the pallet was
   // received on) — set once at receiving, never edited from PII. Null for a pallet created
   // manually via PAR rather than through a real receiving event (see pallets.ts's reinstate
   // handler). No format validation enforced (read-only from every screen today).
-  poNumber        String?   @db.NVarChar(20)
-  apptNumber      String?   @db.NVarChar(20)
+  poNumber         String?   @db.VarChar(20)
+  apptNumber       String?   @db.VarChar(20)
   // Nullable regardless of the item's own `requiresExpirationDate` — PII surfaces that as a
   // prompt/requirement in the UI, not a DB constraint. Editable via PII's Edit Mode (IM+):
   // must be at least 1 month out (else blocked) and gets a confirm-step warning inside 3
   // months — see PATCH /api/pallets/:id.
-  expirationDate  DateTime? @db.Date
+  expirationDate   DateTime? @db.Date
 
   itemRef      Item         @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
   location     Location?    @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
@@ -225,7 +225,7 @@ model Pallet {
 }
 
 model Label {
-  lid              String   @id @db.NVarChar(36)
+  lid              String   @id @db.VarChar(36)
   pid              Int
   dept             Int
   class            Int
@@ -235,8 +235,8 @@ model Label {
   batchDate        Int
   purgeDate        DateTime @db.Date
   destinationStore Int
-  status           String   @db.NVarChar(15)
-  pullFunction     String   @db.NVarChar(2)
+  status           String   @db.VarChar(15)
+  pullFunction     String   @db.VarChar(2)
 
   pallet  Pallet @relation(fields: [pid], references: [pid], onDelete: NoAction, onUpdate: NoAction)
   itemRef Item   @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
@@ -250,11 +250,11 @@ model Reservation {
   locationBin   Int
   locationLevel Int
   palletId      Int
-  workerZ       String   @db.NVarChar(7)
+  workerZ       String   @db.VarChar(7)
   // Original search criteria — preserved so block/find-next can re-run the same query.
   targetAisle   Int
-  targetSize    String?  @db.NVarChar(2)
-  targetStorage String?  @db.NVarChar(2)
+  targetSize    String?  @db.VarChar(2)
+  targetStorage String?  @db.VarChar(2)
   targetZone    Int?
   // Preserved from the original directedPut call so a Blocked Put re-search (blockPut)
   // honors the same STAGED-exclusion preference as the initial search.
@@ -282,8 +282,8 @@ model Reservation {
 model ActivityLog {
   id            Int      @id @default(autoincrement())
   timestamp     DateTime @default(now())
-  userId        String   @db.NVarChar(7)
-  actionType    String   @db.NVarChar(10)
+  userId        String   @db.VarChar(7)
+  actionType    String   @db.VarChar(10)
   palletId      Int?
   locationAisle Int?
   locationBin   Int?
@@ -291,12 +291,12 @@ model ActivityLog {
   dept          Int?
   class         Int?
   item          Int?
-  details       String?  @db.NVarChar(Max)
+  details       String?  @db.Text
   // IRP prod-function code (CA/CF/FP/RP/HP/GPM/CON), set only on the rows that
   // represent one of IRP's countable actions (see writeLog() call sites in
   // pulls.ts/puts.ts/staging.ts). Null for every other actionType (RESERVE,
   // HOLD_PLACE, STAGE_SUM, RESTAGE, etc.) — those aren't IRP-countable events.
-  functionCode  String?  @db.NVarChar(3)
+  functionCode  String?  @db.VarChar(3)
 
   user     User      @relation(fields: [userId], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
   pallet   Pallet?   @relation(fields: [palletId], references: [pid], onDelete: NoAction, onUpdate: NoAction)
@@ -312,13 +312,13 @@ model ActivityLog {
 // PRQ uses to stand in for real label creation.
 model FunctionAssignment {
   id           Int      @id @default(autoincrement())
-  workerZ      String   @db.NVarChar(7)
+  workerZ      String   @db.VarChar(7)
   // CA, CF, FP, BKP, BK, RP, HP, GPM, CON
-  functionCode String   @db.NVarChar(3)
+  functionCode String   @db.VarChar(3)
   date         DateTime @db.Date
   startTime    DateTime
   endTime      DateTime
-  assignedByZ  String   @db.NVarChar(7)
+  assignedByZ  String   @db.VarChar(7)
 
   worker     User @relation("AssignmentWorker", fields: [workerZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
   assignedBy User @relation("AssignmentAssignedBy", fields: [assignedByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
@@ -335,11 +335,11 @@ model FunctionAssignment {
 // "hours of work" — see IRP.md's Blended Goal Calculation); rate2/unit2 hold the
 // second component and are null for every single-rate function.
 model ProdGoal {
-  functionCode  String   @id @db.NVarChar(3)
+  functionCode  String   @id @db.VarChar(3)
   rate          Decimal  @db.Decimal(10, 2)
   // e.g. "cartons/hr", "pallets/hr", "puts/hr", "locations/hr"
-  unit          String   @db.NVarChar(20)
+  unit          String   @db.VarChar(20)
   rate2         Decimal? @db.Decimal(10, 2)
-  unit2         String?  @db.NVarChar(20)
+  unit2         String?  @db.VarChar(20)
   effectiveDate DateTime @db.Date
 }

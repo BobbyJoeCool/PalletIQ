@@ -1,10 +1,10 @@
 import 'dotenv/config'
 import { PrismaClient } from '../generated/prisma/index.js'
-import { PrismaMssql } from '@prisma/adapter-mssql'
+import { PrismaMariaDb } from '@prisma/adapter-mariadb'
 import bcrypt from 'bcryptjs'
 import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genLid } from './demoUtils.js'
 
-const adapter = new PrismaMssql(process.env.DATABASE_URL!)
+const adapter = new PrismaMariaDb(process.env.DATABASE_URL!)
 const prisma = new PrismaClient({ adapter })
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

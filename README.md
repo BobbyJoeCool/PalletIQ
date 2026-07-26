@@ -60,10 +60,15 @@ See the **Explicitly Out of Scope** section of [`outline.md`](Documentation/outl
 |---|---|
 | Frontend | React 18, TypeScript, Vite, TailwindCSS |
 | API | Azure Functions (TypeScript / Node.js) |
-| Hosting | Azure Static Web Apps |
-| Database | Azure SQL |
+| Hosting | Local (developer laptop, LAN-served to demo devices — see GitHub #139) |
+| Database | Self-hosted MySQL, local demo phase (see GitHub #139) |
 | ORM | Prisma |
 | Auth | Badge + PIN login, custom DB-backed flow issuing signed JWTs (Azure AD B2C is not used) |
+
+> **Database query failing unexpectedly?** This app migrated off Azure SQL Server to
+> self-hosted MySQL (GitHub #139). Check `Documentation/Flowcharts-ERDs/database.mmd`'s
+> "TROUBLESHOOTING" comment block first — it's a checklist for whether something didn't
+> carry over correctly in that engine switch, before assuming the query logic is wrong.
 
 This is an intentionally all-TypeScript stack. A `shared/` package defines types once — a `Pallet` or a `Location` — and both the React frontend and the Azure Functions backend import the same definitions. A change to a data shape is a compile error in both places at once, not a runtime surprise.
 
@@ -74,10 +79,10 @@ This is an intentionally all-TypeScript stack. A `shared/` package defines types
 The project is a single monorepo with three top-level pieces:
 
 - **`src/`** — the React app, built with Vite.
-- **`api/`** — Azure Functions, one per route, sharing a Prisma client singleton against Azure SQL.
+- **`api/`** — Azure Functions, one per route, sharing a Prisma client singleton against a self-hosted MySQL instance (local demo phase — see GitHub #139).
 - **`shared/`** — TypeScript types and constants imported by both of the above.
 
-Azure Static Web Apps hosts the built React app and proxies `/api/*` requests straight to the Functions in `api/`, so there's no separate API gateway or CORS configuration to manage — it's one deployable unit.
+The React app and the Azure Functions API run locally on the developer's laptop for the demo phase (see GitHub #139), the API served over the LAN to the tablet. Azure Static Web Apps hosting/deploy is not currently wired up (its GitHub Actions workflow was removed alongside this migration); re-pointing at Azure SWA and/or Azure SQL remains straightforward if this goes to a hosted deployment later.
 
 A few architectural decisions worth calling out for anyone reviewing this as a portfolio piece:
 

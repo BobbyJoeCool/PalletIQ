@@ -12,6 +12,7 @@ build/
 out/
 .vite/
 api/dist/
+api/scripts/palletiq-export-*.xlsx
 
 # ---------- Environment / secrets ----------
 .env

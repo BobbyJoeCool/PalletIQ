@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.0 — 2026-07-26](#180--2026-07-26)
 - [1.7.0 — 2026-07-21](#170--2026-07-21)
 - [1.6.10 — 2026-07-20](#1610--2026-07-20)
 - [1.6.9 — 2026-07-20](#169--2026-07-20)
@@ -60,7 +61,7 @@ issue still ships in its own smaller version along the way (matching this projec
 usual one-screen/one-fix cadence); the milestone version number just marks the point
 where everything listed under it has actually landed.
 
-### v1.8.0 — IRP, PRQ, CII + open-issue cleanup
+### v1.9.0 — IRP, PRQ, CII + open-issue cleanup
 
 - **IRP — Individual Reporting.** Built (`DevNotes/Logs/V1.7/version-1_7_1.md`), pending
   ship. Personal productivity dashboard for the logged-in worker: pull/put performance
@@ -74,10 +75,10 @@ where everything listed under it has actually landed.
 - **CII — Container ID Inquiry.** Designed (`DevNotes/DesignPrompts/CII.md`), not yet
   built. Needs `LabelEvent` (see `schema-additions.prisma`).
 - Most currently open issues target this milestone too: #100, #99, #96, #95, #94, #93,
-  #92, #91, #86, #85, #84, #83. (#89 is held for v1.9.0 instead, since it explicitly
+  #92, #91, #86, #85, #84, #83. (#89 is held for v1.10.0 instead, since it explicitly
   depends on Bulk Pull shipping — see below. #90 isn't assigned to a milestone yet.)
 
-### v1.9.0 — Bulk Pull + OCC
+### v1.10.0 — Bulk Pull + OCC
 
 - **Bulk Pull.** Will let a location hold multiple full pallets plus a partial at once
   (the underlying data-model concept already exists — see this doc's own Quantity
@@ -162,7 +163,7 @@ No issues currently open in this category.
 - [#99](https://github.com/BobbyJoeCool/PalletIQ/issues/99) — STG: per-pallet override of master control values (size/aisle/storage code)
 - [#96](https://github.com/BobbyJoeCool/PalletIQ/issues/96) — Add a generic status-timer/expiration mechanism for status-bearing tables, with an overdue-records report
 - [#94](https://github.com/BobbyJoeCool/PalletIQ/issues/94) — Harden Pallet CA_PULL_PEND/FP_PULL_PEND status coupling before a real label-creation endpoint ships
-- [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) — PII Edit Mode will need per-pallet-vs-partial quantity editing once Bulk Pull ships (targets v1.9.0)
+- [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) — PII Edit Mode will need per-pallet-vs-partial quantity editing once Bulk Pull ships (targets v1.10.0)
 - [#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90) — Add per-record audit trail to PII, LII, and a future Container ID screen (not yet milestone-assigned)
 - [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — Bad Contraction data: every RS/RF/BS location, plus some HS locations on Levels 2-9, incorrectly flagged as contracted — **worth re-checking**: the aisle-renumbering work (v1.7.3) rewrote the contraction logic entirely and preserved BS/RF/RS's existing level-1 exemption, which may already resolve this; not closed here since that work wasn't done under this issue number
 
@@ -174,6 +175,80 @@ See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the spe
 screen(s) each one touches.
 
 ---
+
+## [1.8.0] — 2026-07-26
+
+**Database engine migration: Azure SQL Server → self-hosted MySQL (demo phase).** Driven
+purely by cost — Azure billing, including per-write costs, was unnecessary overhead for a
+demo running on exactly two devices (a laptop and a tablet) in the same room. The app now
+runs against a MySQL instance hosted locally on the developer's laptop, serving both
+devices over the LAN. This is scoped to the demo phase only: if this goes live at a real
+deployment target, it would run on that target's own infrastructure, not Azure and not
+this laptop — re-pointing to a different backing database later is expected to stay
+straightforward, since the change is isolated to the Prisma datasource/adapter layer, not
+the application's data model or query logic. Full writeup, scope, and the design doc this
+came from: GitHub #139. Detailed session-by-session record of everything below:
+`DevNotes/Logs/V1.7/version-1_7_9.md` §1.9–§1.11.
+
+### 1.8.0 — Changed
+
+- **`api/prisma/schema.prisma`**: `datasource` provider `sqlserver` → `mysql`; all 51
+  `@db.NVarChar(n)` fields → `@db.VarChar(n)`; the 2 `@db.NVarChar(Max)` fields
+  (`Item.desc`, `ActivityLog.details`) → `@db.Text`. `Decimal`/`DateTime`/`@db.Date`
+  fields needed no changes.
+- **Prisma driver adapter** swapped app-wide: `@prisma/adapter-mssql` →
+  `@prisma/adapter-mariadb` (MySQL-compatible despite the package name — the shared
+  singleton in `api/lib/prisma.ts`, plus 4 seed/maintenance scripts under `api/prisma/`,
+  all updated to the equivalent `PrismaMariaDb` client).
+- **Migration history reset.** All 12 existing SQL-Server-provider migrations replaced
+  with one fresh `20260725191545_init_mysql` migration against the new provider — no
+  production data existed yet, so this was a clean schema migration, not a data port.
+- **`readme.md`/`README.md`, `Documentation/Flowcharts-ERDs/database.mmd` and
+  `enums.mmd`, `Documentation/ScreenSpecs/Login.md`**: updated to describe the current
+  MySQL/local-hosting setup instead of the old Azure SQL/Azure Static Web Apps one,
+  including fixing every stale `NVarChar` type reference to `VarChar`/`Text`.
+
+### 1.8.0 — Removed
+
+- **Local Docker SQL Server dev/test setup** (`api/docker-compose.yml`,
+  `api/scripts/db-local-init.mjs`, `local.settings.local.json`/`local.settings.azure.json`,
+  and the `db:local:*`/`db:use-*` npm scripts) — retired rather than converted to an
+  equivalent Docker MySQL container, since the real local database now serves that same
+  "don't hit production data with test runs" role directly.
+- **`.github/workflows/azure-static-web-apps-lemon-ground-0d027681e.yml`** — the GitHub
+  Actions workflow that auto-deployed the app to Azure Static Web Apps on every push/PR
+  to `main`, removed as part of moving off Azure for this phase.
+
+### 1.8.0 — Fixed
+
+Found during a pre-commit audit ("make sure all database queries run off MySQL now
+instead of Azure SQL") that the migration above missed one real, live code path:
+
+- **`api/scripts/export-to-excel.mjs` was still connecting directly to Azure SQL**, using
+  the `mssql` package entirely independently of Prisma, with live Azure credentials
+  hardcoded in the (git-tracked) script itself and SQL-Server-only `[User]` bracket
+  identifier quoting. Rewritten to use the `mariadb` driver, reading `DATABASE_URL` from
+  `api/.env` instead of hardcoded credentials, with MySQL backtick quoting
+  (`` `User` ``) instead. A repo-wide search confirmed this was the *only* other direct
+  database connection anywhere outside Prisma's own adapter.
+- Stale Azure-SQL-serverless-auto-pause comments/JSDoc in `api/functions/health.ts`,
+  `src/lib/api.ts`, and `src/pages/LoginPage.tsx` (the "Wake Database" dev-tools control)
+  now note the behavior is a no-op-equivalent plain connectivity check on local MySQL,
+  which has no auto-pause behavior to work around. One of these had a dangling reference
+  to `local.settings.azure.json`, a file this migration already deleted.
+- Deleted the unused root `.env.local`, which still held a live Azure SQL connection
+  string in `Server=...;User ID=...;Password=...` format and served no purpose (confirmed
+  unreferenced by any script or build step).
+
+### 1.8.0 — Added
+
+- **A "check this first" troubleshooting note** for future database query failures: a new
+  comment block at the top of `Documentation/Flowcharts-ERDs/database.mmd` (mirrored as a
+  short pointer in `readme.md`/`README.md`'s Tech Stack section) listing exactly what to
+  check — schema provider/types, migration history, `DATABASE_URL`, adapter imports, raw
+  SQL dialect — before assuming a failing query's own logic is at fault, given this
+  migration is the most likely source of any related regression for the foreseeable
+  future.
 
 ## [1.7.0] — 2026-07-21
 
