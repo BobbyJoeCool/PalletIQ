@@ -227,6 +227,14 @@ export function SDPPage() {
   // prop, which this codebase's convention (see PIPPage.tsx) prefers a key-bump over for
   // a full reset since it also re-triggers the auto-focus effect for free.
   const [locationEntryKey, setLocationEntryKey] = useState(0);
+  // Mirrors LocationEntryFields' own aggregate active state (#85) — its auto-focus effect
+  // registers a key handler 50ms after mount, same delay every other field here uses. The
+  // "✓ Location"/"✗ Location" demo buttons used to render as soon as screenState left
+  // 'entry', so a fast tap (or an automated test) could fire deliverScan before that
+  // handler existed, silently dropping the value instead of landing in Confirm Location —
+  // gating the buttons on this (matching PIP's identical `locationActive`/`onActiveChange`
+  // fix for the same race) closes the window instead of racing it.
+  const [locationActive, setLocationActive] = useState(false);
 
   // Narrows the Storage Code/Size override dropdown-helpers (issue #80) to what's actually
   // present once an aisle is entered — Zone override never narrows (a straight 1-4
@@ -766,13 +774,13 @@ export function SDPPage() {
         <DemoBtn label="✓ Move" color="blue"  onClick={demoMove} />
         <DemoBtn label="⚠ Invalid Pallet" color="amber" onClick={() => setInvalidPalletPickerOpen(true)} />
       </>
-    ) : (
+    ) : locationActive ? (
       <>
         <DemoBtn label="✓ Location" color="green" onClick={demoConfirmOk} />
         <DemoBtn label="✗ Location" color="red"   onClick={demoConfirmBad} />
       </>
-    )
-  ), [screenState, demoPut, demoMove, demoConfirmOk, demoConfirmBad]);
+    ) : null
+  ), [screenState, locationActive, demoPut, demoMove, demoConfirmOk, demoConfirmBad]);
 
   useDemoSlot(demoSlot);
 
@@ -981,7 +989,7 @@ export function SDPPage() {
             <div className="flex items-end gap-4">
               <div className="flex flex-col gap-1">
                 <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Confirm Location</span>
-                <LocationEntryFields key={locationEntryKey} onResolved={handleLocationConfirm} size="large" />
+                <LocationEntryFields key={locationEntryKey} onResolved={handleLocationConfirm} onActiveChange={setLocationActive} size="large" />
               </div>
               <div className="flex gap-3">
                 <ActionBtn label="Unassign"    variant="warning" onClick={handleUnassign} disabled={loading} />

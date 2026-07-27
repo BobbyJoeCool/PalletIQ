@@ -159,7 +159,7 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
  */
 export function PARPage() {
   const { token, user } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, clearMessage } = useMessageBar();
   const { hidePanel, showNumpad } = useNumpad();
   const [searchParams] = useSearchParams();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
@@ -271,6 +271,7 @@ export function PARPage() {
       const data = await apiFetch<PARItemLookup>(`/api/items/dpci/${digits}`, token!);
       setItem(data);
       setDpciInvalid(false);
+      clearMessage(); // issue #95 — clears a stale error from a prior failed attempt
       // Screen-wide auto-advance (v1.6.11, direct instruction): "after entering the DPCI
       // or UPC, the VCP box should focus." Via focusVcpRef, not focusVcp directly — see
       // that ref's own declaration comment (near the top of the component) for why.
@@ -330,6 +331,7 @@ export function PARPage() {
       classField.set(parsed.class);
       itemField.set(parsed.item);
       setDpciInvalid(false);
+      clearMessage(); // issue #95 — clears a stale error from a prior failed attempt
       focusVcpRef.current();
     } catch {
       playAlert('error');
@@ -664,6 +666,7 @@ export function PARPage() {
       const data = await apiFetch<LocationStatusInfo>(`/api/locations/${id}`, token!);
       setLocationInvalid(false);
       setLocationStatusInfo(data);
+      clearMessage(); // issue #95 — clears a stale error from a prior failed attempt
     } catch {
       setLocationInvalid(true);
       setLocationStatusInfo(null);
@@ -754,6 +757,24 @@ export function PARPage() {
       sentences.push(`Location ${fmtLocation(location)} is Storage Code ${locationStatusInfo.storageCode}, but this item is ${item!.storageCode}`);
     }
     return `${sentences.join('. ')}. Continue anyway?`;
+  }
+
+  /** Reason-specific title for the Confirm Location popup (#122), replacing the generic
+   *  "Confirm Location" for every case. `locationNeedsWarning`'s checks aren't mutually
+   *  exclusive — a location can be on hold, under Contraction, occupied, and the wrong
+   *  Storage Code all at once — so this picks one title by priority order rather than
+   *  trying to represent every applicable reason in the title (the message body below it
+   *  already lists all of them via locationWarningMessage). Priority, most operationally
+   *  severe first: Hold > Contraction > Occupied > Wrong Storage Code — a hold or
+   *  contraction is a warehouse-level restriction on the location itself, more consequential
+   *  than either a plain occupancy conflict or the item simply mapping to the wrong type. */
+  function locationWarningTitle(): string {
+    if (!locationStatusInfo) return 'Confirm Location';
+    if (locationStatusInfo.holdCategory) return `Location On ${HOLD_LABELS[locationStatusInfo.holdCategory].name}`;
+    if (locationStatusInfo.contraction) return 'Location On Contraction';
+    if (locationStatusInfo.status !== 'EMPTY') return 'Location Occupied';
+    if (storageMismatch) return 'Incorrect Storage Code';
+    return 'Confirm Location';
   }
 
   // ── Submit ───────────────────────────────────────────────────────────────────
@@ -1136,6 +1157,13 @@ export function PARPage() {
           Then, on the right, under the keypad, create a log for reinstates"). Matches
           PIP's/MNP's own left-form/right-log column split. */}
       <div className="flex-1 flex flex-col p-6 gap-5 overflow-y-auto">
+      {/* Upper region — Row 1/Description/Row 2 beside Printer + Create Pallet (issue #138
+          fix). Printer/Create Pallet only ever needs this top portion's height, so it's
+          nested here as a sibling of just the upper rows rather than spanning the whole
+          column — see the "Lower region" comment below for why that space matters once
+          Multiple Pallets mode is selected. */}
+      <div className="flex gap-5">
+      <div className="flex-1 flex flex-col gap-5">
       {/* Row 1 — DPCI / UPC entry + Description.
           DPCI is its own numpad-driven Dept/Class/Item chain of 3 FieldBoxes (v1.6.11,
           direct instruction — replaces the shared DpciField's native inputs so every field
@@ -1198,7 +1226,33 @@ export function PARPage() {
         <SizeField ref={sizeFieldRef} value={sizeValue} onChange={handleSizeChange} width="w-[126px]" disabled={mode === 'single' && !!location} />
         <PlainText label="SSPs per Carton" value={sspPerCarton != null ? String(sspPerCarton) : ''} width="w-[160px]" />
       </div>
+      </div>
 
+      {/* Middle column — Printer + Create Pallet, sized to just the upper region's height
+          (issue #138 — previously spanned the entire left column's height as its own
+          top-level sibling, permanently reserving its 220px width even below where its own
+          content ends). */}
+      <div className="w-[220px] flex flex-col gap-4 pl-5 border-l border-[#1C1C1C] shrink-0">
+        <PrinterField value={printerField.value} onFocus={focusPrinterField} active={printerField.isActive} />
+        <button
+          type="button"
+          onClick={handleCreateClick}
+          disabled={!canSubmit || submitting}
+          className="w-full h-[88px] rounded-[12px] font-ui text-[22px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40 transition-colors"
+        >
+          Create Pallet
+        </button>
+      </div>
+      </div>
+
+      {/* Lower region — Row 3 onward spans the column's full width (issue #138). Multiple
+          Pallets mode's 4 count boxes (Row 3, ~750px) and its summary line (Row 4, ~820px)
+          don't fit within the narrower width available above, next to Printer/Create
+          Pallet (~726px) — reclaiming that 220px once Printer/Create Pallet's own column
+          has ended above fixes both reported symptoms: Row 3's boxes no longer overflow
+          into an inner horizontal scroll, and Row 4's summary no longer wraps onto a
+          second line and pushes Expiration Date/Location down toward the bottom edge. */}
+      <div className="flex flex-col gap-5">
       {/* Row 3 — Unit Entry */}
       <div className="flex items-start gap-4">
         <ModeToggle mode={mode} onChange={setMode} />
@@ -1231,10 +1285,18 @@ export function PARPage() {
           </>
         ) : (
           <>
-            <PlainText compact label="Full Pallets" value={fullPalletsField.value ? `${fullPalletsNum} Pallets: ${cartonsPerPalletNum} cartons` : ''} width="w-[220px]" />
-            <PlainText compact label="Partial Pallet" value={hasPartial ? `1 Pallet: ${partialCartonsNum} Cartons, ${partialSspsNum} SSPs` : ''} width="w-[220px]" />
+            {/* Widened from 220px (#138) — now that Row 4 has the full reclaimed column
+                width to work with (see the "Lower region" comment above Row 3), these two
+                can be wide enough that their longer values ("1 Pallet: N Cartons, N SSPs")
+                fit on one line instead of wrapping within their own box. */}
+            <PlainText compact label="Full Pallets" value={fullPalletsField.value ? `${fullPalletsNum} Pallets: ${cartonsPerPalletNum} cartons` : ''} width="w-[240px]" />
+            <PlainText compact label="Partial Pallet" value={hasPartial ? `1 Pallet: ${partialCartonsNum} Cartons, ${partialSspsNum} SSPs` : ''} width="w-[240px]" />
             <PlainText compact label="Total Cartons" value={fullPalletsField.value || hasPartial ? String(totalCartonsMulti) : ''} width="w-[110px]" />
-            <PlainText compact label="Total SSP" value={totalSspsMulti != null ? `${totalSspsMulti} (for ${sspPerCarton} per carton)` : ''} width="w-[200px]" />
+            {/* 180px, not wider — this fits all 4 items on Row 4's one line; the longest
+                Total SSP value can still wrap onto a 2nd line within its own box (minor,
+                unlike the original bug where the whole row wrapped and pushed everything
+                below it down). */}
+            <PlainText compact label="Total SSP" value={totalSspsMulti != null ? `${totalSspsMulti} (for ${sspPerCarton} per carton)` : ''} width="w-[180px]" />
           </>
         )}
       </div>
@@ -1351,22 +1413,6 @@ export function PARPage() {
         </div>
       </div>
       </div>
-
-      {/* Middle column — Printer + Create Pallet (now full-width within this narrow column
-          and noticeably taller, per direct instruction: "this way the create pallet button
-          can be larger"), sitting between the left form and the Reinstate Log column —
-          direct instruction, corrected from an earlier round that stacked Printer/Create
-          Pallet above the log within one shared column instead of as its own column. */}
-      <div className="w-[220px] flex flex-col gap-4 p-5 border-l border-[#1C1C1C] shrink-0">
-        <PrinterField value={printerField.value} onFocus={focusPrinterField} active={printerField.isActive} />
-        <button
-          type="button"
-          onClick={handleCreateClick}
-          disabled={!canSubmit || submitting}
-          className="w-full h-[88px] rounded-[12px] font-ui text-[22px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40 transition-colors"
-        >
-          Create Pallet
-        </button>
       </div>
 
       {/* Right column — Reinstate Log (session-local, same convention as PIP's Pull
@@ -1399,7 +1445,7 @@ export function PARPage() {
 
       {locationWarningPending && (
         <ConfirmDialog
-          title="Confirm Location"
+          title={locationWarningTitle()}
           message={locationWarningMessage()}
           confirmLabel="Continue"
           variant="danger"

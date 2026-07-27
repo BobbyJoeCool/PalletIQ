@@ -152,12 +152,18 @@ export function ELAPage() {
     aisleEndField.focus((v) => { setAisleEnd(v.trim()); setSelected(null); hidePanel(); });
   }, [aisleEndField, setAisleEnd, setSelected, hidePanel]);
 
-  /** Workstation restrict-to filter (GitHub #124). */
+  /** Workstation restrict-to filter (GitHub #124). `workstationInvalid` drives the
+   *  app-wide red-wash treatment (#109) — an invalid entry no longer clears itself (see
+   *  useCodePickerField's new default), so this field needs its own tracked flag the same
+   *  way STG's equivalent fields do. */
+  const [workstationInvalid, setWorkstationInvalid] = useState(false);
   const handleWorkstationChange = useCallback((v: string) => {
+    setWorkstationInvalid(false);
     setWorkstation(v);
     setSelected(null);
   }, [setWorkstation, setSelected]);
   const handleInvalidWorkstation = useCallback(() => {
+    setWorkstationInvalid(true);
     setMessage({ type: 'error', text: 'Invalid Workstation' });
   }, [setMessage]);
   const workstationOptions = useMemo(
@@ -319,6 +325,7 @@ export function ELAPage() {
             transform={(v) => v.toUpperCase()}
             strict={workstations !== null}
             onInvalid={handleInvalidWorkstation}
+            invalid={workstationInvalid}
           />
           {/* Filter-button system (GitHub #125) — currently just the one Workstation
               exclude filter; a generic multi-filter framework isn't built out further

@@ -151,21 +151,32 @@ exactly as left. State clears only when the authenticated route tree unmounts (l
 ### Mis-scan / error handling
 
 - A typed Storage Code, Size, or Aisle (on any stack, or on Master Control) that isn't
-  actually valid clears itself and posts `"{Stack} Stack - Storage Code/Size/Aisle -
+  actually valid **stays in the field** (fixed 2026-07-27, issue #109 — previously
+  cleared itself; see below) and posts `"{Stack} Stack - Storage Code/Size/Aisle -
   Invalid Entry"` (or `"Master Control - ..."`) in the message bar. Per-stack Storage
   Code/Size validation (`strict`) is skipped while the narrowing reference data (the
   stack's own Aisle's freight types, or the full Storage Code list) hasn't loaded yet, so
   a value typed before that data arrives isn't falsely rejected.
-  **App-wide red-wash audit (v1.7.0):** no field on this screen picked up the red-wash
-  treatment (`DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) — every one
-  of these fields clears itself atomically on an invalid entry (`PalletCodePicker`'s own
-  `strict` handling calls `field.clear()` before `onInvalid`; per-stack/Master Aisle both
-  clear via `updateStack(index, { aisle: '' })` / equivalent), so there's never a moment
-  where a bad value sits visibly in a box to wash — same finding, and same reasoning, as
-  MNP's audit.
+  **App-wide red-wash, issue #109 (2026-07-27):** every field on this screen now picks up
+  the red-wash treatment (`DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`),
+  the last screen to get it. This previously wasn't possible — every field cleared itself
+  atomically on an invalid entry, so there was never a moment where a bad value sat
+  visibly in a box to wash (the same finding MNP was separately audited-and-correctly-
+  skipped for). Rather than leave STG skipped too, the underlying clear-on-invalid
+  behavior itself was fixed: `useCodePickerField`'s strict-mode reject path no longer
+  calls `field.clear()` by default (a new opt-in `clearOnInvalid` flag exists for a future
+  caller that specifically wants the old wipe behavior; nothing currently uses it), and
+  per-stack/Master Aisle's own free-text existence check no longer clears on failure
+  either. `PalletBox`/`PalletCodePicker` both gained an `invalid` prop applying
+  `INVALID_WASH`, driven by new per-field state (`aisleInvalid`/`storageInvalid`/
+  `sizeInvalid`/`zoneInvalid` per stack, plus Master Control's own `storageInvalid`/
+  `sizeInvalid`) that's set by the failing handler and cleared on the next successful
+  commit or by arming/disarming that field's override. ELA's Workstation field (the only
+  other screen using `strict` mode) got the equivalent treatment in the same pass, to
+  avoid a stale-unstyled-value regression from the shared hook's new default.
 - A per-stack Aisle that doesn't actually exist (checked live against `GET
-  /api/locations/empty-by-zone`) is cleared with `"{Stack} Stack - Aisle - Invalid
-  Entry"`.
+  /api/locations/empty-by-zone`) stays in the field, washed red, with `"{Stack} Stack -
+  Aisle - Invalid Entry"`.
 - Insufficient destination locations for the requested Quantity → shortfall renders as
   red "No Location" bubbles; staging still proceeds for whatever is available, and the
   post-stage message bar/log both report the shortfall as a warning.
@@ -448,6 +459,8 @@ next to the zone summary, not a bug where the log renders twice (it's the same
 
 | Date | Change |
 |---|---|
+| 2026-07-27 | Fixed [#109](https://github.com/BobbyJoeCool/PalletIQ/issues/109) — Storage Code/Size/Zone/Aisle no longer clear themselves on an invalid entry (shared `useCodePickerField`'s clear-on-reject behavior flipped to opt-in); the retained value now washes red via a new `invalid` prop on `PalletBox`/`PalletCodePicker`, completing the app-wide red-wash rollout (STG was the last screen). |
+| 2026-07-27 | Fixed [#127](https://github.com/BobbyJoeCool/PalletIQ/issues/127) — the per-stack Aisle box (both inherited and overridden states) is now a fixed size matching Storage/Size/Zone; `PalletBox` gained the same `reserveToggleSpace` prop `InheritedDisplay` already had, reserving the same trailing width `PalletCodePicker`'s own popup-toggle button occupies. |
 | 2026-07-22 (v1.7.2) | **Per-stack override of Master Control's inherited values** ([GitHub #99](https://github.com/BobbyJoeCool/PalletIQ/issues/99)): every stack's Aisle/Storage Code/Size now live-inherits Master Control's current value automatically and continuously (previously a one-time "Fill" copy, after which the stack's fields were independent state with no further relationship to Master Control); a worker can arm a per-field override toggle (Aisle/Storage Code/Size each independent, 3 per stack) to diverge just that one field on just that one stack, pre-filled from Master Control's value at the moment it's armed. Fill All and each stack's own Fill button removed entirely (inheritance no longer needs a manual trigger). Clear moved into the same row as Quantity (to its left), replacing the old separate Fill/Clear row now that Fill is gone. An active override rides along automatically through queue compaction after a stage, since it's stored directly on the stack's own state alongside Aisle/Storage/Size/Quantity. **Follow-up sizing pass (direct instruction):** each override toggle moved to the left of its field and widened to spell out "Override"; Quantity's row now absorbs the old Fill/Clear row's vertical space (`flex-[2]` vs. `flex-1` for Aisle/Storage/Size), with Clear and Quantity's own text doubled in size to match. |
 | 2026-07-17 (v1.6.6) | Full layout/graphic redesign: two-piece Cab + Forks-strip crop replacing the old single small image; Master Control reorganized (Fill All/Unstage Aisle left, fields center, Refresh right) with a new all-roles "Clear Forks" button on the Cab graphic; per-stack Fill/Clear buttons added; per-stack Storage Code/Size converted to entry-with-dropdown-helper fields scoped to that stack's own Aisle; field validation added everywhere (invalid typed Storage Code/Size/Aisle now clears itself and posts an explicit message-bar error instead of silently committing); STG/ELZ Zone Summary switched to color-coded `ZoneCodeBadge` pills; dynamic Locations-panel bubble sizing (1/2/3 columns based on count, sized to available space) replacing the old fixed 5-per-column/112×32px bubbles; Unstage/Restage modal now lists every freight type present (not just currently-staged), with the type bubble itself as the active/inactive toggle; "no Aisle" bottom info panel switched onto the literal shared `AisleSizeTable` ELA's own page uses; final assigned bubble is green and tappable (not red/dead); Staging stack sits in its own blue-bordered box. Fixed several bugs found live: bubbles not clearing on valid→invalid Quantity; Unstage/Restage's Apply dropping an unconfirmed typed quantity; "Fill All" incorrectly disabled when arriving from ELZ; contracted Storage Code/Size never appearing in dropdown-helper popups (also fixed on ELZ/SDP); bubbles growing without bound at 3+ pallets (a self-referential height/bubble-size measurement loop); bubbles slightly oversized at 3+ per column/3 columns (gap space not subtracted from the sizing math). |
 | 2026-07-16 (v1.6.4) | Pre-population from ELA/ELZ's "Stage Aisle" now only fills Master Control — no fork/stack slot is written directly; the worker fills stacks themselves via Fill All or a per-stack fill button (reverses v1.4.1/#81's "auto-fill all three slots" behavior; product decision made while fixing ELA/03 and STG/05). |

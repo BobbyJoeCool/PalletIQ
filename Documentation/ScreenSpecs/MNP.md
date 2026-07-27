@@ -13,13 +13,14 @@
 3. Worker enters a destination via the shared 3-box Aisle/Bin/Level entry (`levelOptional` — Aisle+Bin alone is enough to advance; a full 8-digit scan still resolves the whole location, including level, at once). `GET /api/locations/:id` validates the Aisle+Bin exists.
    - 3a. Not found → error; destination boxes clear and refocus.
    - 3b. Found → advances to **level_modal**, pre-filled with a known level if a full barcode (or a demo button, which always knows the exact level) already supplied one.
-4. The **Level Modal** (blocking, no dismiss) collects the rack level the pallet was physically placed at. On Enter, `POST /api/puts/manual/confirm` runs three ordered gates before the put actually commits:
+4. The **Level Modal** (blocking, no dismiss) collects the rack level the pallet was physically placed at. On Enter, `POST /api/puts/manual/confirm` runs four ordered gates before the put actually commits:
    - 4a. **Contraction** — if the destination is flagged Contraction: a Worker is hard-blocked outright (`403 CONTRACTED`, no override). An IM+ instead sees a confirmation popup ("This location is on contraction, do you want to complete the put?") and may proceed after accepting (`acknowledgeContraction: true` on resubmit).
-   - 4b. **Occupied/Staged** — if the destination is currently `STORED` or `STAGED` (by a different pallet than the one being put): a blocking popup opens instead of completing with a post-hoc warning.
-     - If the occupant's DPCI matches the incoming pallet's DPCI: the popup offers only **Combine** (IM+ only — see 4c) or Cancel; a Worker sees Cancel plus a note that combining needs IM+.
+   - 4b. **Hold** (issue #92) — if the destination has a `holdCategory`: `HOLD_OUT` never blocks (outbound-only, same rule Directed Put's location search already applies). `HOLD_IN`/`HOLD_BOTH` follow the exact same pattern as Contraction: a Worker is hard-blocked (`403 DESTINATION_ON_HOLD`); an IM+ sees a confirmation popup ("Location On Hold Both"/"Location On Hold Inbound" — "This location is on hold, do you want to complete the put?") and may proceed after accepting (`acknowledgeHold: true` on resubmit). `HOLD_PERM` is a harder, no-override block (`403 DESTINATION_HOLD_PERM`) for **every** role, including Admin — there is no acknowledgement path past it, matching how Permanent is already the most protected hold tier elsewhere in the app (WLH's `HOLD_REMOVE_MIN_ROLE`).
+   - 4c. **Occupied/Staged** — if the destination is currently `STORED` or `STAGED` (by a different pallet than the one being put): a blocking popup opens instead of completing with a post-hoc warning.
+     - If the occupant's DPCI matches the incoming pallet's DPCI: the popup offers only **Combine** (IM+ only — see 4d) or Cancel; a Worker sees Cancel plus a note that combining needs IM+.
      - Otherwise (different DPCI, or a Staged destination with nothing to compare): the popup offers **Proceed Anyway** (any role), **Place Hold Both (Empty Location) & Cancel** (any role — places a `W04` hold and cancels the put), or **Cancel**.
-   - 4c. **Consolidate** (`resolution: 'consolidate'`, IM+ only, reachable only from 4b's Combine choice) — merges the incoming pallet's current quantities onto the STORED occupant of the same DPCI, then zeroes the incoming pallet's own quantity, clears its location fields, and marks its status `CONSOLIDATED` instead of moving it. If the incoming pallet had its own prior location, that location is freed to `EMPTY`, same as a normal move.
-   - Declining any of the three gate popups returns to **pallet_scanned** with the pallet still scanned and the destination boxes cleared (product decision) — it does not restart the whole put.
+   - 4d. **Consolidate** (`resolution: 'consolidate'`, IM+ only, reachable only from 4c's Combine choice) — merges the incoming pallet's current quantities onto the STORED occupant of the same DPCI, then zeroes the incoming pallet's own quantity, clears its location fields, and marks its status `CONSOLIDATED` instead of moving it. If the incoming pallet had its own prior location, that location is freed to `EMPTY`, same as a normal move.
+   - Declining any of the four gate popups returns to **pallet_scanned** with the pallet still scanned and the destination boxes cleared (product decision) — it does not restart the whole put.
 5. On a normal (non-consolidate) completion: the pallet is stored at the destination (old location cleared atomically if this was a move), an entry is recorded in the session's Put History, and the screen resets to **ready**.
 6. **Clear** (available in `pallet_scanned`): cancels the current pallet and returns to `ready` without confirming — no API call for the state reset itself, but `POST /api/puts/manual/cancel` fires (best-effort, not awaited) to record the abandonment as a visible `MNP_CANCEL` activity-log entry, and the local Put History entry updates to read Canceled.
 7. **Abandonment via navigation-away or idle-timeout logout:** if the component unmounts while a pallet is scanned but not yet confirmed, the same `POST /api/puts/manual/cancel` best-effort call fires from an unmount-cleanup effect (using a ref-held token, since `AuthContext`'s idle-timeout logout can null the real token before this effect runs) — MNP has no server-side reservation row the way SDP does, so this client-triggered call is the only way an abandoned scan gets a visible, non-perpetually-"in-progress" outcome in the activity log.
@@ -33,6 +34,9 @@
 - **App-wide red-wash audit (v1.7.0):** unlike PIP/SDP/PII/IID/ISI, no field on this screen picked up the red-wash treatment (`DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) — every failure above clears its field atomically before the next render (`palletField.clear()` / `resetLocationField()`), so there's never a moment where a bad value sits visibly in a box to wash. Audited and intentionally skipped, not overlooked.
 - Contraction, non-IM (`403 CONTRACTED`) → error, `"This location is on contraction — put not allowed"`; returns to `pallet_scanned` with destination cleared.
 - Contraction, IM+, not yet acknowledged (`409 CONTRACTION_CONFIRM_REQUIRED`) → opens the contraction confirm dialog rather than an error message.
+- Hold In/Both, non-IM (`403 DESTINATION_ON_HOLD`) → error, `"This location is on hold — put not allowed"`; returns to `pallet_scanned` with destination cleared.
+- Hold In/Both, IM+, not yet acknowledged (`409 HOLD_CONFIRM_REQUIRED`) → opens the hold confirm dialog rather than an error message.
+- Hold Permanent, any role (`403 DESTINATION_HOLD_PERM`) → error, `"This location is on Hold Permanent — put not allowed"`; no acknowledgement path exists for this one — returns to `pallet_scanned` with destination cleared regardless of role.
 - Destination occupied/staged (`409 DESTINATION_OCCUPIED`) → opens the Occupied/Combine popup rather than an error message.
 - Stale resubmission where the occupant no longer matches DPCI (`409 CONSOLIDATE_MISMATCH`) → not currently surfaced with a distinct message in the frontend; falls through to the generic confirm-failure path.
 - Non-IM attempting `resolution: 'consolidate'` (`403 FORBIDDEN`) → not reachable through the UI (Combine is hidden from non-IM in `CombineDialog`).
@@ -104,7 +108,7 @@
 
 ## Screen Flow
 
-Covers: pallet scan success/failure and move detection, destination entry/validation, the Level Modal, and the three confirm-time gates (Contraction, Occupied/Staged, Consolidate) including their decline paths.
+Covers: pallet scan success/failure and move detection, destination entry/validation, the Level Modal, and the four confirm-time gates (Contraction, Hold, Occupied/Staged, Consolidate) including their decline paths.
 
 ```mermaid
 flowchart TD
@@ -121,11 +125,17 @@ flowchart TD
     E --> F{POST /api/puts/manual/confirm}
     F -->|CONTRACTED, Worker| F1[Error: on contraction] --> C
     F -->|CONTRACTION_CONFIRM_REQUIRED, IM+| G[Contraction popup]
+    F -->|DESTINATION_ON_HOLD, Worker| F1b[Error: on hold] --> C
+    F -->|DESTINATION_HOLD_PERM, any role| F1c[Error: Hold Permanent, no override] --> C
+    F -->|HOLD_CONFIRM_REQUIRED, IM+| G2[Hold popup]
     F -->|DESTINATION_OCCUPIED| H[Occupied/Combine popup]
     F -->|OK normal| I[PUT: unlock, history entry] --> A
 
     G -->|Accept| F2[Resubmit acknowledgeContraction] --> F
     G -->|Cancel| C
+
+    G2 -->|Accept| F2b[Resubmit acknowledgeHold] --> F
+    G2 -->|Cancel| C
 
     H -->|matchesDpci: Combine IM+| J{POST resolution=consolidate}
     H -->|Proceed Anyway| F3[Resubmit resolution=proceed] --> F
@@ -142,7 +152,7 @@ flowchart TD
 
 **MNP_SCAN's unconditional write.** `manualScan` writes the `ActivityLog` entry *before* calling `checkPalletEligibility` — a scan of an ineligible pallet (no cartons, canceled, pull-pending) still leaves a durable trace, unlike SDP's `directedPut`, which only logs on success. This is a deliberate scope decision (`outline.md`'s Manual Put section) — MNP is the more error-prone override path, so every attempt is recorded regardless of outcome.
 
-**Three gates, one resubmission shape.** Contraction, Occupied/Staged, and Consolidate all follow the same "throw a specific error code, resubmit with an extra flag" pattern PIP's `LEVEL_MISMATCH` uses. `pendingLevelRef`/`acknowledgeContractionRef` on the frontend exist specifically to survive this multi-step round-trip — `handleLevelSelect`'s own `level` parameter doesn't otherwise persist across a contraction-then-occupied double-gate, and a worker who's already accepted the contraction popup shouldn't be asked again when a subsequent occupied/combine gate also fires for the same attempt.
+**Four gates, one resubmission shape (Hold added in issue #92).** Contraction, Hold, Occupied/Staged, and Consolidate all follow the same "throw a specific error code, resubmit with an extra flag" pattern PIP's `LEVEL_MISMATCH` uses. `pendingLevelRef`/`acknowledgeContractionRef`/`acknowledgeHoldRef` on the frontend exist specifically to survive this multi-step round-trip — `handleLevelSelect`'s own `level` parameter doesn't otherwise persist across a contraction-then-hold-then-occupied multi-gate sequence, and a worker who's already accepted the contraction and/or hold popups shouldn't be asked again when a subsequent gate also fires for the same attempt. Hold's own override tier is narrower than Contraction's: `HOLD_IN`/`HOLD_BOTH` are IM+-overridable the same way Contraction is, but `HOLD_PERM` has no override path at all, for any role — matching how Permanent is already the most protected hold tier elsewhere in the app (WLH's `HOLD_REMOVE_MIN_ROLE`).
 
 **Occupant lookup is server-truth, not client-supplied.** `manualConfirm` re-queries `Pallet` for whoever is currently `STORED` at the exact destination on every call (excluding the incoming pallet's own pid) — the client never gets to assert who the occupant is. This matters for `CONSOLIDATE_MISMATCH`: if the occupant changed between the initial `DESTINATION_OCCUPIED` throw and the worker's `resolution: 'consolidate'` resubmission (e.g. another worker's put landed there in between), the mismatch is caught server-side rather than trusting a stale client snapshot.
 
@@ -156,8 +166,6 @@ flowchart TD
 
 ## Open items still remaining
 
-- [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) — `placePallet` clears a pallet's old location to `EMPTY` without checking whether a second occupant pallet has since moved in there (shared with SDP).
-- [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — scanning an unknown Pallet ID on MNP crashes with a 500 instead of a clean 404.
 - `CONSOLIDATE_MISMATCH` (a stale Combine resubmission where the occupant no longer matches) has no dedicated frontend message — it currently falls through to the generic "Confirm failed — please try again" text rather than a more specific explanation of what happened.
 - [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — bad Contraction data on RS/RF/BS/some HS locations could incorrectly trigger the Contraction gate (or fail to) for locations that aren't actually contracted.
 
@@ -165,6 +173,9 @@ flowchart TD
 
 | Date | Change |
 |---|---|
+| 2026-07-27 | Fixed [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) — `placePallet` (and `manualConfirm`'s consolidate branch) now check whether a second pallet still occupies a vacated location before clearing it, falling back to `STORED` instead of `EMPTY` if so. |
+| 2026-07-27 | Fixed [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — `manualScan` no longer includes a nonexistent scanned pallet id in its unconditional `MNP_SCAN` log write (was violating `ActivityLog.palletId`'s FK and 500ing instead of surfacing `404 PALLET_NOT_FOUND`); logs `palletId: null` with the invalid id kept in `details.scannedId` instead. |
+| 2026-07-27 | Added the Hold gate ([#92](https://github.com/BobbyJoeCool/PalletIQ/issues/92)) as step 4b of `manualConfirm`'s gate sequence — `HOLD_IN`/`HOLD_BOTH` use the same IM+-overridable pattern as Contraction; `HOLD_PERM` is a harder no-override block for every role; `HOLD_OUT` never blocks. |
 | 2026-07-17 | Rebuilt to the new Screen-Design-Template format, documenting the screen as currently shipped (v1.6.3 and later fixes). The old `DevNotes/Screen-Specs/MNP.md` described a simpler 4-state flow with a single free-text destination field, a non-blocking post-hoc "occupied" warning, and no Contraction gate or Consolidate operation at all — all superseded by the v1.6.3 rebuild described below. |
 | 2026-07-15 (v1.6.3) | Added the Contraction gate (Worker hard-blocked, IM+ can acknowledge and proceed), converted the occupied/staged check from a post-hoc warning into a blocking popup, added pallet Consolidation for same-DPCI destinations (IM+ only), rebuilt destination entry as the shared 3-box Aisle/Bin/Level field (replacing a single free-text field), and added abandoned-scan logging (`MNP_CANCEL`) for Clear/navigate-away/idle-timeout. Fixed a same-session bug where a 6-digit destination barcode scan (including the demo Empty/Occupied buttons) was silently dropped by the new 3-box entry. |
 | 2026-07-08 (v1.1.0) | DPCI/UPC values on the pallet-data panel became tap-to-jump links to Item ID Lookup. |

@@ -58,6 +58,7 @@ type ConfirmResult = NormalConfirmResult | ConsolidateConfirmResult;
  *  see puts.ts's manualConfirm docstring for the exact server-side sequencing. */
 type GateState =
   | { kind: 'contraction' }
+  | { kind: 'hold'; holdCategory: 'HOLD_IN' | 'HOLD_BOTH' }
   | { kind: 'occupied'; occupantPalletId: number | null; occupantDpci: string | null; wasStaged: boolean }
   | { kind: 'combine'; occupantPalletId: number | null; occupantDpci: string | null };
 
@@ -323,6 +324,10 @@ export function MNPPage() {
   // in flight — carried forward on subsequent resubmissions (e.g. into the occupied/combine
   // gate) so the worker isn't asked twice. Reset at the start of every fresh handleLevelSelect.
   const acknowledgeContractionRef = useRef(false);
+  // Same pattern as acknowledgeContractionRef, for the IM+ Hold In/Both override gate (#92).
+  // Hold Permanent has no equivalent — it's a hard block for every role, nothing to
+  // acknowledge past.
+  const acknowledgeHoldRef = useRef(false);
   // Set immediately before deliverScan() by the Empty/Occupied/Contracted/Consolidate demo
   // buttons — /api/demo/location returns a 6-digit Aisle+Bin id (a physical location
   // barcode only ever encodes that much) plus the exact level separately, so this is how
@@ -442,6 +447,7 @@ export function MNPPage() {
   async function handleLevelSelect(level: number) {
     pendingLevelRef.current = level;
     acknowledgeContractionRef.current = false;
+    acknowledgeHoldRef.current = false;
     await submitConfirm(level);
   }
 
@@ -449,12 +455,13 @@ export function MNPPage() {
    * Calls POST /api/puts/manual/confirm with the stored pallet ID, pending destination, and
    * chosen level, plus any gate-resolution flags accumulated so far. Branches on success
    * between a normal put/move and a consolidate result. On a gate error (CONTRACTED,
-   * CONTRACTION_CONFIRM_REQUIRED, DESTINATION_OCCUPIED) opens the matching popup instead of
+   * DESTINATION_ON_HOLD, DESTINATION_HOLD_PERM, CONTRACTION_CONFIRM_REQUIRED,
+   * HOLD_CONFIRM_REQUIRED, DESTINATION_OCCUPIED) opens the matching popup instead of
    * failing outright — see puts.ts's manualConfirm docstring for the exact gate sequencing.
    */
   async function submitConfirm(
     level: number,
-    extra?: { acknowledgeContraction?: boolean; resolution?: 'proceed' | 'consolidate' },
+    extra?: { acknowledgeContraction?: boolean; acknowledgeHold?: boolean; resolution?: 'proceed' | 'consolidate' },
   ) {
     const pallet = scannedPalletRef.current;
     const loc    = pendingLocationRef.current;
@@ -472,6 +479,7 @@ export function MNPPage() {
             destinationLocation: loc,
             level,
             ...(extra?.acknowledgeContraction && { acknowledgeContraction: true }),
+            ...(extra?.acknowledgeHold && { acknowledgeHold: true }),
             ...(extra?.resolution && { resolution: extra.resolution }),
           }),
         },
@@ -527,6 +535,23 @@ export function MNPPage() {
         setPendingGate({ kind: 'contraction' });
         return;
       }
+      if (code === 'DESTINATION_HOLD_PERM') {
+        playAlert('error');
+        setMessage({ type: 'error', text: 'This location is on Hold Permanent — put not allowed' });
+        cancelToDestinationEntry();
+        return;
+      }
+      if (code === 'DESTINATION_ON_HOLD') {
+        playAlert('error');
+        setMessage({ type: 'error', text: 'This location is on hold — put not allowed' });
+        cancelToDestinationEntry();
+        return;
+      }
+      if (code === 'HOLD_CONFIRM_REQUIRED') {
+        const data = (err as { data?: { holdCategory: 'HOLD_IN' | 'HOLD_BOTH' } }).data;
+        setPendingGate({ kind: 'hold', holdCategory: data?.holdCategory ?? 'HOLD_BOTH' });
+        return;
+      }
       if (code === 'DESTINATION_OCCUPIED') {
         const data = (err as { data?: {
           occupantPalletId: number | null; occupantDpci: string | null;
@@ -555,11 +580,19 @@ export function MNPPage() {
     submitConfirm(pendingLevelRef.current, { acknowledgeContraction: true });
   }
 
+  /** IM+ worker accepted the Hold In/Both popup — resubmits with acknowledgeHold: true. */
+  function handleHoldConfirm() {
+    if (pendingLevelRef.current == null) return;
+    acknowledgeHoldRef.current = true;
+    submitConfirm(pendingLevelRef.current, { acknowledgeHold: true });
+  }
+
   /** Worker chose Proceed Anyway on the occupied/staged popup. */
   function handleOccupiedProceed() {
     if (pendingLevelRef.current == null) return;
     submitConfirm(pendingLevelRef.current, {
       acknowledgeContraction: acknowledgeContractionRef.current,
+      acknowledgeHold: acknowledgeHoldRef.current,
       resolution: 'proceed',
     });
   }
@@ -569,6 +602,7 @@ export function MNPPage() {
     if (pendingLevelRef.current == null) return;
     submitConfirm(pendingLevelRef.current, {
       acknowledgeContraction: acknowledgeContractionRef.current,
+      acknowledgeHold: acknowledgeHoldRef.current,
       resolution: 'consolidate',
     });
   }
@@ -609,6 +643,7 @@ export function MNPPage() {
   function cancelToDestinationEntry() {
     setPendingGate(null);
     acknowledgeContractionRef.current = false;
+    acknowledgeHoldRef.current = false;
     pendingLevelRef.current = null;
     setScreenState('pallet_scanned');
     resetLocationField();
@@ -668,6 +703,7 @@ export function MNPPage() {
     pendingEntryKeyRef.current = null;
     pendingLevelRef.current = null;
     acknowledgeContractionRef.current = false;
+    acknowledgeHoldRef.current = false;
     setScreenState('ready');
     palletField.clear();
   }
@@ -915,6 +951,17 @@ export function MNPPage() {
           confirmLabel="Complete Put"
           cancelLabel="Cancel"
           onConfirm={handleContractionConfirm}
+          onCancel={cancelToDestinationEntry}
+        />
+      )}
+
+      {pendingGate?.kind === 'hold' && (
+        <ConfirmDialog
+          title={pendingGate.holdCategory === 'HOLD_BOTH' ? 'Location On Hold Both' : 'Location On Hold Inbound'}
+          message="This location is on hold, do you want to complete the put?"
+          confirmLabel="Complete Put"
+          cancelLabel="Cancel"
+          onConfirm={handleHoldConfirm}
           onCancel={cancelToDestinationEntry}
         />
       )}

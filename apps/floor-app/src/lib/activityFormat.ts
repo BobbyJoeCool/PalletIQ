@@ -139,6 +139,11 @@ function locationToken(location: string | null): DetailIdToken | null {
   return location ? { id: location, type: 'location' } : null;
 }
 
+/** Wraps a formatted DPCI string as a tappable <LiveId> token, or null if this entry has none. */
+function dpciToken(dpci: string | null): DetailIdToken | null {
+  return dpci ? { id: dpci, type: 'dpci' } : null;
+}
+
 /** Formats a single hold-related detail line, shared by HOLD_PLACE/HOLD_CLEAR. */
 function holdCategoryName(cat: unknown): string {
   return typeof cat === 'string' && cat in HOLD_LABELS ? HOLD_LABELS[cat as HoldCategory].name : String(cat);
@@ -186,16 +191,19 @@ const EDIT_FIELD_LABELS: Record<string, string> = {
 const EDIT_FIELD_ORDER = ['dpci', 'vcp', 'ssp', 'currentPallets', 'currentCartons', 'currentSSPs'];
 
 /**
- * Formats one EDIT_PAL field's old/new value for the diff line. Every field but `dpci`
- * is already a display-ready primitive (number/string); `dpci` alone arrives as an
- * object ({ dept, class, item }) and needs the same zero-padded dash format as fmtDpci.
+ * Formats one EDIT_PAL field's old/new "Label: value" segment for the diff line, as
+ * tokens rather than a plain string so `dpci` can render as a tappable <LiveId> (#104).
+ * Every field but `dpci` is already a display-ready primitive (number/string); `dpci`
+ * alone arrives as an object ({ dept, class, item }) and needs the same zero-padded
+ * dash format as fmtDpci before it can become a token.
  */
-function fmtEditValue(field: string, value: unknown): string {
+function fmtEditField(field: string, value: unknown): DetailToken[] {
   if (field === 'dpci' && value && typeof value === 'object') {
     const v = value as { dept: number; class: number; item: number };
-    return `${String(v.dept).padStart(3, '0')}-${String(v.class).padStart(2, '0')}-${String(v.item).padStart(4, '0')}`;
+    const dpci = `${String(v.dept).padStart(3, '0')}-${String(v.class).padStart(2, '0')}-${String(v.item).padStart(4, '0')}`;
+    return [`${EDIT_FIELD_LABELS.dpci}: `, { id: dpci, type: 'dpci' }];
   }
-  return String(value);
+  return [`${EDIT_FIELD_LABELS[field]}: ${String(value)}`];
 }
 
 /**
@@ -209,6 +217,7 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
   const d = entry.details ?? {};
   const pallet = palletToken(entry.palletId);
   const loc = locationToken(entry.location);
+  const dpci = dpciToken(entry.dpci);
 
   switch (entry.actionType) {
     case 'PULL': {
@@ -218,6 +227,7 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
       const qty = fmtPCS(pulled.pallets ?? 0, pulled.cartons ?? 0, pulled.ssps ?? 0);
       const line: DetailLine = [`${label}: Pulled ${qty} from `];
       line.push(pallet ?? '?');
+      if (dpci) line.push(' (', dpci, ')');
       if (loc) line.push(' at ', loc);
       const verifiedVia = d.verifiedVia as string | undefined;
       if (verifiedVia) {
@@ -332,18 +342,30 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
 
       const headerLine: DetailLine = loc ? ['Modified Pallet in ', loc] : ['Modified Pallet'];
 
-      const oldStr = changed.map((f) => `${EDIT_FIELD_LABELS[f]}: ${fmtEditValue(f, oldVals[f])}`).join(', ');
-      const newStr = changed.map((f) => `${EDIT_FIELD_LABELS[f]}: ${fmtEditValue(f, newVals[f])}`).join(', ');
+      const oldParts: DetailToken[] = [];
+      const newParts: DetailToken[] = [];
+      changed.forEach((f, i) => {
+        if (i > 0) { oldParts.push(', '); newParts.push(', '); }
+        oldParts.push(...fmtEditField(f, oldVals[f]));
+        newParts.push(...fmtEditField(f, newVals[f]));
+      });
       const diffLine: DetailLine = [
         pallet ?? '?',
-        ` ${oldStr} changed to ${newStr}. Reason ${reasonCode}`,
+        ' ',
+        ...oldParts,
+        ' changed to ',
+        ...newParts,
+        `. Reason ${reasonCode}`,
       ];
 
       return [headerLine, diffLine];
     }
 
-    case 'REINSTATE':
-      return [['Reinstated pallet ', pallet ?? '?']];
+    case 'REINSTATE': {
+      const line: DetailLine = ['Reinstated pallet ', pallet ?? '?'];
+      if (dpci) line.push(' (', dpci, ')');
+      return [line];
+    }
 
     case 'CONSOLID': {
       const targetToken = palletToken((d.targetPalletId as number | undefined) ?? null);

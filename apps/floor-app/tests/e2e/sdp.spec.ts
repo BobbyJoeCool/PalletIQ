@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { pickCode, tapKeys, messageBarTone } from './helpers';
+import { fmtLocation } from '../../src/lib/fmt';
 
 // Aisle 304 is a standard aisle seeded with plenty of EMPTY locations (see api/prisma/seed.ts,
 // AISLE_PATTERN). If the dev DB has been heavily exercised without a re-seed, this aisle can
@@ -59,11 +60,12 @@ test.describe('SDP — System Directed Put flow', () => {
 
   // Node DIR_OK {Result?} -> PALLET_NOT_FOUND
   test('an unknown pallet ID shows an error', async ({ page }) => {
-    await tapKeys(page, '1');
+    await tapKeys(page, LIVE_AISLE);
     await page.getByRole('button', { name: 'OK', exact: true }).click();
-    await page.getByRole('button', { name: '✗ PID' }).click();
+    await page.getByRole('button', { name: '⚠ Invalid Pallet' }).click();
+    await page.getByRole('button', { name: 'Pallet ID Not Found' }).click();
 
-    await expect(page.getByText('Pallet not found')).toBeVisible();
+    await expect(page.getByText('Pallet ID not found')).toBeVisible();
   });
 
   // Node DIR_OK {Result?} -> NO_LOCATIONS
@@ -115,7 +117,7 @@ test.describe('SDP — System Directed Put flow', () => {
     const { directedLocation } = await directPallet(page, LIVE_AISLE, '✓ Put');
     await page.getByRole('button', { name: '✓ Location' }).click();
 
-    await expect(page.getByText(`Put complete — ${directedLocation}`)).toBeVisible();
+    await expect(page.getByText(`Put complete — ${fmtLocation(directedLocation)}`)).toBeVisible();
     await expect(page.getByText('Screen locked — active reservation')).not.toBeVisible();
   });
 

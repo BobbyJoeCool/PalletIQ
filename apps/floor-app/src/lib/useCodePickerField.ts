@@ -10,10 +10,18 @@ interface UseCodePickerFieldOpts {
   earlyCommit?: (value: string) => boolean;
   disabled?: boolean;
   /** See CodePickerField's own doc — rejects a typed value not present in `options`
-   *  instead of committing it (clears the field, calls `onInvalid` in place of
-   *  `onChange`). Skipped automatically while `optionsLoading` is true. */
+   *  instead of committing it (calls `onInvalid` in place of `onChange`). Skipped
+   *  automatically while `optionsLoading` is true. */
   strict?: boolean;
   onInvalid?: (code: string) => void;
+  /** Opt-in: clears the field the instant a strict-mode entry is rejected, instead of the
+   *  default of leaving the typed value visible (issue #109 — "the vast majority of
+   *  invalid entries SHOULD stay so the user sees what they entered," matching how every
+   *  other invalid-field case in the app already works: UPC/Location/DPCI keep the bad
+   *  value on screen, washed red, rather than silently wiping it). No current caller sets
+   *  this; it exists for a future one that specifically needs the old wipe-on-reject
+   *  behavior rather than a caller-driven wash. */
+  clearOnInvalid?: boolean;
   optionsLoading?: boolean;
   /** Also dismiss the input panel on a maxLength auto-submit, not just an explicit
    *  Enter/OK confirm — see CodePickerField's own doc for when this is appropriate. */
@@ -40,6 +48,7 @@ export function useCodePickerField(
   const {
     panel, maxLength, transform, earlyCommit,
     disabled = false, strict = false, onInvalid, optionsLoading = false, closeOnAutoSubmit = false,
+    clearOnInvalid = false,
   } = opts;
 
   const field = useNumpadField(panel, maxLength, undefined, earlyCommit);
@@ -66,7 +75,7 @@ export function useCodePickerField(
     field.focus((v, explicit) => {
       const trimmed = transform ? transform(v.trim()) : v.trim();
       if (strict && trimmed && !optionsLoading && !options.some((o) => o.code === trimmed)) {
-        field.clear();
+        if (clearOnInvalid) field.clear();
         onInvalid?.(trimmed);
       } else {
         onChange(trimmed);

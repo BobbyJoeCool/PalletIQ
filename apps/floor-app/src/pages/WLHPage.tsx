@@ -75,9 +75,13 @@ const ACTION_OPTIONS: { value: RangeAction; label: string }[] = [
 ];
 
 interface PlaceBreakdownRow { existing: HoldCategory | null; next: HoldCategory; outcome: 'placed' | 'upgraded' | 'blocked'; count: number }
-interface ReleaseBreakdownRow { existing: HoldCategory; released: boolean; count: number }
+/** `next` is the resulting hold value ('released'/'downgraded'/'untouched' all still
+ *  report it — null for a full release, the downgraded-to category for a downgrade, or
+ *  just `existing` again for untouched/blocked) — issue #123's level-aware Release. */
+interface ReleaseBreakdownRow { existing: HoldCategory; next: HoldCategory | null; outcome: 'released' | 'downgraded' | 'blocked' | 'untouched'; count: number }
 interface RangeResult {
-  total: number; placed?: number; upgraded?: number; blocked?: number; released?: number;
+  total: number; placed?: number; upgraded?: number; blocked?: number;
+  released?: number; downgraded?: number; untouched?: number;
   breakdown?: (PlaceBreakdownRow | ReleaseBreakdownRow)[];
 }
 
@@ -152,7 +156,10 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
     ? true
     : hasLevelRange && Number.isInteger(startLevel) && Number.isInteger(endLevel) && startLevel <= endLevel;
   const rangeValid = Number.isInteger(aisle) && Number.isInteger(startBin) && Number.isInteger(endBin) && startBin <= endBin && levelRangeValid;
-  const canReview = rangeValid && (action === 'RELEASE' || (holdType != null && reasonCode !== ''));
+  // Release now needs a chosen hold *level* too (issue #123), same as Place needs a hold
+  // type — just not a reason code, since Release has nothing to log a placement reason
+  // for.
+  const canReview = rangeValid && holdType != null && (action === 'RELEASE' || reasonCode !== '');
 
   /** Human-readable summary of the current range, e.g. "Aisle 318, Bin 1–32 (Odd bins
    *  only), Levels 4–5" — shared by the success message and the confirmation modal. */
@@ -181,7 +188,10 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
       const body = {
         aisle, startBin, endBin, binSide,
         ...(hasLevelRange ? { startLevel, endLevel } : {}),
-        ...(action === 'PLACE' ? { holdType, reasonCode } : {}),
+        // Release now sends holdType too (issue #123 — which level to release), just
+        // never reasonCode (nothing placed, nothing to log a reason for).
+        holdType,
+        ...(action === 'PLACE' ? { reasonCode } : {}),
       };
       const result = await apiFetch<RangeResult>('/api/locations/range-hold', token!, {
         method: action === 'PLACE' ? 'PATCH' : 'DELETE',
@@ -202,10 +212,17 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
         }
         onLog(lines.join('\n'));
       } else {
-        setMessage({ type: 'success', text: `Holds released on ${result.total} locations — ${rangeDesc}` });
-        const lines = [`Release — ${rangeDesc}`];
+        // Message Bar reports what actually changed (released + downgraded), not the raw
+        // total — `total` also counts untouched/blocked buckets the worker's chosen level
+        // never affected, which would otherwise overstate what just happened.
+        const changed = (result.released ?? 0) + (result.downgraded ?? 0);
+        setMessage({ type: 'success', text: `Released ${holdType ? HOLD_LABELS[holdType].name : ''} on ${changed} locations — ${rangeDesc}` });
+        const lines = [`Release ${holdType ? HOLD_LABELS[holdType].name : ''} — ${rangeDesc}`];
         for (const row of (result.breakdown ?? []) as ReleaseBreakdownRow[]) {
-          lines.push(row.released ? `${row.count} released (was ${holdName(row.existing)})` : `${row.count} blocked (still ${holdName(row.existing)}, insufficient role)`);
+          if (row.outcome === 'released') lines.push(`${row.count} released (was ${holdName(row.existing)})`);
+          else if (row.outcome === 'downgraded') lines.push(`${row.count} downgraded ${holdName(row.existing)} → ${holdName(row.next)}`);
+          else if (row.outcome === 'blocked') lines.push(`${row.count} blocked (still ${holdName(row.existing)}, insufficient role)`);
+          else lines.push(`${row.count} untouched (${holdName(row.existing)} not affected by releasing ${holdType ? HOLD_LABELS[holdType].name : ''})`);
         }
         onLog(lines.join('\n'));
       }
@@ -254,31 +271,39 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
 
       <div className="flex flex-col gap-1">
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Action</span>
-        <SegmentedControl options={ACTION_OPTIONS} value={action} onChange={setAction} />
+        <SegmentedControl options={ACTION_OPTIONS} value={action} onChange={(a) => { setAction(a); setHoldType(null); }} />
       </div>
 
+      {/* Hold Type picker (issue #123 — Release previously never showed one at all,
+          unconditionally clearing every hold bucket in range with no way to pick a level).
+          Release offers every category, not just `placeableTypes` (a Place-role filter
+          that has nothing to do with who can *release* a given level — that's checked
+          server-side per HOLD_REMOVE_MIN_ROLE and surfaced as a per-bucket "blocked"
+          outcome instead, same as Place already does for its own role gate). */}
+      <div className="flex flex-col gap-2">
+        <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">
+          {action === 'PLACE' ? 'Hold Type' : 'Release Level'}
+        </span>
+        <div className="grid grid-cols-2 gap-2">
+          {(action === 'PLACE' ? placeableTypes : (Object.keys(HOLD_LABELS) as HoldCategory[])).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setHoldType(t)}
+              className={`flex flex-col items-start gap-0.5 px-4 py-3 rounded-[10px] border text-left transition-colors ${
+                holdType === t ? 'border-[#CC0000] bg-[#CC0000]/10' : 'border-[#3A3A3A] hover:border-[#555]'
+              }`}
+            >
+              <span className="font-ui text-[16px] font-semibold text-white">{HOLD_LABELS[t].name}</span>
+              <span className="font-ui text-[13px] text-[#9A9A9A]">{HOLD_LABELS[t].blocks}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Reason Code stays Place-only — Release has nothing placed to log a reason for. */}
       {action === 'PLACE' && (
-        <>
-          <div className="flex flex-col gap-2">
-            <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Hold Type</span>
-            <div className="grid grid-cols-2 gap-2">
-              {placeableTypes.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setHoldType(t)}
-                  className={`flex flex-col items-start gap-0.5 px-4 py-3 rounded-[10px] border text-left transition-colors ${
-                    holdType === t ? 'border-[#CC0000] bg-[#CC0000]/10' : 'border-[#3A3A3A] hover:border-[#555]'
-                  }`}
-                >
-                  <span className="font-ui text-[16px] font-semibold text-white">{HOLD_LABELS[t].name}</span>
-                  <span className="font-ui text-[13px] text-[#9A9A9A]">{HOLD_LABELS[t].blocks}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <ReasonCodeField key={reasonCodeKey} codes={HOLD_REASON_CODES} value={reasonCode} onChange={setReasonCode} label="Reason Code" />
-        </>
+        <ReasonCodeField key={reasonCodeKey} codes={HOLD_REASON_CODES} value={reasonCode} onChange={setReasonCode} label="Reason Code" />
       )}
 
       <button
@@ -296,7 +321,7 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
           message={
             action === 'PLACE'
               ? `Place a ${holdType ? HOLD_LABELS[holdType].name : ''} hold on Aisle ${aisle}, Bin ${startBin} through Bin ${endBin}${binSide !== 'ALL' ? ` (${binSide === 'ODD' ? 'Odd' : 'Even'} bins only)` : ''}${hasLevelRange ? `, Levels ${startLevel}–${endLevel}` : ''} — ${preview.total} locations in range.`
-              : `Release holds on Aisle ${aisle}, Bin ${startBin} through Bin ${endBin}${binSide !== 'ALL' ? ` (${binSide === 'ODD' ? 'Odd' : 'Even'} bins only)` : ''}${hasLevelRange ? `, Levels ${startLevel}–${endLevel}` : ''} — ${preview.total} locations in range.`
+              : `Release ${holdType ? HOLD_LABELS[holdType].name : ''} on Aisle ${aisle}, Bin ${startBin} through Bin ${endBin}${binSide !== 'ALL' ? ` (${binSide === 'ODD' ? 'Odd' : 'Even'} bins only)` : ''}${hasLevelRange ? `, Levels ${startLevel}–${endLevel}` : ''} — ${preview.total} locations in range.`
           }
           confirmLabel={submitting ? 'Working…' : 'Confirm'}
           variant={action === 'RELEASE' ? 'primary' : 'danger'}

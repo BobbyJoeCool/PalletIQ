@@ -541,6 +541,34 @@ function resolveRangePlace(requested: string, existing: string | null): { next: 
   return { next: requested, outcome: 'placed' };
 }
 
+// Hold hierarchy for Range Release, mirroring resolveRangePlace's shape (issue #123).
+// Unlike Place, Release isn't a flat "always clears" — a chosen release *level* only
+// acts on its own bucket plus whatever downgrades into it, per a confirmed priority
+// order: Hold Permanent is untouched by releasing anything but Hold Permanent itself
+// (releasing Permanent clears everything at/below it, including Both/In/Out); releasing
+// Hold Both clears Both, In, and Out all (Both is treated as a superset of the other
+// two, not just its own exact bucket); releasing Hold In/Out is symmetric — the
+// *opposite* single-direction hold is left untouched (nothing to release), a matching
+// Hold Both downgrades to the opposite direction (releasing just the requested
+// direction's component), and an exact match clears completely.
+type ReleaseOutcome = 'released' | 'downgraded' | 'blocked' | 'untouched';
+function resolveRangeRelease(requested: string, existing: string): { next: string | null; outcome: 'released' | 'downgraded' | 'untouched' } {
+  if (existing === 'HOLD_PERM' && requested !== 'HOLD_PERM') {
+    return { next: existing, outcome: 'untouched' };
+  }
+  if (requested === 'HOLD_PERM' || requested === 'HOLD_BOTH') {
+    // Releasing Permanent clears everything at/below it; releasing Both clears Both
+    // plus pure In/Out (existing is guaranteed one of those three here, since Perm was
+    // already handled above).
+    return { next: null, outcome: 'released' };
+  }
+  // requested is HOLD_IN or HOLD_OUT.
+  const opposite = requested === 'HOLD_IN' ? 'HOLD_OUT' : 'HOLD_IN';
+  if (existing === 'HOLD_BOTH') return { next: opposite, outcome: 'downgraded' };
+  if (existing === requested) return { next: null, outcome: 'released' };
+  return { next: existing, outcome: 'untouched' }; // existing === opposite — nothing to release
+}
+
 /**
  * Places a hold across every location in a single-aisle bin range (issue #14). Requires
  * IM+ to use Range mode at all, on top of whichever role the requested hold type already
@@ -617,18 +645,32 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
 }
 
 /**
- * Releases (clears) whatever hold, if any, currently exists on every location in a
- * single-aisle bin range (issue #14) — no hierarchy involved, Release always just clears.
- * Requires IM+ to attempt at all; clearing a Permanent hold specifically still requires
- * Lead+, checked per existing-hold bucket found in the range — an IM's range-release simply
- * skips any Permanent-held locations it encounters (reported as blocked) rather than
- * failing the whole action outright.
+ * Releases a chosen hold *level* across every location in a single-aisle bin range
+ * (issue #14; level-aware priority added in issue #123 — previously always cleared every
+ * hold bucket found unconditionally, with no way to release just one level respecting the
+ * hierarchy). Evaluates `resolveRangeRelease` independently per distinct existing-hold
+ * bucket found in the range, same snapshot-before-write approach as placeRangeHold (see
+ * its own comment for why: an earlier write's result must not be double-counted/
+ * double-processed by a later bucket in the same pass).
  *
- * @param req - HTTP request with body `{ aisle, startBin, endBin, binSide?, startLevel?, endLevel? }`
- * @returns `{ total, released, blocked, breakdown }` — `breakdown` is one entry per existing
- *   hold type found in the range (`{ existing, released, count }`), same purpose as
- *   placeRangeHold's own breakdown (WLH's session Log panel).
- * @throws 400 INVALID_INPUT for a bad range; 403 FORBIDDEN if caller is below IM
+ * Requires IM+ to attempt at all. Both a full release (bucket → null) and a downgrade
+ * (e.g. Both → Out) are gated by `HOLD_REMOVE_MIN_ROLE[existing]` — a downgrade uses the
+ * *source* bucket's own removal threshold (issue #123 — confirmed: modifying a
+ * Both-held location, even partially, is still gated the same as fully removing Both),
+ * not a lower bar. A bucket the chosen level doesn't target at all (`untouched`, e.g.
+ * Hold Permanent when releasing anything but Permanent itself) needs no role check —
+ * nothing happens to it — and is reported separately from `blocked` (role-insufficient)
+ * so the UI can tell "this wasn't part of what you asked to release" apart from "you
+ * don't have permission to release this."
+ *
+ * @param req - HTTP request with body
+ *   `{ aisle, startBin, endBin, binSide?, startLevel?, endLevel?, holdType }`
+ * @returns `{ total, released, downgraded, blocked, untouched, breakdown }` —
+ *   `breakdown` is one entry per existing hold bucket found in the range
+ *   (`{ existing, next, outcome, count }`), same purpose as placeRangeHold's own
+ *   breakdown (WLH's session Log panel).
+ * @throws 400 INVALID_INPUT for a bad range or missing/invalid holdType;
+ *   403 FORBIDDEN if caller is below IM
  */
 async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
   const auth = await requireAuth(req);
@@ -636,29 +678,44 @@ async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
 
   const body = await req.json() as {
     aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown;
-    startLevel?: unknown; endLevel?: unknown;
+    startLevel?: unknown; endLevel?: unknown; holdType?: string;
   };
   const range = parseRangeParams(body);
+  if (!body.holdType || !(body.holdType in HOLD_REMOVE_MIN_ROLE)) {
+    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  }
   const bins = binsInRange(range);
   const levels = levelFilter(range);
 
-  let released = 0, blocked = 0;
-  const breakdown: { existing: string; released: boolean; count: number }[] = [];
+  // Snapshot every bucket's count BEFORE any writes — see placeRangeHold's identical
+  // comment for why (a downgrade's write target could otherwise be double-counted by a
+  // later bucket in the same pass whose existing-value happens to match).
+  const buckets: { existing: 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM'; count: number }[] = [];
   for (const existing of ['HOLD_IN', 'HOLD_OUT', 'HOLD_BOTH', 'HOLD_PERM'] as const) {
-    const where = { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing };
-    const count = await prisma.location.count({ where });
-    if (count === 0) continue;
+    const count = await prisma.location.count({ where: { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing } });
+    if (count > 0) buckets.push({ existing, count });
+  }
 
-    if (!hasMinRole(auth.role, HOLD_REMOVE_MIN_ROLE[existing])) {
-      blocked += count;
-      breakdown.push({ existing, released: false, count });
+  let released = 0, downgraded = 0, blocked = 0, untouched = 0;
+  const breakdown: { existing: string; next: string | null; outcome: ReleaseOutcome; count: number }[] = [];
+  for (const { existing, count } of buckets) {
+    const { next, outcome } = resolveRangeRelease(body.holdType, existing);
+
+    if (outcome === 'untouched') {
+      untouched += count;
+      breakdown.push({ existing, next, outcome, count });
       continue;
     }
-    await prisma.location.updateMany({ where, data: { holdCategory: null } });
-    released += count;
-    breakdown.push({ existing, released: true, count });
+    if (!hasMinRole(auth.role, HOLD_REMOVE_MIN_ROLE[existing])) {
+      blocked += count;
+      breakdown.push({ existing, next: existing, outcome: 'blocked', count });
+      continue;
+    }
+    await prisma.location.updateMany({ where: { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing }, data: { holdCategory: next } });
+    breakdown.push({ existing, next, outcome, count });
+    if (outcome === 'downgraded') downgraded += count; else released += count;
   }
-  const total = released + blocked;
+  const total = released + downgraded + blocked + untouched;
 
   await writeLog({
     userId: auth.zNumber,
@@ -666,11 +723,12 @@ async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
     locationAisle: range.aisle,
     details: {
       startBin: range.startBin, endBin: range.endBin, binSide: range.binSide,
-      startLevel: range.startLevel, endLevel: range.endLevel, released, blocked,
+      startLevel: range.startLevel, endLevel: range.endLevel,
+      holdType: body.holdType, released, downgraded, blocked, untouched,
     },
   });
 
-  return { total, released, blocked, breakdown };
+  return { total, released, downgraded, blocked, untouched, breakdown };
 }
 
 // ── PATCH /api/locations/:id/hold ─────────────────────────────────────────────

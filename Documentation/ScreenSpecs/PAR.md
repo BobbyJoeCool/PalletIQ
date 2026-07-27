@@ -66,7 +66,9 @@ The item's own Storage Code — just the 2-letter symbol — shows as a small ba
     - **Level**: checked against the full `GET /api/locations/:id` (8-digit) resolution once selected — the same existence check this screen always ran, now attributed specifically to the Level box rather than the whole three-box group.
     Each box washes **individually** on its own failure — direct instruction: "if a single box is invalid, it should be highlighted" — rather than the whole 3-box group washing as one unit (the prior treatment). **(v1.7.0)** The wrapping box around all three fields *also* washes whenever any one of them is invalid, layering group + individual together (direct instruction — "the box holding the location entry fields should have the red error background as well as any field that doesn't exist... ONLY the top level field"): a nonexistent Aisle washes Aisle individually plus the whole group, but never Bin/Level too, since neither could actually be checked against an Aisle that doesn't exist. A location that resolves (Level box passes) but isn't clean — occupied (status other than `EMPTY`), on hold, or contracted — does **not** block anything: it's flagged inline next to the "Location" label (amber text naming exactly what's flagged, e.g. "STORED · Hold Both") and handled at Create Pallet time instead (see below).
 
-**(v1.7.0, direct instruction — "type check the storage code of the location vs. the DPCI")** Once both the item and a resolved Location are known, their Storage Codes are compared (`item.storageCode !== locationStatusInfo.storageCode`) — a mismatch (e.g. the item is CR, the location is FD) does **not** block anything either; it feeds into the exact same warn-then-allow flow as occupied/held/contracted below, just with its own sentence in the warning copy ("Location {id} is Storage Code FD, but this item is CR") rather than the "may already be physically here" reasoning, which doesn't apply to a mismatch. The dialog's title was generalized from "Location isn't clear" to **"Confirm Location"** to cover both cases.
+**(v1.7.0, direct instruction — "type check the storage code of the location vs. the DPCI")** Once both the item and a resolved Location are known, their Storage Codes are compared (`item.storageCode !== locationStatusInfo.storageCode`) — a mismatch (e.g. the item is CR, the location is FD) does **not** block anything either; it feeds into the exact same warn-then-allow flow as occupied/held/contracted below, just with its own sentence in the warning copy ("Location {id} is Storage Code FD, but this item is CR") rather than the "may already be physically here" reasoning, which doesn't apply to a mismatch.
+
+**(2026-07-27, issue #122)** The dialog's title is no longer a fixed "Confirm Location" — `locationWarningTitle()` picks a reason-specific title, since `locationNeedsWarning`'s checks aren't mutually exclusive (a location can be on hold, under Contraction, occupied, *and* the wrong Storage Code all at once) and the title can only show one. Priority order, most operationally severe first: **Hold > Contraction > Occupied > Wrong Storage Code** — `"Location On Hold Inbound"`/`"...Hold Both"`/`"...Hold Permanent"` (via `HOLD_LABELS`), `"Location On Contraction"`, `"Location Occupied"`, or `"Incorrect Storage Code"`. The message body below the title is unchanged — it still lists every applicable reason in one sentence, regardless of which one won the title.
 
 A **Storage/Size** plain-text display (`{storageCode}-{size}`) sits inline beside the Aisle/Bin/Level entry boxes (v1.7.0, direct instruction — moved here from Row 2 on a follow-up: "inline with the Location entry, not after SSPs per Carton"; labeled just "Storage/Size," not "Location Storage/Size," per a second follow-up — the Location label directly above already makes that implicit), blank until a Location actually resolves. Read together with the item's own Storage Code badge up by Description, it's what the mismatch check above is comparing.
 
@@ -108,6 +110,8 @@ A **Storage/Size** plain-text display (`{storageCode}-{size}`) sits inline besid
 
 Message Bar entries are transient, following the app-wide convention (`MessageBarContext`) — no acknowledgment required, and a new message simply replaces whatever was showing. The Location field's invalid-wash (not-found) state and the amber occupied/hold/contraction note are both *persistent* (non-message-bar) states — unlike a Message Bar entry, they stay until the location itself changes.
 
+**(v1.8.0, issue #95)** A stale error also clears the moment a later lookup on that same field actually succeeds — `loadByDpci`, `loadByUpc`, and `checkLocation` (Location's existence/status check) each call `clearMessage()` on their own success path, closing a gap where an "DPCI not found"/"UPC not found"/"Location not found" error could otherwise sit on screen after a corrected, valid entry loaded successfully. PAR was the one screen missed when this same fix landed for 11 other screens in v1.7.0.
+
 ## Styling — red background wash for invalid fields (v1.6.11)
 
 New visual treatment, trialed on PAR only before any wider rollout: an invalid field's background fills with a translucent red wash (`bg-[#CC0000]/30`) instead of relying on a border alone. Applied to **every** invalid state on this screen — DPCI, UPC, the VCP/SSP pair, the mode-relevant loose-SSPs field, Expiration Date (both its group- and box-level failures), and Location's Aisle/Bin/Level (each individually) — Location's old separate `highlight`-prop mechanism from before this redesign is gone; occupied/hold/contraction were folded into the new warn-then-allow flow instead of a hard-block highlight, so there's no longer a second, different Location error state to keep distinct. `src/lib/invalidWash.ts` now exports the shared `INVALID_WASH` constant (v1.6.11, extracted once a second consumer — `LocationEntryFields.tsx`'s own per-box washing — needed it too, rather than duplicating the class string).
@@ -122,53 +126,71 @@ Explicitly not rolled out to any other screen as part of this effort — see the
 
 ## Layout
 
-**(v1.7.0, corrected on a follow-up)** Three-column layout — left is the multi-step create
-form (scrollable, flex-1), a narrow 220px middle column holds just Printer and Create
-Pallet (now full-width within that column and noticeably taller, no longer squeezed in
-beside DPCI/UPC), and a 420px right column holds the session-local Reinstate Log, full
-height. Direct instruction, corrected once from an initial pass that stacked Printer/Create
-Pallet above the log within one shared right column instead of as its own column in
-between: "move the Create Pallet button to a column on the right of everything else, move
-the printer right over top of it... Printer and Create Pallet button between the left side
-and the reinstate log."
+**(v1.7.0, corrected on a follow-up; Middle column's height scope fixed 2026-07-27 —
+issue #138)** Three-column layout — left is the multi-step create form (scrollable,
+flex-1), a narrow 220px middle column holds just Printer and Create Pallet, and a 420px
+right column holds the session-local Reinstate Log, full height. Direct instruction,
+corrected once from an initial pass that stacked Printer/Create Pallet above the log
+within one shared right column instead of as its own column in between: "move the Create
+Pallet button to a column on the right of everything else, move the printer right over
+top of it... Printer and Create Pallet button between the left side and the reinstate
+log."
+
+**Middle column only spans the left form's *upper* rows, not its full height (fixed
+2026-07-27, issue #138).** Originally Middle column was a sibling of the *entire* left
+column, stretching to match its full height even though Printer/Create Pallet's own
+content ends near the top — permanently reserving Middle column's 220px for rows that
+had nothing to do with it. That left only ~726px for Multiple Pallets mode's Row 3 (4
+count boxes, ~750px needed) and Row 4's summary (4 items, ~820px needed), which
+respectively overflowed into an inner horizontal scroll and wrapped onto a second line,
+pushing Expiration Date/Location down toward the screen's bottom edge. Fixed by splitting
+the left column into two stacked regions: an **upper region** (Row 1 DPCI/UPC,
+Description, Row 2 VCP/SSP/Size) that sits beside Middle column as a sibling — only
+this region's height is what Middle column now matches — and a **lower region** (Row 3
+onward: count boxes, summary, Expiration Date, Location) that spans the *full* left+middle
+width (~946px) below both, reclaiming Middle column's 220px once its own content has
+ended above it.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │ Header  (104px) — Home · Back · PAR · Jump · Activity · user/logout              │
 ├──────────────────────────────────────────────────────────────────────────────────┤
 │ Message Bar  (74px)                                                              │
-├──────────────────────────────────────────────────────┬──────────┬────────────────┤
-│ Left column (flex-1, scrollable)                       │ Middle   │ Right column   │
-│  Storage       DPCI          UPC                       │ (220px)  │ (420px)        │
-│  Code [CR]     [___-__-____] [___________]             │          │                │
-│  badge         (same width)  (same width)               │ Printer  │ Reinstate Log  │
-│                                                          │ [PR01 ▾] │ (session,      │
-│  Description: Widget, blank until resolved              │          │  scrollable)   │
-│                                                          │ ┌──────┐ │                │
-│  VCP     SSP     Size    SSPs per Carton                │ │Create│ │ Pallet 12345   │
-│  [____]  [____]  [__]    2 (plain text)                 │ │Pallet│ │ DPCI · N       │
-│                                                          │ └──────┘ │  cartons ·     │
-│  ┌──────────────┐  Single Pallet mode:                   │ (larger, │  Loc/PUT_PEND  │
-│  │Single Pallet │  Cartons     SSPs                       │  full-   │                │
-│  │Multiple      │  [____]      [____]                     │  width)  │ Pallet 12346   │
-│  │ Pallets      │  Multiple Pallets mode:                  │          │  ...           │
-│  └──────────────┘  Full Pallets  Cartons/Pallet │ Partial…  │          │                │
-│                     [____]        [____]        │ […]        │          │ (on-screen     │
-│                                                          │          │  Numpad overlays│
-│  ┌ Summary (compact, always visible) ─────────────────┐ │          │  bottom-right   │
-│  │ Single: Carton Count · Loose SSPs · Total SSPs     │ │          │  when open)     │
-│  │ Multiple: N Pallets: X cartons / 1 Pallet: Y…      │ │          │                │
-│  └───────────────────────────────────────────────────────┘ │          │                │
-│                                                          │          │                │
-│  Expiration Date  (labels inline to each box's left)     │          │                │
-│  Month [MM]   Day [DD]   Year [YYYY]                      │          │                │
-│                                                          │          │                │
-│  Location (optional — disabled/grayed in Multiple mode)  │          │                │
-│           — live-validated; occupied/hold/contraction/   │          │                │
-│              Storage-Code-mismatch flag amber, warn-allow │          │                │
-│  AISLE  BIN  LEVEL       Storage/Size                     │          │                │
-│  [___] [___] [__]        FD-M                             │          │                │
-├──────────────────────────────────────────────────────┴──────────┴────────────────┤
+├─────────────────────────────────────────────┬──────────┬─────────────────────────┤
+│ Upper region (Row 1/Description/Row 2)        │ Middle   │ Right column            │
+│  Storage       DPCI          UPC              │ (220px)  │ (420px)                 │
+│  Code [CR]     [___-__-____] [___________]    │          │                         │
+│  badge         (same width)  (same width)      │ Printer  │ Reinstate Log           │
+│                                                 │ [PR01 ▾] │ (session, scrollable)   │
+│  Description: Widget, blank until resolved     │          │                         │
+│                                                 │ ┌──────┐ │ Pallet 12345            │
+│  VCP     SSP     Size    SSPs per Carton       │ │Create│ │  DPCI · N cartons ·     │
+│  [____]  [____]  [__]    2 (plain text)        │ │Pallet│ │  Loc/PUT_PEND           │
+├─────────────────────────────────────────────┴──────────┤                         │
+│ Lower region (Row 3 onward — full left+middle width,     │ Pallet 12346            │
+│  ~946px, reclaiming Middle column's 220px — issue #138)   │  ...                    │
+│                                                            │                         │
+│  ┌──────────────┐  Single Pallet mode:                     │ (on-screen Numpad       │
+│  │Single Pallet │  Cartons     SSPs                         │  overlays bottom-right  │
+│  │Multiple      │  [____]      [____]                       │  when open)             │
+│  │ Pallets      │  Multiple Pallets mode:                    │                         │
+│  └──────────────┘  Full Pallets  Cartons/Pallet │ Partial…    │                         │
+│                     [____]        [____]        │ […]          │                         │
+│                                                            │                         │
+│  ┌ Summary (compact, always visible; fits one line now) ─┐ │                         │
+│  │ Single: Carton Count · Loose SSPs · Total SSPs        │ │                         │
+│  │ Multiple: N Pallets: X cartons / 1 Pallet: Y…          │ │                         │
+│  └────────────────────────────────────────────────────────┘ │                         │
+│                                                            │                         │
+│  Expiration Date  (labels inline to each box's left)       │                         │
+│  Month [MM]   Day [DD]   Year [YYYY]                        │                         │
+│                                                            │                         │
+│  Location (optional — disabled/grayed in Multiple mode)    │                         │
+│           — live-validated; occupied/hold/contraction/     │                         │
+│              Storage-Code-mismatch flag amber, warn-allow   │                         │
+│  AISLE  BIN  LEVEL       Storage/Size                       │                         │
+│  [___] [___] [__]        FD-M                               │                         │
+├───────────────────────────────────────────────────────────┴─────────────────────────┤
 │ Footer  (54px) — DPCI · UPC · Location  (each opens a popup: DPCI/UPC ask Valid / │
 │                  Valid w/ Expiration / Valid w/o Expiration / Invalid; Location   │
 │                  asks Empty/Occupied/Invalid/Hold/Contraction/Wrong Storage Type) │
@@ -305,6 +327,9 @@ flowchart TD
 
 | Date | Change |
 |---|---|
+| 2026-07-27 | Fixed [#95](https://github.com/BobbyJoeCool/PalletIQ/issues/95) — DPCI/UPC/Location lookup success paths (`loadByDpci`, `loadByUpc`, `checkLocation`) now clear a stale error from a prior failed attempt via `clearMessage()`, closing the one screen missed when this fix landed app-wide (11 other screens) in v1.7.0. |
+| 2026-07-27 | Fixed [#122](https://github.com/BobbyJoeCool/PalletIQ/issues/122) — Confirm Location popup title is now reason-specific (`locationWarningTitle()`) instead of a fixed "Confirm Location," picking one title by priority (Hold > Contraction > Occupied > Wrong Storage Code) when more than one reason applies. |
+| 2026-07-27 | Fixed [#138](https://github.com/BobbyJoeCool/PalletIQ/issues/138) — Middle column (Printer/Create Pallet) now only spans the left form's upper rows instead of its full height, so Row 3 onward (count boxes, summary, Expiration Date, Location) can reclaim its 220px width. Fixes Multiple Pallets mode's count boxes overflowing into an inner horizontal scroll and the summary box wrapping onto a second line and pushing Location toward the bottom edge. |
 | 2026-07-21 (v1.7.0) | Size folded into the screen-wide auto-advance chain: SSP's own commit now advances to Size (skipping straight to Cartons instead when a Location is already entered, since Size is disabled/inherited then), and Size's own commit advances to Cartons — direct instruction: "after entering VCP/SSP, it should direct to Size before we direct to carton count." `CodePickerField` (and `SizeField`, which wraps it) gained a `forwardRef`-exposed `{ focus }` imperative handle for this, since — unlike `LocationEntryFields`' boolean-toggle `autoFocus` prop — a toggle wouldn't reliably re-fire on every chain pass without an explicit reset-then-set-true dance; a direct imperative call sidesteps that. |
 | 2026-07-20 (v1.6.11) | Create-summary confirm dialog reformatted from one long sentence into a fixed 5-line layout (DPCI — Description; pallet-count summary; mode-specific Cartons/SSPs or Full-Pallets/Partial breakdown; Expiration Date if entered; Location if applicable); `ConfirmDialog` gained `whitespace-pre-line` so multi-line messages actually render as separate lines. |
 | 2026-07-20 (v1.6.11) | Screen-wide auto-advance: completing DPCI/UPC, VCP, SSP, or Cartons/SSPs now automatically focuses the next field down the form, ending at Location's Aisle box (via Month/Day/Year first if the item requires an Expiration Date). |

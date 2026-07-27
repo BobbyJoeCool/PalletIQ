@@ -186,10 +186,17 @@ function summarize(
   }
   // HP's density is computed by the caller once its best-effort cartons figure is filled in.
 
-  const primaryCount = pallets ?? puts ?? locations ?? cartons ?? 0;
+  // CA/CF set both `cartons` (the intended rate metric) and `locations` (a secondary
+  // count) — the generic fallback chain below would pick `locations` first since
+  // `cartons` is checked last, so CA/CF need their own explicit case (#131).
+  const primaryCount = (functionCode === 'CA' || functionCode === 'CF')
+    ? (cartons ?? 0)
+    : (pallets ?? puts ?? locations ?? cartons ?? 0);
   const ratePerHour = hours > 0 ? primaryCount / hours : null;
   const hoursOfWork = goal && hours > 0 ? goalCount / goal.rate : (goal ? 0 : null);
-  const pctToGoal = goal && hours > 0 && hoursOfWork != null ? hoursOfWork / hours : (goal ? 0 : null);
+  // Zero hours assigned isn't a 0%-to-goal score, it's "no data" — must stay null (not
+  // 0) so goalBg() renders neutral grey instead of worst-case red (#132).
+  const pctToGoal = goal && hours > 0 ? hoursOfWork! / hours : null;
 
   return {
     functionCode, greyed: false, hasActivity, hasAssignment,

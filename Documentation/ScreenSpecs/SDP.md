@@ -152,15 +152,15 @@ flowchart TD
 
 ## Open items still remaining
 
-- [#85](https://github.com/BobbyJoeCool/PalletIQ/issues/85) — most of the Pallet ID Directed Put Playwright e2e flow fails: demo scans land in the Aisle field instead of Pallet ID. Not yet root-caused; likely a focus-timing issue between the Aisle-confirm → Pallet-ID-focus chain and the demo button's `deliverScan` call.
-- [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — scanning an unknown Pallet ID on SDP crashes with a 500 instead of a clean 404.
-- [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) — `placePallet` clears a pallet's old location to `EMPTY` without checking whether a second occupant pallet has since moved in there (shared with MNP — see `puts.ts`'s `placePallet`, used by both `confirmPut` and `manualConfirm`). Could silently clobber another pallet's occupancy record in a rare race.
 - [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — bad Contraction data on RS/RF/BS/some HS locations could incorrectly exclude otherwise-eligible locations from `findNextLocation`'s search (Contraction is a hard exclusion regardless of mode).
 
 ## Change Log
 
 | Date | Change |
 |---|---|
+| 2026-07-27 | Fixed [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) — `placePallet` (shared with MNP) now checks whether a second pallet still occupies a vacated location before clearing it, falling back to `STORED` instead of `EMPTY` if so. |
+| 2026-07-27 | Fixed [#85](https://github.com/BobbyJoeCool/PalletIQ/issues/85) — the "✓ Location"/"✗ Location" Confirm Location demo buttons now gate on `LocationEntryFields`' own `onActiveChange` (mirroring PIP's existing `locationActive` pattern) instead of rendering as soon as `screenState` left `'entry'`, closing a race where a fast tap could fire before the panel's key handler was registered and silently drop the delivered value. |
+| 2026-07-27 | Fixed [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — confirmed SDP's `directedPut` already returned a correct `404 PALLET_NOT_FOUND` (no FK write beforehand, unlike MNP's `manualScan`); this issue's SDP half wasn't actually reproducible as filed. |
 | 2026-07-17 | Rebuilt to the new Screen-Design-Template format, documenting the screen as currently shipped (v1.6.6). The old `DevNotes/Screen-Specs/SDP.md` described a simpler "same-DPCI-in-aisle Zone lookup" and a plain always-EMPTY-vs-STAGED-agnostic search — both fully superseded by the v1.6.2 location-selection hierarchy rebuild; the old doc's `POST /api/puts/directed` response/error shapes and reservation-timeout polling description are also out of date relative to the live code. |
 | 2026-07-14 (v1.6.2) | Directed Put's location search rebuilt around a real Storage Code/Size/Zone hierarchy (pallet-inherited values + Item fallback + IM+ override), replacing the old same-DPCI Zone lookup entirely. Worker role gained a Size override (Storage Code/Zone remain IM+ only). Reservation timeout detection made proactive (15s poll) instead of purely reactive. Releasing a reservation now restores `STAGED` (not always `EMPTY`) when that's how it was actually found. Confirm Location rebuilt as the shared 3-box entry. Fixed a silently-masked Prisma Client staleness bug that had been failing every real Directed Put, and a reentrant double-submit bug shared with PIP/PAR/LII/WLH. |
 | 2026-07-13 (v1.5.0) | Consolidating/lock-toggle buttons enlarged for tap accuracy; "Applying: …" override summary added next to Consolidating. |

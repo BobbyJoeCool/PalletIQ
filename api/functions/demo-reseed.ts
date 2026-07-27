@@ -12,8 +12,16 @@ import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePi
  *  being defined inline inside the transaction callback. */
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
-/** Put pallets created per (storageCode, size) combo, and the label target per (storageCode, pullFunction) combo. */
-const ROWS_PER_COMBO = 24;
+/** Put pallets created per (storageCode, size) combo, and the label target per (storageCode, pullFunction) combo for CF/FP. */
+const ROWS_PER_COMBO = 36;
+/** CA labels specifically need a higher per-combo cap than ROWS_PER_COMBO (#130) — Tyler's
+ *  (z002p21) Carton Air shift simulator (`simulateCartonAirPulls`) consumes these at a fixed
+ *  200 cartons/hour, and a full 6AM-4PM shift needs ~2000 cartons of source data to avoid
+ *  running the CA label pool dry before shiftEnd. Measured against this app's real combo
+ *  count/average label size (8 CA-eligible storage codes, ~7.2 cartons/label), 24/combo
+ *  (192 labels, ~1384 cartons) fell well short; 48/combo comfortably clears the target with
+ *  margin to spare. */
+const CA_LABEL_ROWS_PER_COMBO = 48;
 /** Seeded demo Worker account used as the receivedByZ attribution on generated put pallets. */
 const SEED_USER_Z = 'z002p21';
 const VCP_OPTIONS = [6, 8, 10, 12, 16, 20, 24];
@@ -708,9 +716,10 @@ function assignPullFunction(level: number, size: string, qty: number, totalCarto
  *   present in the Location table, with a random item/quantity (no realism constraint —
  *   any DPCI/quantity is fine for a put pallet).
  * - Creates up to ROWS_PER_COMBO fresh PRINTED labels for every (storageCode, pullFunction)
- *   combo, sourced only from pallets already STORED at a real location — this does *not*
- *   synthesize backing stock, so a combo with too little real stored inventory at the
- *   right level/size will end up with fewer than ROWS_PER_COMBO labels (or none). Every
+ *   combo (CA_LABEL_ROWS_PER_COMBO for CA specifically — see its own doc comment), sourced
+ *   only from pallets already STORED at a real location — this does *not* synthesize backing
+ *   stock, so a combo with too little real stored inventory at the right level/size will end
+ *   up with fewer than that cap's worth of labels (or none). Every
  *   pallet that gets a fresh label also moves to CA_PULL_PEND (CA/CF) or FP_PULL_PEND
  *   (FP) — this is the only place in the app that currently creates labels (PRQ is a
  *   placeholder screen, not a real create-label workflow yet), simulating "an outside
@@ -880,7 +889,8 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
 
         const key = `${loc.storageCode}|${fn}`;
         const bucket = buckets.get(key) ?? [];
-        if (bucket.length >= ROWS_PER_COMBO) continue;
+        const cap = fn === 'CA' ? CA_LABEL_ROWS_PER_COMBO : ROWS_PER_COMBO;
+        if (bucket.length >= cap) continue;
 
         const store = stores[storeIdx % stores.length];
         storeIdx++;

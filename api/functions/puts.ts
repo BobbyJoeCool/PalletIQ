@@ -9,6 +9,21 @@ import { findNextLocation, resolveEffectiveCriteria } from '../lib/zoneLogic.js'
 import { parseLocationBarcode, formatLocationId as locationString } from '../lib/locationParser.js';
 
 /**
+ * Resolves what a vacated location's status should become once a pallet leaves it (#86).
+ * Unconditionally setting it to `EMPTY` is wrong if a second pallet still shares that exact
+ * (aisle, bin, level) — possible via MNP's dual-occupancy "Proceed Anyway" override, since
+ * no `@@unique` constraint blocks two pallets pointing at the same location — clearing to
+ * `EMPTY` in that case would silently corrupt the remaining occupant's own location status.
+ * Falls back to `STORED` if anyone else is still there; excludes the pallet that's leaving.
+ */
+async function vacatedLocationStatus(aisle: number, bin: number, level: number, leavingPid: number): Promise<'EMPTY' | 'STORED'> {
+  const stillOccupied = await prisma.pallet.count({
+    where: { locationAisle: aisle, locationBin: bin, locationLevel: level, pid: { not: leavingPid } },
+  });
+  return stillOccupied > 0 ? 'STORED' : 'EMPTY';
+}
+
+/**
  * Atomically stores a pallet at a new location.
  * Clears the pallet's previous location (if any) by setting it to EMPTY,
  * then marks the new location as STORED and updates the pallet's location fields
@@ -49,12 +64,14 @@ async function placePallet(
 
   const ops = [];
 
-  // Clear old location if applicable.
+  // Clear old location if applicable — falls back to STORED instead of EMPTY if a second
+  // pallet still occupies it (#86).
   if (pallet?.locationAisle != null) {
+    const vacatedStatus = await vacatedLocationStatus(pallet.locationAisle, pallet.locationBin!, pallet.locationLevel!, palletId);
     ops.push(
       prisma.location.update({
         where: { LocationID: { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel! } },
-        data: { status: 'EMPTY' },
+        data: { status: vacatedStatus },
       }),
     );
   }
@@ -225,8 +242,13 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
 
 /**
  * Confirms a system-directed put by scanning the target location barcode.
- * Validates that the scanned location (Aisle+Bin) matches the reserved location,
- * then calls placePallet to atomically complete the store and deletes the Reservation.
+ * Validates that the scanned location (Aisle+Bin) matches the reserved location, then
+ * atomically claims the Reservation (deletes it first, before touching Location/Pallet
+ * state — #93) and calls placePallet to complete the store. Claiming first, rather than
+ * deleting after placePallet, closes the race against `unassignPut`/`blockPut`/the
+ * expiry timer all acting on the same row: whichever of them deletes the row first wins
+ * outright, and every loser gets a clean 404 instead of a chance to clobber the winner's
+ * write.
  *
  * The level from the Reservation record (not the scanned barcode) is used as the
  * destination level, since physical barcodes only encode aisle+bin.
@@ -248,7 +270,8 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
  *   `{ scannedLocation: string; wasScanned?: boolean }`
  * @returns `{ location: string; wasMove: boolean; clearedLocation: string | null; wasStaged: boolean }`
  * @throws 400 INVALID_INPUT for non-numeric reservationId, missing body, or LOCATION_MISMATCH;
- *   404 NOT_FOUND if reservation does not exist (may have been expired by the timer function)
+ *   404 NOT_FOUND if reservation does not exist, or lost the claim race to a concurrent
+ *   unassign/block/expiry-timer call on the same reservation
  */
 async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
   const auth = await requireAuth(req);
@@ -270,6 +293,14 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
     throw Object.assign(new Error('LOCATION_MISMATCH'), { status: 400 });
   }
 
+  // Atomically claim the reservation before touching Location/Pallet state (#93) —
+  // deletes it now, rather than after placePallet, so a concurrent unassign/block/
+  // expiry-timer call racing on the same row can never win after this point and clobber
+  // the location this call is about to store into. deleteMany (not delete) so a lost
+  // race returns a count of 0 instead of throwing — something else already claimed it.
+  const claimed = await prisma.reservation.deleteMany({ where: { id: reservationId } });
+  if (claimed.count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
   const { wasMove, clearedLocation } = await placePallet(
     reservation.palletId,
     reservation.locationAisle,
@@ -277,8 +308,6 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
     reservation.locationLevel,
     auth.zNumber,
   );
-
-  await prisma.reservation.delete({ where: { id: reservationId } });
 
   // Only IM+ overrides set target fields on the Reservation (see directedPut) — a
   // plain directed put leaves them null, so their presence here means an override
@@ -331,10 +360,11 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
 
 /**
  * Cancels an active put reservation without placing the pallet.
- * Sets the reserved location back to STAGED (if that's genuinely how findNextLocation
- * found it — `wasStaged`, set back in directedPut/blockPut) or EMPTY otherwise, and
- * deletes the Reservation row, in a single transaction — so the location is immediately
- * available for other puts/staging again, without silently erasing a GPMer's staging work.
+ * Atomically claims the Reservation (deletes it first, before touching Location state —
+ * #93, same pattern as confirmPut) then sets the reserved location back to STAGED (if
+ * that's genuinely how findNextLocation found it — `wasStaged`, set back in
+ * directedPut/blockPut) or EMPTY otherwise — so the location is immediately available
+ * for other puts/staging again, without silently erasing a GPMer's staging work.
  *
  * @param req - HTTP request with URL param `reservationId`
  * @returns `{ location: string; releasedStatus: 'STAGED' | 'EMPTY' }` — the released
@@ -358,13 +388,16 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
   // back to STAGED should only happen when we're sure, not merely "not known false."
   const releasedStatus = reservation.wasStaged === true ? 'STAGED' : 'EMPTY';
 
-  await prisma.$transaction([
-    prisma.location.update({
-      where: { LocationID: { aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel } },
-      data: { status: releasedStatus },
-    }),
-    prisma.reservation.delete({ where: { id: reservationId } }),
-  ]);
+  // Atomically claim the reservation before touching Location state (#93) — same pattern
+  // as confirmPut: whichever of confirm/unassign/block/the expiry timer deletes this row
+  // first wins; everyone else gets a clean 404 instead of racing a stale read into a write.
+  const claimed = await prisma.reservation.deleteMany({ where: { id: reservationId } });
+  if (claimed.count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+  await prisma.location.update({
+    where: { LocationID: { aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel } },
+    data: { status: releasedStatus },
+  });
 
   await writeLog({
     userId: auth.zNumber,
@@ -389,9 +422,11 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
  * finds the next eligible location to direct the worker to. Used when a worker arrives
  * at the directed location and finds it unusable.
  *
- * Flow: place Hold Both on the current location → delete current Reservation →
+ * Flow: claim (delete) current Reservation → place Hold Both on the current location →
  * find the next empty location → set it to RESERVED → create new Reservation →
- * write two activity log entries (BLOCK_PUT and RESERVE).
+ * write two activity log entries (BLOCK_PUT and RESERVE). The claim runs first (#93) so
+ * a concurrent confirm/unassign/expiry-timer call on the same reservation can't race in
+ * after this location's already been touched.
  *
  * The hold reason code ("Blocked Put") lives only in the activity log per spec;
  * it is not stored as a column on the Location.
@@ -417,21 +452,24 @@ async function blockPut(req: HttpRequest, _ctx: InvocationContext): Promise<unkn
     reservation.locationLevel,
   );
 
-  // Place Hold Both on the blocked location and clear the reservation atomically. The
-  // location was RESERVED (never actually stored), so it reverts to EMPTY or STAGED
-  // (whichever findNextLocation actually found it as — see unassignPut's identical
-  // comment); holdCategory is independent of status (see Location.holdCategory's schema
-  // comment) — Phase 10 fixed this from `status: 'HOLD_BOTH'`, which clobbered
-  // operational state.
+  // Atomically claim the reservation before touching Location state (#93) — same pattern
+  // as confirmPut/unassignPut: whichever of confirm/unassign/block/the expiry timer
+  // deletes this row first wins; everyone else gets a clean 404 instead of racing a
+  // stale read into a write.
+  const claimed = await prisma.reservation.deleteMany({ where: { id: reservationId } });
+  if (claimed.count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+
+  // Place Hold Both on the blocked location. The location was RESERVED (never actually
+  // stored), so it reverts to EMPTY or STAGED (whichever findNextLocation actually found
+  // it as — see unassignPut's identical comment); holdCategory is independent of status
+  // (see Location.holdCategory's schema comment) — Phase 10 fixed this from `status:
+  // 'HOLD_BOTH'`, which clobbered operational state.
   const blockedStatus = reservation.wasStaged === true ? 'STAGED' : 'EMPTY';
 
-  await prisma.$transaction([
-    prisma.location.update({
-      where: { LocationID: { aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel } },
-      data: { status: blockedStatus, holdCategory: 'HOLD_BOTH' },
-    }),
-    prisma.reservation.delete({ where: { id: reservationId } }),
-  ]);
+  await prisma.location.update({
+    where: { LocationID: { aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel } },
+    data: { status: blockedStatus, holdCategory: 'HOLD_BOTH' },
+  });
 
   await writeLog({
     userId: auth.zNumber,
@@ -530,12 +568,18 @@ async function manualScan(req: HttpRequest, _ctx: InvocationContext): Promise<un
 
   if (isNaN(palletId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  // Always log the scan first, before the eligibility check.
+  // Always log the scan first, before the eligibility check — but only attribute the
+  // entry to a real pallet. ActivityLog.palletId is a required FK, so logging a
+  // nonexistent scanned id as-is 500s instead of surfacing checkPalletEligibility's
+  // intended 404 (#83); a scan of an unknown id logs without palletId (still recording
+  // the attempt, with the invalid id kept in details for the audit trail) instead of
+  // dropping the log entry outright.
+  const scannedPalletExists = await prisma.pallet.findUnique({ where: { pid: palletId }, select: { pid: true } });
   await writeLog({
     userId: auth.zNumber,
     actionType: 'MNP_SCAN',
-    palletId,
-    details: { method: 'MNP' },
+    ...(scannedPalletExists && { palletId }),
+    details: { method: 'MNP', ...(!scannedPalletExists && { scannedId: palletId }) },
   });
 
   const elig = await checkPalletEligibility(palletId);
@@ -567,19 +611,26 @@ async function manualScan(req: HttpRequest, _ctx: InvocationContext): Promise<un
  * The worker supplies the destination Aisle+Bin (from a 6 or 8-digit barcode or numpad)
  * and the specific level they placed the pallet at (from the level-selection modal in the UI).
  *
- * Three gates run, in order, before the pallet is actually placed — each can require a
+ * Four gates run, in order, before the pallet is actually placed — each can require a
  * resubmission with an extra acknowledgement/resolution field, the same "throw then
  * resubmit" shape PIP's LEVEL_MISMATCH uses:
  *
  * 1. **Contraction** (`Location.contraction`): a Worker is hard-blocked (403 CONTRACTED,
  *    no override). IM+ gets 409 CONTRACTION_CONFIRM_REQUIRED until resubmitted with
  *    `acknowledgeContraction: true`.
- * 2. **Occupied/staged**: if the destination is STORED or STAGED, the put is blocked
+ * 2. **Hold** (`Location.holdCategory`, #92): `HOLD_OUT` never blocks (outbound-only,
+ *    matches `zoneLogic.ts`'s `NOT_HELD_FILTER`). `HOLD_IN`/`HOLD_BOTH` use the same
+ *    override pattern as Contraction — Worker hard-blocked (403 DESTINATION_ON_HOLD),
+ *    IM+ gets 409 HOLD_CONFIRM_REQUIRED (with `{ holdCategory }`) until resubmitted with
+ *    `acknowledgeHold: true`. `HOLD_PERM` is a harder, no-override block (403
+ *    DESTINATION_HOLD_PERM) for every role, per product decision — matching how
+ *    `HOLD_REMOVE_MIN_ROLE` already treats Permanent as the most protected tier.
+ * 3. **Occupied/staged**: if the destination is STORED or STAGED, the put is blocked
  *    (409 DESTINATION_OCCUPIED, with `{ occupantPalletId, occupantDpci, matchesDpci,
  *    wasStaged }`) until resubmitted with `resolution: 'proceed'` or `'consolidate'`.
  *    `resolution: 'proceed'` is rejected (re-thrown) when `matchesDpci` is true — a
  *    same-DPCI occupant must be resolved via consolidate, not a plain override.
- * 3. **Consolidate** (`resolution: 'consolidate'`, IM+ only): merges the incoming
+ * 4. **Consolidate** (`resolution: 'consolidate'`, IM+ only): merges the incoming
  *    pallet's current quantities onto the STORED occupant of the same DPCI, then zeroes
  *    and clears the incoming pallet's own location fields and marks it `CONSOLIDATED`
  *    instead of moving it into the destination. If the incoming pallet had its own prior
@@ -591,14 +642,17 @@ async function manualScan(req: HttpRequest, _ctx: InvocationContext): Promise<un
  *
  * @param req - HTTP request with body:
  *   `{ palletId: number | string; destinationLocation: string; level: number;
- *      acknowledgeContraction?: boolean; resolution?: 'proceed' | 'consolidate' }`
+ *      acknowledgeContraction?: boolean; acknowledgeHold?: boolean;
+ *      resolution?: 'proceed' | 'consolidate' }`
  * @returns Normal put: `{ location, level, wasMove, clearedLocation, destinationWasOccupied, destinationWasStaged }`.
  *   Consolidate: `{ consolidated: true, targetPalletId, sourcePalletId, location }`.
  * @throws 400 INVALID_INPUT for non-numeric palletId, invalid barcode, or missing level;
  *   403 CONTRACTED if a Worker targets a contracted location;
+ *   403 DESTINATION_ON_HOLD if a Worker targets a Hold In/Both location;
+ *   403 DESTINATION_HOLD_PERM if any role targets a Hold Permanent location (no override);
  *   403 FORBIDDEN if a non-IM+ user submits `resolution: 'consolidate'`;
  *   404 NOT_FOUND if the exact aisle+bin+level location record does not exist;
- *   409 CONTRACTION_CONFIRM_REQUIRED / DESTINATION_OCCUPIED — see above;
+ *   409 CONTRACTION_CONFIRM_REQUIRED / HOLD_CONFIRM_REQUIRED / DESTINATION_OCCUPIED — see above;
  *   409 CONSOLIDATE_MISMATCH if the destination's occupant no longer matches DPCI (stale resubmission)
  */
 async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
@@ -609,6 +663,7 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     destinationLocation: string;
     level: number;
     acknowledgeContraction?: boolean;
+    acknowledgeHold?: boolean;
     resolution?: 'proceed' | 'consolidate';
   };
 
@@ -640,6 +695,28 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     }
     if (!body.acknowledgeContraction) {
       throw Object.assign(new Error('CONTRACTION_CONFIRM_REQUIRED'), { status: 409 });
+    }
+  }
+
+  // Hold gate (#92) — mirrors findNextLocation's NOT_HELD_FILTER (zoneLogic.ts): HOLD_OUT
+  // never blocks a put (outbound-only). HOLD_IN/HOLD_BOTH use the same override pattern as
+  // Contraction above (Worker hard-blocked, IM+ can proceed after explicit acknowledgement).
+  // HOLD_PERM is a harder, no-override block for every role — matching how
+  // HOLD_REMOVE_MIN_ROLE already treats Permanent as the most protected hold tier
+  // elsewhere in the app (locations.ts) — per product decision, unlike Contraction there's
+  // no acknowledgement path that lets even an IM+ worker put onto a Hold Permanent location.
+  if (destLocation.holdCategory === 'HOLD_PERM') {
+    throw Object.assign(new Error('DESTINATION_HOLD_PERM'), { status: 403 });
+  }
+  if (destLocation.holdCategory === 'HOLD_IN' || destLocation.holdCategory === 'HOLD_BOTH') {
+    if (!hasMinRole(auth.role, 'IM')) {
+      throw Object.assign(new Error('DESTINATION_ON_HOLD'), { status: 403 });
+    }
+    if (!body.acknowledgeHold) {
+      throw Object.assign(new Error('HOLD_CONFIRM_REQUIRED'), {
+        status: 409,
+        data: { holdCategory: destLocation.holdCategory },
+      });
     }
   }
 
@@ -718,12 +795,14 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
       );
 
       // Free the incoming pallet's own prior location, if it had one — same as
-      // placePallet's existing wasMove handling for a normal move.
+      // placePallet's existing wasMove handling for a normal move, including the same
+      // dual-occupancy fallback to STORED instead of EMPTY (#86).
       if (pallet.locationAisle != null) {
+        const vacatedStatus = await vacatedLocationStatus(pallet.locationAisle, pallet.locationBin!, pallet.locationLevel!, pallet.pid);
         ops.push(
           prisma.location.update({
             where: { LocationID: { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel! } },
-            data: { status: 'EMPTY' },
+            data: { status: vacatedStatus },
           }),
         );
       }

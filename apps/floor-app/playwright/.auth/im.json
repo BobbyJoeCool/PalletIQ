@@ -1,0 +1,18 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://localhost:5173",
+      "localStorage": [
+        {
+          "name": "palletiq_token",
+          "value": "eyJhbGciOiJIUzI1NiJ9.eyJ6TnVtYmVyIjoiejAwMnAyMiIsInJvbGUiOiJJTSIsImlhdCI6MTc4NTE3ODgyMSwiZXhwIjoxNzg1MjIyMDIxfQ.I2GGXhSyE6apkn6_OAvyUmv1NkC4LKhlDeOuJkg4YyU"
+        },
+        {
+          "name": "palletiq_user",
+          "value": "{\"zNumber\":\"z002p22\",\"firstName\":\"Sarah\",\"lastName\":\"Okafor\",\"role\":\"IM\"}"
+        }
+      ]
+    }
+  ]
+}

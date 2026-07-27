@@ -17,6 +17,7 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
+import { INVALID_WASH } from '../lib/invalidWash';
 import { SIZE_NAMES } from '../lib/sizes';
 import { effectiveStack } from '../lib/stagingHelpers';
 import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
@@ -106,27 +107,37 @@ function FieldDisplay({
  *  font size — Qty only (issue #99 follow-up), since Qty's own row now absorbs the extra
  *  height Clear/Fill's old row used to occupy and reads oddly undersized at that height
  *  with the same small text every other field uses. */
+/** `reserveToggleSpace` mirrors `InheritedDisplay`'s own prop of the same name (#127) —
+ *  reserves the same trailing width `PalletCodePicker`'s own popup toggle button occupies,
+ *  so a field whose *overridden* state renders as a plain `PalletBox` (Aisle) ends up the
+ *  same fixed width as one whose overridden state renders as a `PalletCodePicker`
+ *  (Storage/Size/Zone) — without this, Aisle's box rendered visibly wider than Storage's/
+ *  Size's, since only PalletCodePicker's own flex-1 wrapper splits its width with a `▾`
+ *  button sibling. */
 function PalletBox({
-  label, value, onFocus, active = false, tinted = false, large = false,
-}: { label: string; value: string; onFocus: () => void; active?: boolean; tinted?: boolean; large?: boolean }) {
+  label, value, onFocus, active = false, tinted = false, large = false, reserveToggleSpace = false, invalid = false,
+}: { label: string; value: string; onFocus: () => void; active?: boolean; tinted?: boolean; large?: boolean; reserveToggleSpace?: boolean; invalid?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onFocus}
-      className={`relative flex-1 flex items-center justify-between px-2 rounded-[5px] border-2 transition-colors min-h-0 ${
-        tinted ? 'bg-[#3A6BB080]' : 'bg-[#0D0D0D]'
-      } ${active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-    >
-      <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
-      <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
-      <span className={`relative font-ui font-medium uppercase tracking-wider text-[#9A9A9A] ${large ? 'text-[18px]' : 'text-[9px]'}`}>
-        {label}
-      </span>
-      <span className={`relative font-data font-semibold text-white ${large ? 'text-[30px]' : 'text-[15px]'}`}>
-        {value || <span className="text-[#444]">—</span>}
-      </span>
-      {active && <span className="absolute right-1 top-1 bottom-1 w-[2px] bg-[#CC0000] animate-pulse rounded-sm" />}
-    </button>
+    <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
+      <button
+        type="button"
+        onClick={onFocus}
+        className={`relative flex-1 min-w-0 flex items-center justify-between px-2 rounded-[5px] border-2 transition-colors min-h-0 ${
+          invalid ? INVALID_WASH : tinted ? 'bg-[#3A6BB080]' : 'bg-[#0D0D0D]'
+        } ${invalid ? '' : active ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+      >
+        <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
+        <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
+        <span className={`relative font-ui font-medium uppercase tracking-wider text-[#9A9A9A] ${large ? 'text-[18px]' : 'text-[9px]'}`}>
+          {label}
+        </span>
+        <span className={`relative font-data font-semibold text-white ${large ? 'text-[30px]' : 'text-[15px]'}`}>
+          {value || <span className="text-[#444]">—</span>}
+        </span>
+        {active && <span className="absolute right-1 top-1 bottom-1 w-[2px] bg-[#CC0000] animate-pulse rounded-sm" />}
+      </button>
+      {reserveToggleSpace && <span className="shrink-0 w-[20px]" aria-hidden />}
+    </div>
   );
 }
 
@@ -193,7 +204,7 @@ function OverrideToggle({ active, onClick, ariaLabel }: { active: boolean; onCli
  * of CodePickerField's own field+popup logic to match.
  */
 function PalletCodePicker({
-  label, ariaLabel, value, onChange, options, maxLength, transform, earlyCommit, strict, onInvalid, tinted = false,
+  label, ariaLabel, value, onChange, options, maxLength, transform, earlyCommit, strict, onInvalid, tinted = false, invalid = false,
 }: {
   label: string;
   ariaLabel: string;
@@ -204,13 +215,18 @@ function PalletCodePicker({
   transform?: (raw: string) => string;
   earlyCommit?: (value: string) => boolean;
   /** See CodePickerField's own doc — rejects a typed value not present in `options`
-   *  instead of committing it (clears the field, calls `onInvalid` in place of `onChange`). */
+   *  instead of committing it (calls `onInvalid` in place of `onChange`) — the value stays
+   *  visible, washed red via `invalid` below, rather than clearing (#109). */
   strict?: boolean;
   onInvalid?: (code: string) => void;
   /** 50%-transparent blue field background — set whenever this field's override is active
    *  (issue #99; PalletCodePicker is only ever rendered for Storage/Size while overridden,
    *  see StackBox, so every call site passes this as always-true). */
   tinted?: boolean;
+  /** Applies the app-wide red-wash treatment (#109), same precedence as CodePickerField's
+   *  own `invalid` prop — wins over `tinted`/active. Caller-driven: set true by the
+   *  `onInvalid` handler below, cleared once the field commits a valid value. */
+  invalid?: boolean;
 }) {
   const { field, open, setOpen, wrapperRef, focusField, selectOption } = useCodePickerField(value, onChange, options, {
     panel: 'keyboard', maxLength, transform, earlyCommit, strict, onInvalid,
@@ -223,8 +239,8 @@ function PalletCodePicker({
         onClick={focusField}
         aria-label={ariaLabel}
         className={`relative flex-1 min-w-0 flex items-center justify-between px-2 rounded-[5px] border-2 transition-colors ${
-          tinted ? 'bg-[#3A6BB080]' : 'bg-[#0D0D0D]'
-        } ${field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
+          invalid ? INVALID_WASH : tinted ? 'bg-[#3A6BB080]' : 'bg-[#0D0D0D]'
+        } ${invalid ? '' : field.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
       >
         <span className="absolute left-1.5 right-1.5 top-1/3 h-px bg-black/40" />
         <span className="absolute left-1.5 right-1.5 top-2/3 h-px bg-black/40" />
@@ -369,6 +385,18 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   const aisleField = useNumpadField('numpad');
   const quantityField = useNumpadField('numpad');
 
+  // Invalid-entry wash state (#109) — an invalid entry no longer clears itself (the
+  // typed/scanned value stays visible so the worker can see what they entered), so each
+  // field needs its own tracked flag to drive the red wash instead of relying on the
+  // absence of a value. Cleared the moment that field's own handler next resolves
+  // successfully (Aisle: a real API confirmation; Storage/Size/Zone: PalletCodePicker's
+  // own `onChange`, since a fresh commit only ever fires for a value that passed strict
+  // validation).
+  const [aisleInvalid, setAisleInvalid] = useState(false);
+  const [storageInvalid, setStorageInvalid] = useState(false);
+  const [sizeInvalid, setSizeInvalid] = useState(false);
+  const [zoneInvalid, setZoneInvalid] = useState(false);
+
   // Keep the on-screen field displays in sync with context — covers the worker's own
   // confirm, an override toggling on (pre-filled from Master Control), route-state
   // pre-population from ELA/ELZ, and queue compaction after a sibling stage, all of which
@@ -404,23 +432,28 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
    *  identical pair). */
   const handleInvalidStorage = useCallback(() => {
     playAlert('error');
+    setStorageInvalid(true);
     setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Storage Code - Invalid Entry` });
   }, [index, setMessage]);
   const handleInvalidSize = useCallback(() => {
     playAlert('error');
+    setSizeInvalid(true);
     setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Size - Invalid Entry` });
   }, [index, setMessage]);
   const handleInvalidZone = useCallback(() => {
     playAlert('error');
+    setZoneInvalid(true);
     setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Zone - Invalid Entry` });
   }, [index, setMessage]);
 
   /** Validates a confirmed Aisle entry actually exists (the other open STG validation-
-   *  checklist item), mirroring SDP's own `handleAisleConfirm` — clears the field and
-   *  reports `"{Stack} Stack - Aisle - Invalid Entry"` on the status bar if not, otherwise
-   *  commits it into StagingContext. Only ever wired up while Aisle is overridden (see
-   *  render below), so this always writes the stack's own override value, never Master
-   *  Control's. */
+   *  checklist item), mirroring SDP's own `handleAisleConfirm` — reports `"{Stack} Stack -
+   *  Aisle - Invalid Entry"` on the status bar if not, otherwise commits it into
+   *  StagingContext. Only ever wired up while Aisle is overridden (see render below), so
+   *  this always writes the stack's own override value, never Master Control's. Keeps the
+   *  typed value in the field either way (#109 — "the vast majority of invalid entries
+   *  SHOULD stay so the user sees what they entered"), washed red via `aisleInvalid` while
+   *  it hasn't yet been confirmed to exist. */
   const handleAisleConfirm = useCallback(async (v: string) => {
     const trimmed = v.trim();
     hidePanel();
@@ -429,11 +462,13 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
       try {
         await apiFetch(`/api/locations/empty-by-zone?aisle=${aisleNum}`, token!);
         clearMessage();
+        setAisleInvalid(false);
       } catch (err) {
         const code = err instanceof Error ? err.message : '';
         if (code === 'NOT_FOUND') {
           playAlert('error');
-          updateStack(index, { aisle: '' });
+          setAisleInvalid(true);
+          updateStack(index, { aisle: trimmed });
           setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Aisle - Invalid Entry` });
           return;
         }
@@ -458,17 +493,21 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   // while not overridden anyway — effectiveStack always reads Master Control for it — but
   // clearing it avoids a stale value quietly resurfacing next time the override arms again).
   const toggleAisleOverride = useCallback(() => {
+    setAisleInvalid(false);
     updateStack(index, stack.aisleOverride ? { aisleOverride: false, aisle: '' } : { aisleOverride: true, aisle: master.aisle });
   }, [index, stack.aisleOverride, master.aisle, updateStack]);
   const toggleStorageOverride = useCallback(() => {
+    setStorageInvalid(false);
     updateStack(index, stack.storageCodeOverride ? { storageCodeOverride: false, storageCode: '' } : { storageCodeOverride: true, storageCode: master.storageCode });
   }, [index, stack.storageCodeOverride, master.storageCode, updateStack]);
   const toggleSizeOverride = useCallback(() => {
+    setSizeInvalid(false);
     updateStack(index, stack.sizeOverride ? { sizeOverride: false, size: '' } : { sizeOverride: true, size: master.size });
   }, [index, stack.sizeOverride, master.size, updateStack]);
   // Zone has no Master Control field to pre-fill from (unlike Aisle/Storage/Size) — arming
   // just starts it blank, disarming clears it back out the same as the others.
   const toggleZoneOverride = useCallback(() => {
+    setZoneInvalid(false);
     updateStack(index, stack.zoneOverride ? { zoneOverride: false, zone: '' } : { zoneOverride: true, zone: '' });
   }, [index, stack.zoneOverride, updateStack]);
 
@@ -476,6 +515,10 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
    *  and any computed locations/shortfall — the single-slot version of `clearForks()`'s own
    *  logic, independent of the other two stacks (mirrors STG#06's per-stack scoping). */
   const clearStack = useCallback(() => {
+    setAisleInvalid(false);
+    setStorageInvalid(false);
+    setSizeInvalid(false);
+    setZoneInvalid(false);
     updateStack(index, {
       aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0,
       aisleOverride: false, storageCodeOverride: false, sizeOverride: false,
@@ -513,9 +556,9 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
         <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
           <OverrideToggle active={stack.aisleOverride} onClick={toggleAisleOverride} ariaLabel={`${STACK_LABELS[index]} Aisle override`} />
           {stack.aisleOverride ? (
-            <PalletBox label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} tinted />
+            <PalletBox label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} tinted reserveToggleSpace invalid={aisleInvalid} />
           ) : (
-            <InheritedDisplay label="Aisle" value={master.aisle} onActivate={toggleAisleOverride} />
+            <InheritedDisplay label="Aisle" value={master.aisle} onActivate={toggleAisleOverride} reserveToggleSpace />
           )}
         </div>
         {/* Zone — override-only, no Master Control equivalent to inherit from (unlike
@@ -529,12 +572,13 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               label="Zone"
               ariaLabel={`${STACK_LABELS[index]} Zone`}
               value={stack.zone}
-              onChange={(v) => updateStack(index, { zone: v })}
+              onChange={(v) => { setZoneInvalid(false); updateStack(index, { zone: v }); }}
               options={ZONE_OPTIONS}
               maxLength={1}
               strict
               onInvalid={handleInvalidZone}
               tinted
+              invalid={zoneInvalid}
             />
           ) : (
             <InheritedDisplay label="Zone" value="" onActivate={toggleZoneOverride} reserveToggleSpace />
@@ -547,13 +591,14 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               label="Storage"
               ariaLabel={`${STACK_LABELS[index]} Storage Code`}
               value={stack.storageCode}
-              onChange={(v) => updateStack(index, { storageCode: v })}
+              onChange={(v) => { setStorageInvalid(false); updateStack(index, { storageCode: v }); }}
               options={storageOptions}
               maxLength={2}
               transform={(v) => v.toUpperCase()}
               strict={storageStrict}
               onInvalid={handleInvalidStorage}
               tinted
+              invalid={storageInvalid}
             />
           ) : (
             <InheritedDisplay label="Storage" value={master.storageCode} onActivate={toggleStorageOverride} reserveToggleSpace />
@@ -566,7 +611,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               label="Size"
               ariaLabel={`${STACK_LABELS[index]} Size`}
               value={stack.size}
-              onChange={(v) => updateStack(index, { size: v })}
+              onChange={(v) => { setSizeInvalid(false); updateStack(index, { size: v }); }}
               options={sizeOptions}
               maxLength={2}
               transform={(v) => v.toUpperCase()}
@@ -574,6 +619,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               strict={sizeStrict}
               onInvalid={handleInvalidSize}
               tinted
+              invalid={sizeInvalid}
             />
           ) : (
             <InheritedDisplay label="Size" value={master.size} onActivate={toggleSizeOverride} reserveToggleSpace />
@@ -1552,15 +1598,22 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
     ? aisleTypes.sizesFor(master.storageCode || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
     : undefined;
 
+  // Invalid-entry wash state (#109) — see StackBox's identical pair for why these are
+  // needed now that an invalid entry no longer clears itself.
+  const [storageInvalid, setStorageInvalid] = useState(false);
+  const [sizeInvalid, setSizeInvalid] = useState(false);
+
   /** A typed value that isn't in the field's own (narrowed-or-full) options list never
    *  flagged an error before — it just silently never matched anything downstream. Mirrors
    *  the Aisle field's own invalid-entry message format. */
   const handleInvalidStorage = useCallback(() => {
     playAlert('error');
+    setStorageInvalid(true);
     setMessage({ type: 'error', text: 'Master Control - Storage Code - Invalid Entry' });
   }, [setMessage]);
   const handleInvalidSize = useCallback(() => {
     playAlert('error');
+    setSizeInvalid(true);
     setMessage({ type: 'error', text: 'Master Control - Size - Invalid Entry' });
   }, [setMessage]);
 
@@ -1593,21 +1646,23 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
         <div className="flex items-end gap-4">
           <StorageCodeField
             value={master.storageCode}
-            onChange={(v) => setMaster({ storageCode: v })}
+            onChange={(v) => { setStorageInvalid(false); setMaster({ storageCode: v }); }}
             options={storageCodeOptions}
             size="compact"
             strict
             onInvalid={handleInvalidStorage}
+            invalid={storageInvalid}
           />
           <FieldDisplay label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} width="w-[120px]" />
           <SizeField
             value={master.size}
-            onChange={(v) => setMaster({ size: v })}
+            onChange={(v) => { setSizeInvalid(false); setMaster({ size: v }); }}
             options={sizeOptions}
             size="compact"
             ariaLabel="Master Size"
             strict
             onInvalid={handleInvalidSize}
+            invalid={sizeInvalid}
           />
         </div>
 

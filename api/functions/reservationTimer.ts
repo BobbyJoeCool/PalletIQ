@@ -9,11 +9,16 @@ const TIMEOUT_MINUTES = 5;
  * Timer-triggered Azure Function that runs every minute.
  * Scans for Reservation rows that have been open longer than TIMEOUT_MINUTES (5 minutes).
  * For each expired reservation:
- *   1. Sets the reserved location back to STAGED if that's genuinely how findNextLocation
+ *   1. Atomically claims it (deletes it first, before touching Location state — #93,
+ *      same pattern as confirmPut/unassignPut/blockPut) — if a concurrent confirm/
+ *      unassign/block call already claimed this same reservation between this
+ *      function's own initial `findMany` read and this per-row claim attempt, the claim
+ *      loses (count 0) and this reservation is skipped rather than clobbering whatever
+ *      that other call already did.
+ *   2. Sets the reserved location back to STAGED if that's genuinely how findNextLocation
  *      found it (`wasStaged`, set back in directedPut/blockPut), or EMPTY otherwise — an
  *      expiring reservation shouldn't silently erase a GPMer's staging work (same fix as
  *      unassignPut/blockPut; see unassignPut's comment for why `=== true`, not `!== false`)
- *   2. Deletes the Reservation row
  *   3. Writes a RES_TMOUT activity log entry
  *
  * This runs server-side so reservations are cleaned up even if the client disconnects
@@ -35,28 +40,34 @@ async function clearExpiredReservations(_timer: Timer, ctx: InvocationContext): 
 
   if (expired.length === 0) return;
 
-  ctx.log(`Clearing ${expired.length} expired reservation(s)`);
+  ctx.log(`Clearing up to ${expired.length} expired reservation(s)`);
 
-  // Clear each expired reservation individually so each gets its own log entry.
+  // Clear each expired reservation individually so each gets its own log entry and its
+  // own claim attempt — one lost race (or one unrelated failure) doesn't abort the rest
+  // of the batch.
   for (const res of expired) {
-    const releasedStatus = res.wasStaged === true ? 'STAGED' : 'EMPTY';
-    await prisma.$transaction([
-      prisma.location.update({
+    try {
+      const claimed = await prisma.reservation.deleteMany({ where: { id: res.id } });
+      if (claimed.count === 0) continue; // already claimed by confirm/unassign/block (#93)
+
+      const releasedStatus = res.wasStaged === true ? 'STAGED' : 'EMPTY';
+      await prisma.location.update({
         where: { LocationID: { aisle: res.locationAisle, bin: res.locationBin, level: res.locationLevel } },
         data: { status: releasedStatus },
-      }),
-      prisma.reservation.delete({ where: { id: res.id } }),
-    ]);
+      });
 
-    await writeLog({
-      userId:        res.workerZ,
-      actionType:    'RES_TMOUT',
-      palletId:      res.palletId,
-      locationAisle: res.locationAisle,
-      locationBin:   res.locationBin,
-      locationLevel: res.locationLevel,
-      details:       { reservationId: res.id, expiredAfterMinutes: TIMEOUT_MINUTES },
-    });
+      await writeLog({
+        userId:        res.workerZ,
+        actionType:    'RES_TMOUT',
+        palletId:      res.palletId,
+        locationAisle: res.locationAisle,
+        locationBin:   res.locationBin,
+        locationLevel: res.locationLevel,
+        details:       { reservationId: res.id, expiredAfterMinutes: TIMEOUT_MINUTES },
+      });
+    } catch (err) {
+      ctx.error(`Failed to clear expired reservation ${res.id}:`, err);
+    }
   }
 }
 
