@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AisleGrid, type GridLevel, type ZoneBinRange } from '../components/shared/AisleGrid';
+import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { ZoneCodeBadge } from '../components/shared/ZoneCodeBadge';
 import { useAuth } from '../context/AuthContext';
@@ -8,10 +9,7 @@ import { useELZ } from '../context/ELZContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
-import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
-import { INVALID_WASH } from '../lib/invalidWash';
 import { useNumpadField } from '../lib/useNumpadField';
-import { useStorageCodes } from '../lib/useStorageCodes';
 
 interface Breakdown {
   storageCode: string;
@@ -65,21 +63,13 @@ export function ELZPage() {
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
-  // Narrows the Storage Code dropdown-helper (issue #80) to codes actually present in
-  // this aisle, once one is entered — the zone map/summary below stays fully unfiltered
-  // regardless (that's the existing, separate ELZ.md behavior; narrowing only ever
-  // applies to this entry field's own popup, never to the map/summary display).
-  const aisleTypes = useAisleFreightTypes(aisle);
-  const fullStorageCodes = useStorageCodes();
-  const storageCodeOptions = aisleTypes && fullStorageCodes
-    ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
-    : undefined;
-  // Checked against the full reference list (not the aisle-narrowed storageCodeOptions
-  // above) — a real code just absent from this aisle isn't "invalid," it's a valid code
-  // that happens to return an empty breakdown. Stays false while the list is still loading,
-  // same reasoning as ELA's identical guard.
-  const isInvalidStorageCode = !!storageCode && fullStorageCodes != null
-    && !fullStorageCodes.some((c) => c.code === storageCode);
+  // StorageCodeField now owns its own aisle-narrowing (popup only) and full-list validity
+  // check internally (Feature 10) — passing `aisle` below is all that's needed; the field
+  // no longer needs the screen to pre-compute a narrowed options list. `isInvalidStorageCode`
+  // is still tracked here because it also gates the message bar and the fetch's own
+  // `storageCode` query param below, not just the field's own wash — sourced from the
+  // field's reactive `onValidityChange` instead of the screen re-deriving it.
+  const [isInvalidStorageCode, setIsInvalidStorageCode] = useState(false);
 
   // Pre-populate the Aisle field display from router state (ELA "View Zone Map" / STG) on
   // mount — Storage Code's pre-population is handled by StorageCodeField's own value-sync
@@ -162,24 +152,18 @@ export function ELZPage() {
     <div className="absolute inset-0 flex flex-col p-6 gap-4 select-none">
       {/* Top bar */}
       <div className="flex items-end gap-4 shrink-0">
-        <div className="w-[160px] flex flex-col gap-1">
-          <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-            Aisle
-          </span>
-          <button
-            type="button"
-            onClick={focusAisleField}
-            className={`flex items-center h-[64px] px-5 rounded-[12px] border-2 transition-colors ${
-              notFound ? INVALID_WASH : aisleField.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
-            }`}
-          >
-            <span className="font-data text-[26px] font-medium text-white">
-              {aisleField.value || <span className="text-[#444]">—</span>}
-            </span>
-            {aisleField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-          </button>
-        </div>
-        <StorageCodeField value={storageCode} onChange={setStorageCode} options={storageCodeOptions} closeOnAutoSubmit invalid={isInvalidStorageCode} />
+        <NumpadFieldBox
+          label="Aisle"
+          value={aisleField.value}
+          onFocus={focusAisleField}
+          active={aisleField.isActive}
+          invalid={notFound}
+          width="w-[160px]"
+          boxClass="h-[64px] px-5 rounded-[12px]"
+          valueClass="text-[26px] font-medium"
+          caretClass="w-[2px] h-[28px]"
+        />
+        <StorageCodeField value={storageCode} onChange={setStorageCode} aisle={aisle} closeOnAutoSubmit onValidityChange={setIsInvalidStorageCode} />
       </div>
 
       {/* Main area: grid + zone summary */}

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNumpad } from '../../context/NumpadContext';
 import { INVALID_WASH } from '../../lib/invalidWash';
 import { useNumpadField } from '../../lib/useNumpadField';
@@ -68,21 +68,36 @@ interface LocationEntryFieldsProps {
    *  separately via its own Level Confirmation modal rather than typed here. Default
    *  false — LII/WLH/PAR require the full three-box resolution and are unaffected. */
   levelOptional?: boolean;
-  /** Fires the moment the Aisle box completes (3 manually-typed digits — not a full-value
-   *  scan override, which resolves the whole thing via `onResolved` instead), before
-   *  advancing to Bin. Lets a caller progressively validate Aisle on its own (v1.6.11, PAR)
-   *  without waiting for the whole 3-box chain to resolve. Optional — LII/WLH/MNP/PIP/SDP
-   *  don't pass it and are unaffected. */
-  onAisleEntered?: (aisle: string) => void;
-  /** Fires the moment the Bin box completes (3 manually-typed digits), before advancing to
-   *  Level (or resolving immediately, if Level is locked/optional) — same progressive-
-   *  validation use as `onAisleEntered`, one box further in. */
-  onBinEntered?: (aisle: string, bin: string) => void;
-  /** Per-box invalid-wash flags (v1.6.11, PAR) — independent of `groupInvalid`. Use these
-   *  when a caller can attribute a specific failure to one box specifically (e.g. "this
-   *  Aisle doesn't exist" vs. "this Bin doesn't exist within that Aisle" vs. "this Level
-   *  doesn't exist within that Aisle+Bin") rather than the whole three-box value being
-   *  generically wrong. All default false. */
+  /** Checks whether a completed Aisle box's value is a real aisle (issue #162) — when
+   *  provided, the component owns this async check internally (calling it the moment
+   *  Aisle completes, before advancing to Bin) instead of a caller computing its own
+   *  `aisleInvalid` externally. Mirrors `useAisleField`'s `fetch` contract (issue #161) —
+   *  every current caller wires `GET /api/locations/aisle-exists`. Omit for a caller with
+   *  no progressive per-box check need (LII/MNP/PIP/SDP/WLH — see this component's own
+   *  `Documentation/Components/LocationEntryFields.md` for why the rollout stayed PAR-only
+   *  this round); the box then just renders the external `aisleInvalid` prop below,
+   *  exactly as before. Resolving a full 8-digit (or 6-digit, when `levelOptional`)
+   *  barcode-scan override clears any stale internal invalid state from a prior manual
+   *  attempt, same as a fresh `value` prefill. */
+  checkAisle?: (aisle: string) => Promise<{ exists: boolean }>;
+  /** Checks whether a completed Bin box's value is a real Aisle+Bin combination — same
+   *  internal-ownership shape as `checkAisle`, one box further in; skipped automatically
+   *  while the internal Aisle check is already known invalid (an Aisle+Bin combination
+   *  can't meaningfully exist within an Aisle that itself doesn't). Resolve only matters
+   *  for its success/failure — the resolved value itself is unused. */
+  checkAisleBin?: (aisle: string, bin: string) => Promise<unknown>;
+  /** Fires whenever the internal Aisle check's result changes (only meaningful when
+   *  `checkAisle` is provided) — for a caller's own side effect (message-bar text),
+   *  mirroring `useCodePickerField`'s `onValidityChange` convention. */
+  onAisleValidityChange?: (invalid: boolean) => void;
+  /** Same as `onAisleValidityChange`, one box further in — only meaningful when
+   *  `checkAisleBin` is provided. */
+  onBinValidityChange?: (invalid: boolean) => void;
+  /** Per-box invalid-wash flags (v1.6.11) — independent of `groupInvalid`. External
+   *  override for a caller with no internal `checkAisle`/`checkAisleBin` (e.g. a caller
+   *  attributing a compound-submit failure to one specific box) — ignored for whichever
+   *  box has its own internal check active, since the internal result drives that box's
+   *  wash instead. All default false. */
   aisleInvalid?: boolean;
   binInvalid?: boolean;
   levelInvalid?: boolean;
@@ -116,7 +131,8 @@ interface LocationEntryFieldsProps {
  */
 export function LocationEntryFields({
   onResolved, autoFocus = true, value, highlight = false, onActiveChange, lockedAisle, lockedLevel, size = 'default',
-  levelOptional = false, onAisleEntered, onBinEntered, aisleInvalid = false, binInvalid = false, levelInvalid = false,
+  levelOptional = false, checkAisle, checkAisleBin, onAisleValidityChange, onBinValidityChange,
+  aisleInvalid: externalAisleInvalid = false, binInvalid: externalBinInvalid = false, levelInvalid = false,
   groupInvalid = false,
 }: LocationEntryFieldsProps) {
   const { hidePanel } = useNumpad();
@@ -135,6 +151,16 @@ export function LocationEntryFields({
   useEffect(() => {
     onActiveChangeRef.current?.(isActive);
   }, [isActive]);
+
+  // Internal progressive existence-check state (issue #162) — only ever populated when
+  // `checkAisle`/`checkAisleBin` are provided; otherwise stays permanently false and the
+  // external `aisleInvalid`/`binInvalid` props drive the wash instead (see boxClasses below).
+  const [internalAisleInvalid, setInternalAisleInvalid] = useState(false);
+  const [internalBinInvalid, setInternalBinInvalid] = useState(false);
+  useEffect(() => { onAisleValidityChange?.(internalAisleInvalid); }, [internalAisleInvalid]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onBinValidityChange?.(internalBinInvalid); }, [internalBinInvalid]); // eslint-disable-line react-hooks/exhaustive-deps
+  const aisleInvalid = checkAisle ? internalAisleInvalid : externalAisleInvalid;
+  const binInvalid = checkAisleBin ? internalBinInvalid : externalBinInvalid;
 
   // The Aisle→Bin→Level auto-advance chain below only ever registers its handlers once,
   // at mount (see the effect at the bottom) — handleBinConfirm/handleLevelConfirm are
@@ -159,6 +185,16 @@ export function LocationEntryFields({
     levelField.focus(handleLevelConfirm);
   }
 
+  /** A full-value scan/prefill override bypasses the interactive per-box chain entirely,
+   *  so any internal invalid state left over from a prior manual attempt no longer means
+   *  anything against the new value — cleared the same way a fresh external `value`
+   *  prefill clears it (see that effect below). No-op when neither `checkAisle` nor
+   *  `checkAisleBin` is provided. */
+  function clearInternalInvalid() {
+    setInternalAisleInvalid(false);
+    setInternalBinInvalid(false);
+  }
+
   /** Aisle field submit: an 8-digit value is a full-barcode override; a 6-digit value is a
    *  full Aisle+Bin override when levelOptional (see the prop's doc comment); a 3-digit
    *  value advances to Bin. */
@@ -166,17 +202,24 @@ export function LocationEntryFields({
     const v = value.trim();
     if (v.length === 8) {
       hidePanel();
+      clearInternalInvalid();
       onResolved(v, true);
       return;
     }
     if (levelOptional && v.length === 6) {
       hidePanel();
+      clearInternalInvalid();
       onResolved(v, true);
       return;
     }
     if (v.length !== 3) return;
     aisleValueRef.current = v;
-    onAisleEntered?.(v);
+    if (checkAisle) {
+      setInternalBinInvalid(false);
+      checkAisle(v)
+        .then(({ exists }) => setInternalAisleInvalid(!exists))
+        .catch(() => setInternalAisleInvalid(true));
+    }
     setTimeout(() => focusBinField(), 50);
   }
 
@@ -187,17 +230,27 @@ export function LocationEntryFields({
     const v = value.trim();
     if (v.length === 8) {
       hidePanel();
+      clearInternalInvalid();
       onResolved(v, true);
       return;
     }
     if (levelOptional && v.length === 6) {
       hidePanel();
+      clearInternalInvalid();
       onResolved(v, true);
       return;
     }
     if (v.length !== 3) return;
     binValueRef.current = v;
-    onBinEntered?.(lockedAisle ?? aisleValueRef.current, v);
+    // Skipped entirely once Aisle is already known invalid (internally or externally) —
+    // a Bin can't meaningfully exist or not within an Aisle that itself doesn't, and only
+    // the top-level field actually at fault should wash (same rule PAR's own pre-existing
+    // checkAisleBinExists already followed).
+    if (checkAisleBin && !aisleInvalid) {
+      checkAisleBin(lockedAisle ?? aisleValueRef.current, v)
+        .then(() => setInternalBinInvalid(false))
+        .catch(() => setInternalBinInvalid(true));
+    }
     if (lockedLevel != null) {
       hidePanel();
       onResolved((lockedAisle ?? aisleValueRef.current) + v + lockedLevel, false);
@@ -218,11 +271,13 @@ export function LocationEntryFields({
     const v = value.trim();
     if (v.length === 8) {
       hidePanel();
+      clearInternalInvalid();
       onResolved(v, true);
       return;
     }
     if (levelOptional && v.length === 6) {
       hidePanel();
+      clearInternalInvalid();
       onResolved(v, true);
       return;
     }
@@ -243,6 +298,7 @@ export function LocationEntryFields({
   // boxes; an 8-digit string fills them directly, bypassing the normal typed-entry chain.
   useEffect(() => {
     if (value == null) return;
+    clearInternalInvalid();
     if (!value) {
       aisleField.clear();
       binField.clear();

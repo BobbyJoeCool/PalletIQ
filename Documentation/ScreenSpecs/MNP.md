@@ -173,6 +173,7 @@ flowchart TD
 
 | Date | Change |
 |---|---|
+| 2026-07-27 (Feature 10 / #158) | Internal-only: the Pallet ID box (local `FieldDisplay`/`NumpadFieldBox`) replaced with the shared `PalletIdField` component, matching its existing 72px box size via override props. `handlePalletScan`'s own submit logic and clear-on-error (no wash) behavior are unchanged. |
 | 2026-07-27 | Fixed [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) — `placePallet` (and `manualConfirm`'s consolidate branch) now check whether a second pallet still occupies a vacated location before clearing it, falling back to `STORED` instead of `EMPTY` if so. |
 | 2026-07-27 | Fixed [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — `manualScan` no longer includes a nonexistent scanned pallet id in its unconditional `MNP_SCAN` log write (was violating `ActivityLog.palletId`'s FK and 500ing instead of surfacing `404 PALLET_NOT_FOUND`); logs `palletId: null` with the invalid id kept in `details.scannedId` instead. |
 | 2026-07-27 | Added the Hold gate ([#92](https://github.com/BobbyJoeCool/PalletIQ/issues/92)) as step 4b of `manualConfirm`'s gate sequence — `HOLD_IN`/`HOLD_BOTH` use the same IM+-overridable pattern as Contraction; `HOLD_PERM` is a harder no-override block for every role; `HOLD_OUT` never blocks. |

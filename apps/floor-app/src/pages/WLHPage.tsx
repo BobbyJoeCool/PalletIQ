@@ -15,6 +15,8 @@ import { useWLH } from '../context/WLHContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
+import { useAisleField } from '../lib/useAisleField';
+import { useLocationRangeFields } from '../lib/useLocationRangeFields';
 import { useNumpadField } from '../lib/useNumpadField';
 
 type BinSide = 'ALL' | 'ODD' | 'EVEN';
@@ -24,10 +26,14 @@ type RangeAction = 'PLACE' | 'RELEASE';
  *  LocationEntryFields' boxes. Range mode doesn't reuse LocationEntryFields itself — that
  *  component's fixed Aisle/Bin/Level shape and 8-digit full-barcode-scan override don't
  *  fit a Start/End Bin pair — but matches its visual language for consistency. */
-function RangeNumBox({ label, field, onFocus }: {
+function RangeNumBox({ label, field, onFocus, invalid = false }: {
   label: string;
   field: ReturnType<typeof useNumpadField>;
   onFocus: () => void;
+  /** Applies the app-wide red-wash treatment — currently only Aisle passes this
+   *  (issue #161's existence check); Start/End Bin have no independent existence concept
+   *  of their own outside the resolved range itself. */
+  invalid?: boolean;
 }) {
   return (
     <NumpadFieldBox
@@ -35,6 +41,7 @@ function RangeNumBox({ label, field, onFocus }: {
       value={field.value}
       onFocus={onFocus}
       active={field.isActive}
+      invalid={invalid}
       width="w-[120px]"
       labelClass="text-[13px]"
       boxClass="h-[56px] px-4 rounded-[10px]"
@@ -103,16 +110,24 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
   const { hidePanel } = useNumpad();
   const role = (user?.role ?? 'WORKER') as Role;
 
-  // padOnSubmit: typing "5" and hitting OK is accepted as "005", matching every other
-  // fixed-width Aisle/Bin field in the app (LocationEntryFields, ELZ, SDP, STG).
-  const aisleField = useNumpadField('numpad', 3, true);
-  const startBinField = useNumpadField('numpad', 3, true);
-  const endBinField = useNumpadField('numpad', 3, true);
-  // Level range (WLH fix item 03) — optional, 2-digit like every other Level field in the
-  // app (LocationEntryFields, etc). Left blank on both ends means "every level," matching
-  // the original single-aisle-and-bins-only design's default.
-  const startLevelField = useNumpadField('numpad', 2, true);
-  const endLevelField = useNumpadField('numpad', 2, true);
+  // Start/End Bin + optional Start/End Level (Feature 10) — shared hook, since Aisle is
+  // a separate, bare-filter field (issue #161's own scope) not part of this range shape.
+  const rangeFields = useLocationRangeFields({ onEndBinComplete: hidePanel });
+  // Bare Aisle filter (issue #161) — previously unvalidated ("is this a number" only);
+  // now a real existence check, same as ELA's range ends. Advances to Start Bin on confirm
+  // regardless of validity (via `onConfirm`, matching this screen's own pre-existing
+  // "length drives advance" convention) — `invalid` only washes the box and gates
+  // `canReview` below, it doesn't block the worker from continuing to type the rest of
+  // the range.
+  const aisleFields = useAisleField({
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    onConfirm: useCallback((v) => { if (v.length === 3) rangeFields.focusStartBin(); }, [rangeFields.focusStartBin]),
+  });
+  const {
+    startBinField, endBinField, startLevelField, endLevelField,
+    focusStartBin, focusEndBin, focusStartLevel, focusEndLevel,
+    startBin, endBin, startLevel, endLevel, hasLevelRange, levelRangeValid,
+  } = rangeFields;
 
   const [binSide, setBinSide] = useState<BinSide>('ALL');
   const [action, setAction] = useState<RangeAction>('PLACE');
@@ -128,34 +143,11 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
 
   const placeableTypes = (Object.keys(HOLD_LABELS) as HoldCategory[]).filter((t) => hasMinRole(role, HOLD_LABELS[t].placeRole));
 
-  /** Registers the Aisle field's numpad handler; on confirm (3 digits), advances to Start Bin. */
-  function focusAisle() { aisleField.focus((v) => { if (v.trim().length === 3) startBinField.focus(handleStartBin); }); }
-  /** Registers the Start Bin field's numpad handler, wired to handleStartBin on confirm. */
-  function focusStartBin() { startBinField.focus(handleStartBin); }
-  /** Registers the End Bin field's numpad handler, wired to handleEndBin on confirm. */
-  function focusEndBin() { endBinField.focus(handleEndBin); }
-  /** Registers the Start Level field's numpad handler — no auto-advance chain, since the Level range is optional and either box may be filled independently. */
-  function focusStartLevel() { startLevelField.focus(() => {}); }
-  /** Registers the End Level field's numpad handler — no auto-advance chain, same reasoning as focusStartLevel. */
-  function focusEndLevel() { endLevelField.focus(() => {}); }
-  /** Start Bin field submit: advances to End Bin once exactly 3 digits are entered. */
-  function handleStartBin(v: string) { if (v.trim().length === 3) { setTimeout(() => focusEndBin(), 50); } }
-  /** End Bin field submit: dismisses the numpad panel once exactly 3 digits are entered — the last field in the required chain. */
-  function handleEndBin(v: string) { if (v.trim().length === 3) hidePanel(); }
-
-  const aisle = aisleField.value ? parseInt(aisleField.value, 10) : NaN;
-  const startBin = startBinField.value ? parseInt(startBinField.value, 10) : NaN;
-  const endBin = endBinField.value ? parseInt(endBinField.value, 10) : NaN;
-  // Level range (WLH fix item 03) is optional — either both boxes are blank (no filter, the
-  // original "every level" default) or both are filled with a valid Start<=End pair. One
-  // filled and the other blank is treated as invalid, same as any half-entered range.
-  const startLevel = startLevelField.value ? parseInt(startLevelField.value, 10) : NaN;
-  const endLevel = endLevelField.value ? parseInt(endLevelField.value, 10) : NaN;
-  const hasLevelRange = startLevelField.value !== '' && endLevelField.value !== '';
-  const levelRangeValid = startLevelField.value === '' && endLevelField.value === ''
-    ? true
-    : hasLevelRange && Number.isInteger(startLevel) && Number.isInteger(endLevel) && startLevel <= endLevel;
-  const rangeValid = Number.isInteger(aisle) && Number.isInteger(startBin) && Number.isInteger(endBin) && startBin <= endBin && levelRangeValid;
+  const aisle = aisleFields.field.value ? parseInt(aisleFields.field.value, 10) : NaN;
+  // Combines this screen's own Aisle existence check (issue #161) with the shared hook's
+  // Bin/Level range validity (Feature 10) — the hook doesn't know about Aisle at all, see
+  // its own doc.
+  const rangeValid = Number.isInteger(aisle) && !aisleFields.invalid && rangeFields.rangeValid;
   // Release now needs a chosen hold *level* too (issue #123), same as Place needs a hold
   // type — just not a reason code, since Release has nothing to log a placement reason
   // for.
@@ -226,11 +218,8 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
         }
         onLog(lines.join('\n'));
       }
-      aisleField.clear();
-      startBinField.clear();
-      endBinField.clear();
-      startLevelField.clear();
-      endLevelField.clear();
+      aisleFields.clear();
+      rangeFields.clear();
       setBinSide('ALL');
       setAction('PLACE');
       setHoldType(null);
@@ -252,7 +241,7 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
     // relying on the page never overflowing, keeps the button reachable regardless.
     <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 max-w-[720px] pr-1">
       <div className="flex items-stretch gap-3">
-        <RangeNumBox label="Aisle" field={aisleField} onFocus={focusAisle} />
+        <RangeNumBox label="Aisle" field={aisleFields.field} onFocus={aisleFields.focusField} invalid={aisleFields.invalid} />
         <div className="w-px bg-[#3A3A3A]" />
         <RangeNumBox label="Start Bin" field={startBinField} onFocus={focusStartBin} />
         <RangeNumBox label="End Bin" field={endBinField} onFocus={focusEndBin} />

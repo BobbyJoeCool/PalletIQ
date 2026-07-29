@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
 import { DemoPicker } from '../components/shared/DemoPicker';
-import { type DpciValue } from '../components/shared/DpciField';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { LiveId } from '../components/ui/LiveId';
@@ -17,7 +17,10 @@ import { playAlert } from '../lib/audio';
 import { EDIT_REASON_CODES } from '../lib/editReasonCodes';
 import { fmtDpci } from '../lib/fmt';
 import { INVALID_WASH } from '../lib/invalidWash';
+import { useDpciFields } from '../lib/useDpciFields';
+import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
+import { checkSspCap, checkVcpSspRatio } from '../lib/vcpSspValidation';
 import type { PalletStatus } from '@shared/index';
 
 /** Every `PalletStatus` value (see `shared/index.ts`), with a human-readable label, for
@@ -59,15 +62,14 @@ function toDateInputValue(iso: string | null): string {
  * flag a warning immediately on defocus without blocking further editing (the server
  * re-validates authoritatively at Save time regardless, via the exact same rule). Returns
  * the warning text, or null if the given values are fine (or not yet resolvable, e.g. SSP
- * not entered yet — never warns on an incomplete field).
+ * not entered yet — never warns on an incomplete field). The underlying rules are shared
+ * with PAR (Feature 10, issue #164 — `checkVcpSspRatio`/`checkSspCap`); this wrapper just
+ * owns PII's own message wording, which differs slightly from PAR's own text.
  */
 function vcpSspWarning(vcpStr: string, sspStr: string, sspsStr: string): string | null {
-  const vcp = parseInt(vcpStr, 10);
-  const ssp = parseInt(sspStr, 10);
-  if (isNaN(vcp) || isNaN(ssp) || ssp <= 0) return null;
-  if (vcp % ssp !== 0) return 'SSP must divide evenly into VCP';
-  const ssps = parseInt(sspsStr, 10);
-  if (!isNaN(ssps) && ssps >= vcp / ssp) return 'SSPs on Pallet must be less than a full carton (VCP ÷ SSP)';
+  const { ratioInvalid, sspPerCarton } = checkVcpSspRatio(vcpStr, sspStr);
+  if (ratioInvalid) return 'SSP must divide evenly into VCP';
+  if (checkSspCap(sspPerCarton, sspsStr)) return 'SSPs on Pallet must be less than a full carton (VCP ÷ SSP)';
   return null;
 }
 
@@ -158,18 +160,14 @@ export function PIIPage() {
   // UPC/ISI's UPC.
   const [palletInvalid, setPalletInvalid] = useState(false);
 
-  const palletField = useNumpadField();
-  // Seeds the Pallet ID field's displayed value from a persisted pallet on mount (a fresh
-  // page load never ran the focus-and-type flow that would normally populate it).
-  useEffect(() => {
-    if (pallet) palletField.set(String(pallet.pid));
-    // Only on mount — this field's value afterward is owned by loadPallet/user typing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const palletFieldRef = useRef<PalletIdFieldHandle>(null);
+  // The field's displayed value — separate from `pallet.pid` since it must stay visible
+  // as-typed on a not-found error (issue PII#01), when no `pallet` is loaded at all.
+  // Seeded from a persisted pallet on mount (a fresh page load never ran the
+  // focus-and-type flow that would normally populate it).
+  const [pidValue, setPidValue] = useState(() => (pallet ? String(pallet.pid) : ''));
 
   // Edit-mode field values, seeded from the loaded pallet on entering edit mode.
-  // DPCI is three separate fields (issue #21).
-  const [editDpci, setEditDpci] = useState<DpciValue>({ dept: '', class: '', item: '' });
   const [editVcp, setEditVcp] = useState('');
   const [editSsp, setEditSsp] = useState('');
   const [editCartons, setEditCartons] = useState('');
@@ -200,9 +198,24 @@ export function PIIPage() {
   // screen used before). VCP/SSP/SSPs on Pallet each re-check the trio on their own commit,
   // using the other two's current state — whichever one the worker just defocused is
   // always included via its own fresh value.
-  const deptEdit = useEditField(editDpci.dept, (v) => setEditDpci((p) => ({ ...p, dept: v })), { maxLength: 3, padOnSubmit: true });
-  const classEdit = useEditField(editDpci.class, (v) => setEditDpci((p) => ({ ...p, class: v })), { maxLength: 2, padOnSubmit: true });
-  const itemEdit = useEditField(editDpci.item, (v) => setEditDpci((p) => ({ ...p, item: v })), { maxLength: 4, padOnSubmit: true });
+
+  /** DPCI entry chain (issue #159) — the same shared hook PAR/IID/ISI use, so a worker
+   *  correcting a pallet's DPCI here gets the identical Dept→Class→Item auto-advance and
+   *  real-time existence check as those screens, instead of the plain independent-EditBox
+   *  treatment every other Edit-mode field on this screen still uses. Deliberate behavior
+   *  addition, not just a markup swap — previously this screen had no client-side DPCI
+   *  check at all, relying entirely on the server rejecting an invalid combination at Save
+   *  time; now an invalid in-progress edit washes red and shows an error immediately,
+   *  matching PAR/IID/ISI's own UX. Save's own gating is untouched (still gated only on
+   *  `changedFields` being non-empty, not on `dpciInvalid`) — not extending further than
+   *  what was actually asked for. */
+  const dpciFields = useDpciFields<{ dpci: string }>({
+    fetch: useCallback((digits) => apiFetch<{ dpci: string }>(`/api/items/dpci/${digits}`, token!), [token]),
+    onNotFound: useCallback(() => {
+      playAlert('error');
+      setMessage({ type: 'error', text: 'DPCI not found' });
+    }, [setMessage]),
+  });
   const vcpEdit = useEditField(editVcp, setEditVcp, { onCommit: (v) => checkVcpSspWarning(v, editSsp, editSSPs) });
   const sspEdit = useEditField(editSsp, setEditSsp, { onCommit: (v) => checkVcpSspWarning(editVcp, v, editSSPs) });
   const cartonsEdit = useEditField(editCartons, setEditCartons);
@@ -213,71 +226,21 @@ export function PIIPage() {
   // body with confirmNearExpiration added.
   const [expirationConfirmPending, setExpirationConfirmPending] = useState(false);
 
-  // Expiration Date — numpad-driven Month/Day/Year chain (v1.7.0, matching PAR's exact
-  // format — direct instruction). Month/Day use padOnSubmit (typing "5" and confirming
-  // becomes "05"); Year has no padOnSubmit, same reasoning as PAR's own chain (a partial
-  // year has no sensible padded meaning). Only the entry-format-level checks (Month 1-12,
-  // Day exists in the entered month) are mirrored here — PAR's additional whole-date
-  // "too soon" group wash is a business-rule check, not a format one, and PII already
-  // surfaces that separately via the server's EXPIRATION_NEEDS_CONFIRM confirm popup below.
-  const monthField = useNumpadField('numpad', 2, true);
-  const dayField = useNumpadField('numpad', 2, true);
-  const yearField = useNumpadField('numpad', 4);
-  const [monthInvalid, setMonthInvalid] = useState(false);
-  const [dayInvalid, setDayInvalid] = useState(false);
-
-  /** Days in a given month, 1-indexed — see PARPage.tsx's identical helper for the leap-year reasoning. */
-  function daysInMonth(month: number, year?: number): number {
-    if (month === 2) {
-      if (year == null) return 29;
-      const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-      return isLeap ? 29 : 28;
-    }
-    const table = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    return table[month - 1] ?? 31;
-  }
-
-  /** Registers the Month field's numpad handler, wired to handleMonthConfirm on confirm. */
-  function focusMonthField() { monthField.focus(handleMonthConfirm); }
-  /** Registers the Day field's numpad handler, wired to handleDayConfirm on confirm. */
-  function focusDayField() { dayField.focus(handleDayConfirm); }
-  /** Registers the Year field's numpad handler, wired to handleYearConfirm on confirm. */
-  function focusYearField() { yearField.focus(handleYearConfirm); }
-
-  /** Month field submit: validates the 1-12 range and advances to Day, same as PAR's chain. */
-  function handleMonthConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 2) return;
-    const n = parseInt(v, 10);
-    setMonthInvalid(n < 1 || n > 12);
-    setTimeout(() => focusDayField(), 50);
-  }
-  /** Day field submit: validates the day exists in the entered month, skipped if Month is
-   *  already out of range. Advances to Year regardless, same as PAR's chain. */
-  function handleDayConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 2) return;
-    const monthNum = parseInt(monthField.value, 10);
-    const dayNum = parseInt(v, 10);
-    const monthOk = monthNum >= 1 && monthNum <= 12;
-    setDayInvalid(monthOk && (dayNum < 1 || dayNum > daysInMonth(monthNum)));
-    setTimeout(() => focusYearField(), 50);
-  }
-  /** Year field submit: once exactly 4 digits are entered, re-checks Day against the real
-   *  year (leap-year precision), composes Month+Day+Year into the ISO value this screen's
-   *  own Save already expects, and hides the panel (chain's terminal step). */
-  function handleYearConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 4) return;
-    hidePanel();
-    const monthNum = parseInt(monthField.value, 10);
-    const dayNum = parseInt(dayField.value, 10);
-    const yearNum = parseInt(v, 10);
-    const monthOk = monthNum >= 1 && monthNum <= 12;
-    const dayOk = monthOk && dayNum >= 1 && dayNum <= daysInMonth(monthNum, yearNum);
-    setDayInvalid(monthOk && !dayOk);
-    setEditExpirationDate(`${v}-${monthField.value}-${dayField.value}`);
-  }
+  // Expiration Date — shared Month/Day/Year chain (Feature 10 / issue #163), now the
+  // same canonical implementation PAR uses — including PAR's own ref-based fix for a
+  // stale-Month/Day-value bug that this screen's prior hand-rolled version (reading
+  // `monthField.value`/`dayField.value` directly inside later handlers, the exact shape
+  // that caused PAR's own bug) very likely also carried, just never reported.
+  // `checkTooSoon` stays off — PII intentionally omits that client-side pre-check,
+  // relying on the server's `EXPIRATION_NEEDS_CONFIRM` confirm popup instead (see below).
+  const expirationFields = useExpirationDateFields({
+    onChange: setEditExpirationDate,
+    onComplete: hidePanel,
+  });
+  const {
+    monthField, dayField, yearField, monthInvalid, dayInvalid,
+    focusMonthField, focusDayField, focusYearField,
+  } = expirationFields;
 
   /** Looks up a pallet by id via the API and transitions to the loaded state; resets to ready on failure. */
   const loadPallet = useCallback(async (idStr: string) => {
@@ -297,7 +260,7 @@ export function PIIPage() {
       const data = await apiFetch<PIIPalletData>(`/api/pallets/${pid}`, token!);
       setPallet(data);
       setScreenState('loaded');
-      palletField.set(String(pid));
+      setPidValue(String(pid));
       setPalletInvalid(false);
     } catch {
       playAlert('error');
@@ -312,19 +275,22 @@ export function PIIPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, hidePanel, clearMessage]);
 
-  /** Registers the Pallet ID field's numpad handler; a scan while editing discards unsaved changes and re-loads. */
+  /** Wired to the Pallet ID field's onChange; a scan while editing discards unsaved changes and re-loads. */
+  const handlePalletIdChange = useCallback((v: string) => {
+    const trimmed = v.trim();
+    if (!trimmed) return;
+    setPidValue(trimmed);
+    if (screenState === 'edit') {
+      // A new scan while editing discards unsaved changes without a confirmation
+      // prompt — this is a demo-scope simplification of PII.md's confirm-before-discard.
+      setScreenState('loaded');
+    }
+    void loadPallet(trimmed);
+  }, [screenState, loadPallet]);
+
   const focusPalletField = useCallback(() => {
-    palletField.focus((v) => {
-      const trimmed = v.trim();
-      if (!trimmed) return;
-      if (screenState === 'edit') {
-        // A new scan while editing discards unsaved changes without a confirmation
-        // prompt — this is a demo-scope simplification of PII.md's confirm-before-discard.
-        setScreenState('loaded');
-      }
-      void loadPallet(trimmed);
-    });
-  }, [palletField, screenState, loadPallet]);
+    palletFieldRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     // React re-runs this effect whenever the dependency's value changes in *either*
@@ -352,23 +318,14 @@ export function PIIPage() {
   /** Seeds the edit-mode fields from the currently loaded pallet and switches to the edit state. */
   function enterEditMode() {
     if (!pallet) return;
-    setEditDpci({
-      dept: String(pallet.dpci.dept).padStart(3, '0'),
-      class: String(pallet.dpci.class).padStart(2, '0'),
-      item: String(pallet.dpci.item).padStart(4, '0'),
-    });
+    dpciFields.setFromDpci(fmtDpci(pallet.dpci));
     setEditVcp(String(pallet.vcp));
     setEditSsp(String(pallet.ssp));
     setEditCartons(String(pallet.currentCartons));
     setEditSSPs(String(pallet.currentSSPs));
     setEditPallets(String(pallet.currentPallets));
     setEditExpirationDate(toDateInputValue(pallet.expirationDate));
-    const [y, m, d] = toDateInputValue(pallet.expirationDate).split('-');
-    monthField.set(m ?? '');
-    dayField.set(d ?? '');
-    yearField.set(y ?? '');
-    setMonthInvalid(false);
-    setDayInvalid(false);
+    expirationFields.setFromIso(toDateInputValue(pallet.expirationDate));
     setReasonCode('');
     setExpirationConfirmPending(false);
     setVcpSspInvalid(false);
@@ -392,9 +349,9 @@ export function PIIPage() {
     if (!pallet) return {};
     const body: Record<string, unknown> = {};
 
-    const dept = parseInt(editDpci.dept, 10);
-    const cls = parseInt(editDpci.class, 10);
-    const itm = parseInt(editDpci.item, 10);
+    const dept = parseInt(dpciFields.deptField.value, 10);
+    const cls = parseInt(dpciFields.classField.value, 10);
+    const itm = parseInt(dpciFields.itemField.value, 10);
     if (!isNaN(dept) && !isNaN(cls) && !isNaN(itm) &&
         (dept !== pallet.dpci.dept || cls !== pallet.dpci.class || itm !== pallet.dpci.item)) {
       body.dpci = { dept, class: cls, item: itm };
@@ -414,7 +371,7 @@ export function PIIPage() {
     }
 
     return body;
-  }, [pallet, editDpci, editVcp, editSsp, editCartons, editSSPs, editPallets, editExpirationDate]);
+  }, [pallet, dpciFields.deptField.value, dpciFields.classField.value, dpciFields.itemField.value, editVcp, editSsp, editCartons, editSSPs, editPallets, editExpirationDate]);
 
   const hasChanges = Object.keys(changedFields).length > 0;
 
@@ -530,21 +487,7 @@ export function PIIPage() {
 
   return (
     <div className="absolute inset-0 flex flex-col p-6 gap-4 select-none">
-      <div className="w-[260px]">
-        <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">Pallet ID</span>
-        <button
-          type="button"
-          onClick={focusPalletField}
-          className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] border-2 transition-colors ${
-            palletInvalid ? INVALID_WASH : palletField.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
-          }`}
-        >
-          <span className="font-data text-[26px] font-medium text-white">
-            {palletField.value || <span className="text-[#444]">—</span>}
-          </span>
-          {palletField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-        </button>
-      </div>
+      <PalletIdField ref={palletFieldRef} value={pidValue} onChange={handlePalletIdChange} invalid={palletInvalid} />
 
       {loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
 
@@ -556,12 +499,12 @@ export function PIIPage() {
             <>
               <div className="flex items-center gap-3 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
-                <div className="flex items-center gap-2">
-                  <EditBox value={deptEdit.field.value} active={deptEdit.field.isActive} onFocus={deptEdit.focus} width="w-[76px]" />
+                <div className={`flex items-center gap-2 rounded-[10px] ${dpciFields.dpciInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
+                  <EditBox value={dpciFields.deptField.value} active={dpciFields.deptField.isActive} onFocus={dpciFields.focusDeptField} width="w-[76px]" />
                   <span className="text-[#555]">-</span>
-                  <EditBox value={classEdit.field.value} active={classEdit.field.isActive} onFocus={classEdit.focus} width="w-[64px]" />
+                  <EditBox value={dpciFields.classField.value} active={dpciFields.classField.isActive} onFocus={dpciFields.focusClassField} width="w-[64px]" />
                   <span className="text-[#555]">-</span>
-                  <EditBox value={itemEdit.field.value} active={itemEdit.field.isActive} onFocus={itemEdit.focus} width="w-[92px]" />
+                  <EditBox value={dpciFields.itemField.value} active={dpciFields.itemField.isActive} onFocus={dpciFields.focusItemField} width="w-[92px]" />
                 </div>
                 <CurrentValue>{fmtDpci(pallet.dpci)}</CurrentValue>
               </div>

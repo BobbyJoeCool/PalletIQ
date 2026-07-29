@@ -1,5 +1,6 @@
 import { forwardRef } from 'react';
 import { SIZES, SIZE_NAMES } from '../../lib/sizes';
+import { useAisleFreightTypes } from '../../lib/useAisleFreightTypes';
 import { CodePickerField, type CodeOption, type CodePickerFieldHandle } from './CodePickerField';
 
 const FULL_SIZE_OPTIONS: CodeOption[] = SIZES.map((s) => ({ code: s, desc: SIZE_NAMES[s] }));
@@ -7,9 +8,17 @@ const FULL_SIZE_OPTIONS: CodeOption[] = SIZES.map((s) => ({ code: s, desc: SIZE_
 interface SizeFieldProps {
   value: string;
   onChange: (value: string) => void;
-  /** Narrowed list of sizes actually available in the current context (e.g. present in an
-   *  already-entered aisle + Storage Code) — issue #80. Omit to show the full XS–L
-   *  reference list. */
+  /** Dependency prop (Feature 10) — when given, narrows to sizes actually present in this
+   *  aisle, computed internally via `useAisleFreightTypes` rather than the caller
+   *  pre-filtering. `null`/omitted falls back to the full XS-L reference list. */
+  aisle?: number | null;
+  /** Second dependency prop (Feature 10) — further narrows within `aisle` to sizes paired
+   *  with this specific Storage Code (Size depends on *both* Aisle and Storage Code, not
+   *  just Aisle — `useAisleFreightTypes`' own `sizesFor` already supports this second
+   *  narrowing dimension). Ignored if `aisle` isn't also given. */
+  storageCode?: string | null;
+  /** Escape hatch: wins over `aisle`/`storageCode`-based narrowing entirely. No current
+   *  caller needs this; prefer `aisle`/`storageCode` for the common case. */
   options?: CodeOption[];
   /** `compact` matches STG's per-stack pallet-box styling; `default` matches full-screen
    *  filter bars (ELA). Styling is variant-based, not free className passthrough (issue #78). */
@@ -23,7 +32,11 @@ interface SizeFieldProps {
    *  (or the full XS–L list, if `options` is omitted) instead of committing it. */
   strict?: boolean;
   onInvalid?: (code: string) => void;
-  /** See CodePickerField's own doc — applies the app-wide red-wash treatment. */
+  /** See `useCodePickerField`'s own doc — fires reactively on the field's own computed
+   *  validity, independent of `strict` (Feature 10). */
+  onValidityChange?: (invalid: boolean) => void;
+  /** See CodePickerField's own doc — forces the wash on top of the field's own internal
+   *  value-vs-options check; not needed for the ordinary case (Feature 10). */
   invalid?: boolean;
 }
 
@@ -44,13 +57,24 @@ function isCompleteSingleLetterSize(v: string): boolean {
  * context (e.g. an aisle + Storage Code already entered), or the full list otherwise — Size
  * has no lookup table to fetch from, so the un-narrowed case is just this static list.
  */
-export const SizeField = forwardRef<CodePickerFieldHandle, SizeFieldProps>(function SizeField({ value, onChange, options, size = 'default', width, label = 'Size', ariaLabel, disabled = false, strict = false, onInvalid, invalid = false }, ref) {
+export const SizeField = forwardRef<CodePickerFieldHandle, SizeFieldProps>(function SizeField({ value, onChange, aisle, storageCode, options, size = 'default', width, label = 'Size', ariaLabel, disabled = false, strict = false, onInvalid, onValidityChange, invalid = false }, ref) {
+  // Always called (Rules of Hooks) — internally no-ops (returns null) while `aisle` is
+  // null/omitted.
+  const aisleTypes = useAisleFreightTypes(aisle ?? null);
+
+  const narrowedByAisle = aisle != null && aisleTypes
+    ? aisleTypes.sizesFor(storageCode || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
+    : undefined;
+  const resolvedOptions = options ?? narrowedByAisle ?? FULL_SIZE_OPTIONS;
+  const optionsLoading = !options && aisle != null && aisleTypes === null;
+
   return (
     <CodePickerField
       ref={ref}
       value={value}
       onChange={onChange}
-      options={options ?? FULL_SIZE_OPTIONS}
+      options={resolvedOptions}
+      optionsLoading={optionsLoading}
       panel="keyboard"
       maxLength={2}
       earlyCommit={isCompleteSingleLetterSize}
@@ -62,6 +86,7 @@ export const SizeField = forwardRef<CodePickerFieldHandle, SizeFieldProps>(funct
       disabled={disabled}
       strict={strict}
       onInvalid={onInvalid}
+      onValidityChange={onValidityChange}
       invalid={invalid}
     />
   );

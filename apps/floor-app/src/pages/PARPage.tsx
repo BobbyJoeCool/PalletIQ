@@ -18,17 +18,11 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { INVALID_WASH } from '../lib/invalidWash';
+import { useDpciFields } from '../lib/useDpciFields';
+import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
-
-/** Splits a formatted "078-01-0004" DPCI string into its 3 parts, for `.set()`-ing the
- *  Dept/Class/Item numpad fields directly (demo fills, ?dpci= pre-population). PAR uses
- *  its own numpad-driven Dept/Class/Item chain (v1.6.11, direct instruction — this whole
- *  screen stays numpad-driven, unlike the shared `DpciField`'s plain-native-input design
- *  built for infrequent admin edits) rather than the shared `DpciField` component. */
-function splitDpciString(s: string): { dept: string; class: string; item: string } {
-  const [dept, cls, item] = s.split('-');
-  return { dept: dept ?? '', class: cls ?? '', item: item ?? '' };
-}
+import { useUpcField } from '../lib/useUpcField';
+import { checkSspCap, checkVcpSspRatio } from '../lib/vcpSspValidation';
 
 type Mode = 'single' | 'multiple';
 
@@ -205,6 +199,11 @@ export function PARPage() {
   // statically, in place of a plain forward reference it can't.
   const focusVcpRef = useRef(() => {});
   const focusCartonsRef = useRef(() => {});
+  // Same forward-reference need as focusVcpRef/focusCartonsRef above: dpciFields'
+  // onBeforeResolve (declared before upcFields) clears the UPC field on a DPCI entry, but
+  // upcFields doesn't exist yet at that point — see the useEffect near upcFields' own
+  // declaration that keeps this current.
+  const clearUpcFieldRef = useRef(() => {});
 
   // ── Row 1: DPCI / UPC / Description (Expiration Date state lives here too,
   // rendered just before Location further down) ─────────────────────
@@ -224,10 +223,6 @@ export function PARPage() {
   // stale/empty ref instead of what's actually on screen. Reading `.value` directly is
   // always correct by construction — whatever's displayed is exactly what gets looked up,
   // regardless of how it got there.
-  const deptField = useNumpadField('numpad', 3, true);
-  const classField = useNumpadField('numpad', 2, true);
-  const itemField = useNumpadField('numpad', 4, true);
-  const upcField = useNumpadField('numpad');
 
   // Printer preview — typeable (direct instruction: "selectable and typeable but the
   // dropdown be disabled... calls the Keyboard"), unlike every other field on this screen
@@ -250,223 +245,83 @@ export function PARPage() {
   // PARContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern, scoped to
   // just the resolved item (not the whole multi-step create form).
   const { item, setItem } = usePAR();
-  const [dpciInvalid, setDpciInvalid] = useState(false);
-  const [upcInvalid, setUpcInvalid] = useState(false);
   const [expirationDate, setExpirationDate] = useState(''); // ISO YYYY-MM-DD, or ''
   const [expirationInvalid, setExpirationInvalid] = useState(false);
   const [expirationConfirmPending, setExpirationConfirmPending] = useState(false);
 
-  const dpciDigits = `${deptField.value}${classField.value}${itemField.value}`;
-
-  /** Looks up the item by DPCI, populating Description/Expiration-required state, and
-   *  clears the UPC field (v1.6.11 revised, direct instruction — "if the DPCI is entered,
-   *  it should clear the UPC field," matching IID's own `loadByDpci`). Asymmetric with the
-   *  reverse direction: resolving via UPC still populates the DPCI boxes (see loadByUpc),
-   *  but DPCI is the anchor identifier everywhere else in the app, so entering one directly
-   *  supersedes whatever was in UPC rather than leaving a now-mismatched value visible. */
-  const loadByDpci = useCallback(async (digits: string) => {
-    upcField.clear();
-    setUpcInvalid(false);
-    try {
-      const data = await apiFetch<PARItemLookup>(`/api/items/dpci/${digits}`, token!);
+  /** DPCI entry chain (issue #159, shared with IID/ISI/PII's Edit mode) — looks up the
+   *  item, populating Description/Expiration-required state, and clears the UPC field
+   *  (v1.6.11 revised, direct instruction — "if the DPCI is entered, it should clear the
+   *  UPC field"). Asymmetric with the reverse direction: resolving via UPC still populates
+   *  the DPCI boxes (see upcFields below), but DPCI is the anchor identifier everywhere else
+   *  in the app, so entering one directly supersedes whatever was in UPC rather than leaving
+   *  a now-mismatched value visible. */
+  const dpciFields = useDpciFields<PARItemLookup>({
+    fetch: useCallback((digits) => apiFetch<PARItemLookup>(`/api/items/dpci/${digits}`, token!), [token]),
+    onBeforeResolve: useCallback(() => {
+      resetToNumpad();
+      clearUpcFieldRef.current();
+    }, [resetToNumpad]),
+    onResolved: useCallback((data) => {
       setItem(data);
-      setDpciInvalid(false);
       clearMessage(); // issue #95 — clears a stale error from a prior failed attempt
       // Screen-wide auto-advance (v1.6.11, direct instruction): "after entering the DPCI
       // or UPC, the VCP box should focus." Via focusVcpRef, not focusVcp directly — see
       // that ref's own declaration comment (near the top of the component) for why.
       focusVcpRef.current();
-    } catch {
+    }, [setItem, clearMessage]),
+    onNotFound: useCallback(() => {
       playAlert('error');
       setMessage({ type: 'error', text: 'DPCI not found' });
       setItem(null);
-      setDpciInvalid(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+    }, [setMessage, setItem]),
+  });
+  const { deptField, classField, itemField, dpciInvalid, focusDeptField, focusClassField, focusItemField } = dpciFields;
+  const dpciDigits = `${deptField.value}${classField.value}${itemField.value}`;
 
-  /** Registers the Dept field's numpad handler, wired to handleDeptConfirm on confirm. */
-  function focusDeptField() { deptField.focus(handleDeptConfirm); }
-  /** Registers the Class field's numpad handler, wired to handleClassConfirm on confirm. */
-  function focusClassField() { classField.focus(handleClassConfirm); }
-  /** Registers the Item field's numpad handler, wired to handleItemConfirm on confirm. */
-  function focusItemField() { itemField.focus(handleItemConfirm); }
-
-  /** Dept field submit: advances to Class once exactly 3 digits are entered. */
-  function handleDeptConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 3) return;
-    setTimeout(() => focusClassField(), 50);
-  }
-  /** Class field submit: advances to Item once exactly 2 digits are entered. */
-  function handleClassConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 2) return;
-    setTimeout(() => focusItemField(), 50);
-  }
-  /** Item field submit: once exactly 4 digits are entered, resolves the full DPCI lookup
-   *  directly (IID's own pattern) rather than a separate "watch for 9 complete digits"
-   *  effect — the chain's own completion is the one moment that matters. Reads
-   *  deptField.value/classField.value directly rather than refs — see this chain's own
-   *  declaration comment above for why. */
-  function handleItemConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 4) return;
-    resetToNumpad();
-    void loadByDpci(`${deptField.value}${classField.value}${v}`);
-  }
-
-  /** Looks up the item by UPC; on success also populates the DPCI boxes (the confirmed
-   *  asymmetric behavior — UPC never gets populated back, DPCI always does). */
-  const loadByUpc = useCallback(async (v: string) => {
-    const trimmed = v.trim();
-    if (!trimmed) return;
-    resetToNumpad();
-    try {
-      const data = await apiFetch<PARItemLookup>(`/api/items/upc/${encodeURIComponent(trimmed)}`, token!);
+  /** UPC entry field (issue #160, shared with IID/ISI) — looks up the item, also
+   *  populating the DPCI boxes on success (the confirmed asymmetric behavior — UPC never
+   *  gets populated back, DPCI always does, so this doesn't clear DPCI on begin the way
+   *  dpciFields.onBeforeResolve clears UPC). */
+  const upcFields = useUpcField<PARItemLookup>({
+    fetch: useCallback((upc) => apiFetch<PARItemLookup>(`/api/items/upc/${encodeURIComponent(upc)}`, token!), [token]),
+    onBeforeResolve: useCallback(() => {
+      resetToNumpad();
+    }, [resetToNumpad]),
+    onResolved: useCallback((data) => {
       setItem(data);
-      setUpcInvalid(false);
-      const parsed = splitDpciString(data.dpci);
-      deptField.set(parsed.dept);
-      classField.set(parsed.class);
-      itemField.set(parsed.item);
-      setDpciInvalid(false);
+      dpciFields.setFromDpci(data.dpci);
       clearMessage(); // issue #95 — clears a stale error from a prior failed attempt
       focusVcpRef.current();
-    } catch {
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [setItem, clearMessage]),
+    onNotFound: useCallback(() => {
       playAlert('error');
       setMessage({ type: 'error', text: 'UPC not found' });
-      setUpcInvalid(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, resetToNumpad]);
+    }, [setMessage]),
+  });
+  useEffect(() => { clearUpcFieldRef.current = upcFields.clear; });
 
-  const focusUpcField = useCallback(() => upcField.focus(loadByUpc), [upcField, loadByUpc]);
-
-  // ── Expiration Date — numpad-driven Month/Day/Year chain (v1.6.11 — restored as 3
-  // separate boxes, matching the native date input this replaced, direct instruction:
-  // "split the expiration date into day month year just like it was before, but keep the
-  // keypad call"). Same Dept/Class/Item chain shape DPCI itself uses. Month/Day use
-  // padOnSubmit (typing "5" and confirming becomes "05" — a real, sensible date value,
-  // unlike the old single 8-digit field where a partial value couldn't be safely padded
-  // without guessing which digits were month vs. day). Year has no padOnSubmit — a
-  // partial year has no sensible padded meaning — so an early/explicit Enter with fewer
-  // than 4 digits just fails the length check in handleYearConfirm and drops silently.
-  const monthField = useNumpadField('numpad', 2, true);
-  const dayField = useNumpadField('numpad', 2, true);
-  const yearField = useNumpadField('numpad', 4);
-  const [monthInvalid, setMonthInvalid] = useState(false);
-  const [dayInvalid, setDayInvalid] = useState(false);
-  // Live-value mirrors — same stale-closure hazard as vcpValueRef/sspValueRef above:
-  // handleDayConfirm/handleYearConfirm are registered via a chain frozen at whenever Month
-  // was first tapped (before any of Month/Day/Year had values), so their own reads of
-  // monthField.value/dayField.value never see later updates. This was the actual cause of
-  // a direct report: entering 10/24/2027 and hitting Create Pallet submitted "//2027" —
-  // Month and Day were both read stale (empty) inside handleYearConfirm's ISO composition.
-  const monthValueRef = useRef('');
-  const dayValueRef = useRef('');
-
-  /** Days in a given month, 1-indexed (`month`: 1=Jan…12=Dec). `year` is optional and only
-   *  affects February: omitted (Month/Day are validated against each other before Year is
-   *  even typed, in this chain's order), February is treated permissively as 29 days, so a
-   *  leap-only Feb 29 isn't flagged wrong before the year is known; once Year lands,
-   *  `handleYearConfirm` re-checks Day with the real year for the precise leap/non-leap
-   *  answer. Returns `31` for an out-of-range month (1-12 range itself is `monthInvalid`'s
-   *  own separate check, not this function's job). */
-  function daysInMonth(month: number, year?: number): number {
-    if (month === 2) {
-      if (year == null) return 29;
-      const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-      return isLeap ? 29 : 28;
-    }
-    const table = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    return table[month - 1] ?? 31;
-  }
-
-  /** Client-side mirror of the server's Expiration Date rule — checked live once the
-   *  chain completes, so an obviously-bad date highlights before Create Pallet is even
-   *  attempted. The server remains authoritative (including the 1-3-month confirm step,
-   *  which can only really be driven by the actual submit attempt). Only meaningful once
-   *  Month/Day are themselves in range — handleYearConfirm only calls this when they are,
-   *  since composing an ISO string from an out-of-range month/day and parsing it with
-   *  `Date` would silently roll over to a misleading different date instead of erroring. */
-  function checkExpirationDate(value: string) {
-    if (!value) {
-      setExpirationInvalid(false);
-      return;
-    }
-    const parsed = new Date(value);
-    const oneMonthOut = new Date();
-    oneMonthOut.setMonth(oneMonthOut.getMonth() + 1);
-    setExpirationInvalid(parsed < oneMonthOut);
-  }
-
-  /** Registers the Month field's numpad handler, wired to handleMonthConfirm on confirm. */
-  function focusMonthField() { monthField.focus(handleMonthConfirm); }
-  /** Registers the Day field's numpad handler, wired to handleDayConfirm on confirm. */
-  function focusDayField() { dayField.focus(handleDayConfirm); }
-  /** Registers the Year field's numpad handler, wired to handleYearConfirm on confirm. */
-  function focusYearField() { yearField.focus(handleYearConfirm); }
-
-  /** Month field submit: validates the 1-12 range (direct instruction — "I can put 24 in
-   *  the month, we should validate the month to be only 1-12") and advances to Day once
-   *  exactly 2 digits are entered, regardless of whether the value itself was in range —
-   *  same "length drives advance, correctness is checked separately" convention the DPCI
-   *  chain uses. Writes monthValueRef (not just monthField.value) — unlike the DPCI chain,
-   *  Month/Day/Year have no other value-setting path (no demo prefill, no URL param) for a
-   *  ref to ever go stale against, so the DPCI chain's reasoning for reading `.value`
-   *  directly doesn't apply here; a ref is what actually fixes the bug this chain had
-   *  (see monthValueRef/dayValueRef's own declaration comment). */
-  function handleMonthConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 2) return;
-    monthValueRef.current = v;
-    const n = parseInt(v, 10);
-    setMonthInvalid(n < 1 || n > 12);
-    setTimeout(() => focusDayField(), 50);
-  }
-  /** Day field submit: validates the day actually exists in the entered month (direct
-   *  instruction — "validate the day exists in the month (if entered)"), skipped if Month
-   *  itself is already out of range (nothing meaningful to validate Day against). Advances
-   *  to Year regardless, same convention as Month. */
-  function handleDayConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 2) return;
-    dayValueRef.current = v;
-    const monthNum = parseInt(monthValueRef.current, 10);
-    const dayNum = parseInt(v, 10);
-    const monthOk = monthNum >= 1 && monthNum <= 12;
-    setDayInvalid(monthOk && (dayNum < 1 || dayNum > daysInMonth(monthNum)));
-    setTimeout(() => focusYearField(), 50);
-  }
-  /** Year field submit: once exactly 4 digits are entered, re-checks Day against the real
-   *  year (leap-year precision for a Feb 29 entered before Year was known), then combines
-   *  Month+Day+Year into the ISO value this screen stores/submits — only running the
-   *  server-mirroring "too soon" check when Month/Day are themselves valid, since an
-   *  out-of-range value composed into an ISO string and parsed by `Date` would silently
-   *  roll over to a different, misleading date rather than erroring. */
-  function handleYearConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 4) return;
-    resetToNumpad();
-    const monthNum = parseInt(monthValueRef.current, 10);
-    const dayNum = parseInt(dayValueRef.current, 10);
-    const yearNum = parseInt(v, 10);
-    const monthOk = monthNum >= 1 && monthNum <= 12;
-    const dayOk = monthOk && dayNum >= 1 && dayNum <= daysInMonth(monthNum, yearNum);
-    setDayInvalid(monthOk && !dayOk);
-    const iso = `${v}-${monthValueRef.current}-${dayValueRef.current}`;
-    setExpirationDate(iso);
-    if (monthOk && dayOk) {
-      checkExpirationDate(iso);
-    } else {
-      setExpirationInvalid(false);
-    }
-    // Screen-wide auto-advance (v1.6.11, direct instruction) — Year is the terminal step
-    // of the "expiration required" branch, so it continues on to Location next, same as
-    // the "not required" branch does directly from SSPs (see handleSspsConfirm).
-    setTimeout(() => setLocationAutoFocus(true), 50);
-  }
+  // Expiration Date — shared Month/Day/Year chain (Feature 10 / issue #163, extracted
+  // from PAR's own original implementation, which is now the canonical one PII also uses)
+  // — see useExpirationDateFields.ts's own doc for why (a real, direct bug report about
+  // stale Month/Day values). `checkTooSoon` restores PAR's own additional client-side
+  // "at least 1 month out" pre-check (PII intentionally omits this, relying on the
+  // server's confirm-popup round trip instead). `onComplete` restores PAR's own
+  // screen-wide auto-advance to Location once Year commits.
+  const expirationFields = useExpirationDateFields({
+    onChange: setExpirationDate,
+    checkTooSoon: true,
+    onTooSoonChange: setExpirationInvalid,
+    onComplete: () => {
+      resetToNumpad();
+      setTimeout(() => setLocationAutoFocus(true), 50);
+    },
+  });
+  const {
+    monthField, dayField, yearField, monthInvalid, dayInvalid,
+    focusMonthField, focusDayField, focusYearField,
+  } = expirationFields;
 
   // ── Row 2: VCP / SSP ────────────────────────────────────────────────────────
   const vcpField = useNumpadField();
@@ -494,18 +349,15 @@ export function PARPage() {
 
   const vcpNum = vcpField.value ? parseInt(vcpField.value, 10) : NaN;
   const sspNum = sspField.value ? parseInt(sspField.value, 10) : NaN;
-  const sspPerCarton = Number.isInteger(vcpNum) && Number.isInteger(sspNum) && sspNum > 0 && vcpNum % sspNum === 0
-    ? vcpNum / sspNum
-    : null;
+  const sspPerCarton = checkVcpSspRatio(vcpField.value, sspField.value).sspPerCarton;
 
-  /** Checked whenever VCP or SSP commits — SSP must evenly divide VCP, same rule PII enforces. */
-  const checkVcpSsp = useCallback((vcp: string, ssp: string) => {
-    const v = vcp ? parseInt(vcp, 10) : NaN;
-    const s = ssp ? parseInt(ssp, 10) : NaN;
-    if (!Number.isInteger(v) || !Number.isInteger(s)) { setVcpSspInvalid(false); return; }
-    const bad = s <= 0 || v % s !== 0;
-    setVcpSspInvalid(bad);
-    if (bad) setMessage({ type: 'error', text: 'SSP must divide evenly into VCP' });
+  /** Checked whenever VCP or SSP commits — SSP must evenly divide VCP (Feature 10, issue
+   *  #164 — shared rule with PII, via `checkVcpSspRatio`). This wrapper just owns PAR's
+   *  own state/message-bar side effects around that shared pure check. */
+  const runVcpSspCheck = useCallback((vcp: string, ssp: string) => {
+    const { ratioInvalid } = checkVcpSspRatio(vcp, ssp);
+    setVcpSspInvalid(ratioInvalid);
+    if (ratioInvalid) setMessage({ type: 'error', text: 'SSP must divide evenly into VCP' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -515,7 +367,7 @@ export function PARPage() {
     const v = value.trim();
     vcpField.set(v);
     vcpValueRef.current = v;
-    checkVcpSsp(v, sspValueRef.current);
+    runVcpSspCheck(v, sspValueRef.current);
     setTimeout(() => focusSsp(), 50);
   }
   /** SSP field submit: checks the ratio and advances to Size — Single Pallet mode only
@@ -530,7 +382,7 @@ export function PARPage() {
     const v = value.trim();
     sspField.set(v);
     sspValueRef.current = v;
-    checkVcpSsp(vcpValueRef.current, v);
+    runVcpSspCheck(vcpValueRef.current, v);
     if (mode === 'single') {
       if (location) setTimeout(() => focusCartonsRef.current(), 50);
       else setTimeout(() => sizeFieldRef.current?.focus(), 50);
@@ -548,8 +400,8 @@ export function PARPage() {
   function focusVcp() { vcpField.focus(handleVcpConfirm); }
   /** Registers the SSP field's numpad handler, wired to handleSspConfirm on confirm. */
   function focusSsp() { sspField.focus(handleSspConfirm); }
-  // Keeps focusVcpRef current for loadByDpci/loadByUpc (declared above) to call — see
-  // that ref's own declaration comment.
+  // Keeps focusVcpRef current for dpciFields'/upcFields' own onResolved (declared above)
+  // to call — see that ref's own declaration comment.
   useEffect(() => { focusVcpRef.current = focusVcp; });
 
   // ── Row 3: Unit Entry (Single / Multiple Pallet) ────────────────────────────
@@ -568,11 +420,10 @@ export function PARPage() {
   const [partialSspsInvalid, setPartialSspsInvalid] = useState(false);
 
   /** Checked whenever a loose-SSPs field commits — must stay below one full carton's
-   *  worth (vcp/ssp), same rule PII enforces on currentSSPs. */
-  const checkSspCap = useCallback((looseSSPsStr: string, setInvalid: (b: boolean) => void) => {
-    const loose = looseSSPsStr ? parseInt(looseSSPsStr, 10) : 0;
-    if (sspPerCarton == null || !Number.isInteger(loose)) { setInvalid(false); return; }
-    const bad = loose >= sspPerCarton;
+   *  worth (Feature 10, issue #164 — shared rule with PII, via `checkSspCap`). This
+   *  wrapper just owns PAR's own state/message-bar side effects. */
+  const runSspCapCheck = useCallback((looseSSPsStr: string, setInvalid: (b: boolean) => void) => {
+    const bad = checkSspCap(sspPerCarton, looseSSPsStr);
     setInvalid(bad);
     if (bad) setMessage({ type: 'error', text: `SSPs must be less than a full carton (${sspPerCarton} per carton)` });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -593,7 +444,7 @@ export function PARPage() {
   function handleSspsConfirm(value: string) {
     const v = value.trim();
     sspsField.set(v);
-    checkSspCap(v, setSspsInvalid);
+    runSspCapCheck(v, setSspsInvalid);
     if (item?.requiresExpirationDate) {
       setTimeout(() => focusMonthField(), 50);
     } else {
@@ -612,7 +463,7 @@ export function PARPage() {
   const focusFullPallets = useCallback(() => fullPalletsField.focus((v) => { fullPalletsField.set(v.trim()); resetToNumpad(); }), [fullPalletsField, resetToNumpad]);
   const focusCartonsPerPallet = useCallback(() => cartonsPerPalletField.focus((v) => { cartonsPerPalletField.set(v.trim()); resetToNumpad(); }), [cartonsPerPalletField, resetToNumpad]);
   const focusPartialCartons = useCallback(() => partialCartonsField.focus((v) => { partialCartonsField.set(v.trim()); resetToNumpad(); }), [partialCartonsField, resetToNumpad]);
-  const focusPartialSsps = useCallback(() => partialSspsField.focus((v) => { partialSspsField.set(v.trim()); resetToNumpad(); checkSspCap(v.trim(), setPartialSspsInvalid); }), [partialSspsField, resetToNumpad, checkSspCap]);
+  const focusPartialSsps = useCallback(() => partialSspsField.focus((v) => { partialSspsField.set(v.trim()); resetToNumpad(); runSspCapCheck(v.trim(), setPartialSspsInvalid); }), [partialSspsField, resetToNumpad, runSspCapCheck]);
 
   // ── Row 4: Summary (derived, read-only) ─────────────────────────────────────
   const cartonsNum = cartonsField.value ? parseInt(cartonsField.value, 10) : 0;
@@ -629,15 +480,21 @@ export function PARPage() {
   // ── Row 5: Location (Single Pallet mode only) ───────────────────────────────
   const [location, setLocation] = useState('');
   // locationInvalid means "Level doesn't exist within this Aisle+Bin" specifically (the
-  // full 3-box resolution) — passed to LocationEntryFields' levelInvalid prop below.
-  // aisleInvalid/binInvalid (v1.6.11, new) are each box's own progressive existence check,
-  // fired the moment that box completes rather than waiting for the whole chain — direct
-  // instruction: "When Aisle is entered, should validate the Aisle exists, and Bin should
-  // validate the Bin exists within the aisle (if entered) and Level should validate the
-  // level exists in the Aisle/Bin (if selected)... if a single box is invalid, it should
-  // be highlighted." Each box washes independently now (no more whole-group wash, which
-  // also fixes the group wash extending past the last box — nothing to extend once the
-  // wash lives on each box instead of a wrapper around all three).
+  // full 3-box resolution, still owned here — see checkLocation below) — passed to
+  // LocationEntryFields' levelInvalid prop below. aisleInvalid/binInvalid (v1.6.11; moved
+  // into LocationEntryFields' own internal ownership by issue #162) are each box's own
+  // progressive existence check, fired the moment that box completes rather than waiting
+  // for the whole chain — direct instruction: "When Aisle is entered, should validate the
+  // Aisle exists, and Bin should validate the Bin exists within the aisle (if entered)...
+  // if a single box is invalid, it should be highlighted." The checks themselves now run
+  // inside LocationEntryFields (via its `checkAisle`/`checkAisleBin` props below); these
+  // two states are just this screen's own mirror of that internal result (via
+  // `onAisleValidityChange`/`onBinValidityChange`), needed for `checkLocation`'s guard and
+  // the render wash below — the same "component owns the check, screen mirrors the
+  // boolean for its own side effects" shape `useCodePickerField`'s `onValidityChange`
+  // already established. Each box washes independently (no whole-group wash, which also
+  // fixes the group wash extending past the last box — nothing to extend once the wash
+  // lives on each box instead of a wrapper around all three).
   const [locationInvalid, setLocationInvalid] = useState(false);
   const [aisleInvalid, setAisleInvalid] = useState(false);
   const [binInvalid, setBinInvalid] = useState(false);
@@ -657,9 +514,11 @@ export function PARPage() {
    *  three Location boxes are complete, mirroring DPCI's own existence-check effect
    *  rather than waiting until submit. Occupied/held/contracted locations are not
    *  rejected outright (see below) — only "not found" blocks Create Pallet. Skipped
-   *  entirely when Aisle or Bin is already known invalid — Level "not existing" in an
-   *  Aisle/Bin that itself doesn't exist isn't a separate, independently-wrong fact, and
-   *  only the top-level field actually at fault should wash (direct instruction). */
+   *  entirely when Aisle or Bin is already known invalid (via `LocationEntryFields`' own
+   *  internal check, issue #162 — mirrored into `aisleInvalid`/`binInvalid` below through
+   *  its `onAisleValidityChange`/`onBinValidityChange` callbacks) — Level "not existing"
+   *  in an Aisle/Bin that itself doesn't exist isn't a separate, independently-wrong fact,
+   *  and only the top-level field actually at fault should wash (direct instruction). */
   const checkLocation = useCallback(async (id: string) => {
     if (aisleInvalid || binInvalid) return;
     try {
@@ -675,55 +534,23 @@ export function PARPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, aisleInvalid, binInvalid]);
 
-  /** Aisle box's own progressive check (v1.6.11) — fires the moment Aisle completes, before
-   *  Bin is even typed. A stale Bin/Level result from a previously-entered, now-replaced
-   *  Aisle is cleared, since it no longer means anything against the new Aisle. */
-  const checkAisleExists = useCallback(async (aisle: string) => {
-    setBinInvalid(false);
-    try {
-      const { exists } = await apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!);
-      setAisleInvalid(!exists);
-    } catch {
-      setAisleInvalid(true);
-    }
-  }, [token]);
-
-  /** Bin box's own progressive check (v1.6.11) — fires the moment Bin completes, reusing
-   *  `getLocation`'s existing 6-digit (Aisle+Bin, level-agnostic) lookup rather than a new
-   *  endpoint, since that's already exactly "does this Aisle+Bin combination exist." Skipped
-   *  entirely when Aisle is already known invalid — Bin can't meaningfully exist or not
-   *  exist within an Aisle that itself doesn't, and only the top-level field actually at
-   *  fault (Aisle) should wash, not every downstream box too (direct instruction). */
-  const checkAisleBinExists = useCallback(async (aisle: string, bin: string) => {
-    if (aisleInvalid) return;
-    try {
-      await apiFetch(`/api/locations/${aisle}${bin}`, token!);
-      setBinInvalid(false);
-    } catch {
-      setBinInvalid(true);
-    }
-  }, [token, aisleInvalid]);
-
-  /** `isOverride` is true for a value that bypassed the normal per-box typed sequence — a
-   *  full-barcode scan (LocationEntryFields' own `wasScanned`) or a demo-picker prefill
-   *  (`pickLocation` passes `true` explicitly, same reasoning) — in which case Aisle/Bin's
-   *  own progressive checks never ran, so any invalid state left over from a previous
-   *  manual entry attempt needs clearing; a normal in-sequence chain completion
-   *  (`wasScanned: false`) already has accurate per-box state from onAisleEntered/
-   *  onBinEntered as typing happened, so leaves it alone. */
-  const handleLocationResolved = useCallback((v: string, isOverride = false) => {
+  const handleLocationResolved = useCallback((v: string) => {
     setLocation(v);
     setLocationStatusConfirmed(false);
-    if (isOverride) {
-      setAisleInvalid(false);
-      setBinInvalid(false);
-    }
     void checkLocation(v);
     // LocationEntryFields calls its own hidePanel() once the third box resolves — reopen
     // the numpad right after so it stays visible per this screen's persistent-panel rule,
     // without needing to modify that shared component.
     showNumpad();
   }, [checkLocation, showNumpad]);
+
+  /** Aisle box's own progressive check (v1.6.11), now owned by LocationEntryFields itself
+   *  (issue #162) — this screen just supplies the fetch. */
+  const checkAisle = useCallback((aisle: string) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]);
+  /** Bin box's own progressive check (v1.6.11), reusing `getLocation`'s existing 6-digit
+   *  (Aisle+Bin, level-agnostic) lookup — same reasoning as before, now owned by
+   *  LocationEntryFields itself (issue #162). */
+  const checkAisleBin = useCallback((aisle: string, bin: string) => apiFetch(`/api/locations/${aisle}${bin}`, token!), [token]);
 
   // Occupied (status !== EMPTY), on hold, or contracted — the pallet being reinstated is
   // very likely physically sitting here already, so this warns-then-allows rather than
@@ -839,22 +666,12 @@ export function PARPage() {
 
   /** Resets every field to a blank form after a successful create. */
   function clearForm() {
-    deptField.clear();
-    classField.clear();
-    itemField.clear();
-    upcField.clear();
+    dpciFields.clear();
+    upcFields.clear();
     setItem(null);
-    setDpciInvalid(false);
-    setUpcInvalid(false);
     setExpirationDate('');
     setExpirationInvalid(false);
-    monthField.clear();
-    dayField.clear();
-    yearField.clear();
-    monthValueRef.current = '';
-    dayValueRef.current = '';
-    setMonthInvalid(false);
-    setDayInvalid(false);
+    expirationFields.clear();
     vcpField.clear();
     sspField.clear();
     vcpValueRef.current = '';
@@ -901,8 +718,8 @@ export function PARPage() {
         body.partialCartons = partialCartonsNum;
         body.partialSsps = partialSspsNum;
       }
-      if (dpciDigits.length === 9 && !upcInvalid) body.dpci = dpciDigits;
-      else if (upcField.value) body.upc = upcField.value;
+      if (dpciDigits.length === 9 && !upcFields.upcInvalid) body.dpci = dpciDigits;
+      else if (upcFields.field.value) body.upc = upcFields.field.value;
       else body.dpci = dpciDigits;
 
       const result = await apiFetch<ReinstateResult>('/api/pallets/reinstate', token!, {
@@ -949,10 +766,10 @@ export function PARPage() {
       playAlert('error');
       setConfirming(false);
       if (code === 'DPCI_NOT_FOUND') {
-        setDpciInvalid(true);
+        dpciFields.markInvalid();
         setMessage({ type: 'error', text: 'DPCI not found' });
       } else if (code === 'UPC_NOT_FOUND') {
-        setUpcInvalid(true);
+        upcFields.markInvalid();
         setMessage({ type: 'error', text: 'UPC not found' });
       } else if (code === 'LOCATION_NOT_FOUND') {
         setLocationInvalid(true);
@@ -1020,38 +837,29 @@ export function PARPage() {
   const pickDpci = useCallback(async (key: IdentifierDemoKey) => {
     setDpciPickerOpen(false);
     if (key === 'invalid') {
-      deptField.set('999');
-      classField.set('99');
-      itemField.set('9000');
-      void loadByDpci('999999000');
+      dpciFields.loadDpci('999999000');
       return;
     }
     const requiresExpirationDate = key === 'validWithExpiration' ? true : key === 'validWithoutExpiration' ? false : undefined;
     const sample = await fillSample(requiresExpirationDate);
     if (!sample) return;
-    const parsed = splitDpciString(sample.dpci);
-    deptField.set(parsed.dept);
-    classField.set(parsed.class);
-    itemField.set(parsed.item);
-    void loadByDpci(sample.dpci.replace(/-/g, ''));
+    dpciFields.loadDpci(sample.dpci);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fillSample, loadByDpci]);
+  }, [fillSample]);
 
   /** UPC picker: same 4 options as the DPCI picker, filling the UPC field instead. */
   const pickUpc = useCallback(async (key: IdentifierDemoKey) => {
     setUpcPickerOpen(false);
     if (key === 'invalid') {
-      upcField.set('999999999999');
-      void loadByUpc('999999999999');
+      upcFields.loadUpc('999999999999');
       return;
     }
     const requiresExpirationDate = key === 'validWithExpiration' ? true : key === 'validWithoutExpiration' ? false : undefined;
     const sample = await fillSample(requiresExpirationDate);
     if (!sample) return;
-    upcField.set(sample.upc);
-    void loadByUpc(sample.upc);
+    upcFields.loadUpc(sample.upc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fillSample, loadByUpc]);
+  }, [fillSample]);
 
   /** Location picker: fills the Location field with a real location matching the picked
    *  status (or a nonexistent one for "Invalid") — same as scanning/typing one in, nothing
@@ -1063,7 +871,7 @@ export function PARPage() {
   const pickLocation = useCallback(async (key: 'empty' | 'occupied' | 'invalid' | 'held' | 'contracted' | 'wrongType') => {
     setLocationPickerOpen(false);
     if (key === 'invalid') {
-      handleLocationResolved('99999999', true);
+      handleLocationResolved('99999999');
       return;
     }
     if (!item) {
@@ -1073,7 +881,7 @@ export function PARPage() {
     try {
       const qs = `status=${key}&storageCode=${encodeURIComponent(item.storageCode)}`;
       const { locationId, level } = await apiFetch<{ locationId: string; level: number }>(`/api/demo/location?${qs}`, token!);
-      handleLocationResolved(locationId + String(level).padStart(2, '0'), true);
+      handleLocationResolved(locationId + String(level).padStart(2, '0'));
     } catch {
       setMessage({ type: 'error', text: 'Demo fill unavailable' });
     }
@@ -1099,10 +907,7 @@ export function PARPage() {
   const dpciParam = searchParams.get('dpci');
   useEffect(() => {
     if (!dpciParam) return;
-    const parsed = splitDpciString(dpciParam);
-    deptField.set(parsed.dept);
-    classField.set(parsed.class);
-    itemField.set(parsed.item);
+    dpciFields.setFromDpci(dpciParam);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dpciParam]);
 
@@ -1183,7 +988,7 @@ export function PARPage() {
         {/* Extra ml-8 beyond the row's own gap-4, direct instruction — DPCI and UPC read
             as two distinct entry methods, not one continuous group. */}
         <div className="ml-8">
-          <FieldBox label="UPC" value={upcField.value} onFocus={focusUpcField} active={upcField.isActive} invalid={upcInvalid} width="w-[261px]" />
+          <FieldBox label="UPC" value={upcFields.field.value} onFocus={upcFields.focusField} active={upcFields.field.isActive} invalid={upcFields.upcInvalid} width="w-[261px]" />
         </div>
       </div>
 
@@ -1362,8 +1167,9 @@ export function PARPage() {
           invalid, layering group + individual together rather than choosing one or the
           other: "the box holding the location entry fields should have the red error
           background as well as any field that doesn't exist... ONLY the top level field."
-          checkAisleBinExists/checkLocation are each guarded to skip entirely once a parent
-          box (Aisle, or Aisle+Bin) is already known invalid, so an Aisle that doesn't exist
+          LocationEntryFields' own internal checkAisleBin call (issue #162) and this
+          screen's checkLocation are each guarded to skip entirely once a parent box
+          (Aisle, or Aisle+Bin) is already known invalid, so an Aisle that doesn't exist
           washes only Aisle individually (plus the group) — Bin/Level never also wash just
           because their parent doesn't exist. Occupied/held/contracted don't block entry,
           just flag via the amber note below, since Create Pallet's own warn-then-allow
@@ -1392,10 +1198,10 @@ export function PARPage() {
               value={location}
               onResolved={handleLocationResolved}
               autoFocus={locationAutoFocus}
-              onAisleEntered={(aisle) => void checkAisleExists(aisle)}
-              onBinEntered={(aisle, bin) => void checkAisleBinExists(aisle, bin)}
-              aisleInvalid={aisleInvalid}
-              binInvalid={binInvalid}
+              checkAisle={checkAisle}
+              checkAisleBin={checkAisleBin}
+              onAisleValidityChange={setAisleInvalid}
+              onBinValidityChange={setBinInvalid}
               levelInvalid={locationInvalid}
             />
           </div>

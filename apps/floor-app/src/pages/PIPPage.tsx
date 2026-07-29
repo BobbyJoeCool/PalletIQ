@@ -5,6 +5,7 @@ import { Dropdown } from '../components/shared/Dropdown';
 import { HoldPanel } from '../components/shared/HoldPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { LiveId } from '../components/ui/LiveId';
 import { ModalOverlay } from '../components/ui/ModalOverlay';
@@ -278,7 +279,9 @@ export function PIPPage() {
   const [invalidLabelPickerOpen, setInvalidLabelPickerOpen] = useState(false);
 
   const labelField    = useNumpadField();
-  const pidField      = useNumpadField();
+  const pidFieldRef   = useRef<PalletIdFieldHandle>(null);
+  const [pidValue, setPidValue] = useState('');
+  const [pidActive, setPidActive] = useState(false);
   // Issue #82 — UPC and Location replace the old single Alternate ID field; each is
   // independently scannable/enterable (one-active-field-at-a-time, same as everywhere
   // else), and confirming either alone immediately attempts a verify with just that value.
@@ -328,7 +331,7 @@ export function PIPPage() {
     if (screenStateRef.current === 'verifying') {
       setMessage({ type: 'warning', text: 'Label not verified' });
       setLabelData(null);
-      pidField.clear();
+      setPidValue('');
       upcField.clear();
       resetLocationField(false);
     }
@@ -344,11 +347,11 @@ export function PIPPage() {
     labelField.focus(handleLabelScan);
   }, [labelField]);
 
-  /** Registers the Pallet ID field's numpad handler, wired to handlePidVerify on confirm. */
+  /** (Re-)focuses the Pallet ID field for another attempt. */
   const focusPidField = useCallback(() => {
     suppressAutoPidFocusRef.current = true;
-    pidField.focus(handlePidVerify);
-  }, [pidField]);
+    pidFieldRef.current?.focus();
+  }, []);
 
   /** Registers the UPC field's numpad handler, wired to handleUpcVerify on confirm. */
   const focusUpcField = useCallback(() => {
@@ -388,7 +391,7 @@ export function PIPPage() {
       // condition. Overwriting whatever's already showing (e.g. the previous pull's success
       // message) with a "Label not verified" warning on every plain rescan is what issue #45
       // actually reported; the fields still get cleared to make way for the new label's data.
-      pidField.clear();
+      setPidValue('');
       upcField.clear();
       resetLocationField(false);
     }
@@ -440,6 +443,7 @@ export function PIPPage() {
    */
   async function handlePidVerify(value: string) {
     const v = value.trim();
+    setPidValue(v);
     if (!v || loadingRef.current) return;
     const ld = labelDataRef.current;
     if (!ld) return;
@@ -458,8 +462,8 @@ export function PIPPage() {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
-      pidField.clear();
-      pidField.focus(handlePidVerify);
+      setPidValue('');
+      pidFieldRef.current?.focus();
       if (code === 'PALLET_MISMATCH') {
         setMessage({ type: 'error', text: 'Incorrect Pallet ID' });
       } else if (code === 'WRONG_PULL_FUNCTION') {
@@ -622,7 +626,7 @@ export function PIPPage() {
     setScreenState('ready');
     labelField.clear();
     setLabelInvalid(false);
-    pidField.clear();
+    setPidValue('');
     upcField.clear();
     resetLocationField(false);
     focusLabelField();
@@ -749,7 +753,7 @@ export function PIPPage() {
         <DemoBtn label="✗ Scan Label" color="red"   onClick={demoBadLabel} />
         <DemoBtn label="⚠ Invalid Label" color="amber" onClick={() => setInvalidLabelPickerOpen(true)} />
       </>
-    ) : pidField.isActive ? (
+    ) : pidActive ? (
       <>
         <DemoBtn label="✓ Scan PID" color="green" onClick={demoScanPid} />
         <DemoBtn label="✗ Scan PID" color="red"   onClick={demoBadPid} />
@@ -766,7 +770,7 @@ export function PIPPage() {
       </>
     ) : null
   ), [
-    labelField.isActive, pidField.isActive, upcField.isActive, locationActive,
+    labelField.isActive, pidActive, upcField.isActive, locationActive,
     demoScanLabel, demoBadLabel,
     demoScanPid, demoBadPid, demoScanUpc, demoBadUpc, demoScanLocation, demoBadLocation,
   ]);
@@ -857,11 +861,15 @@ export function PIPPage() {
                 </div>
 
                 <div className="flex flex-col gap-2 mt-1">
-                  <FieldDisplay
+                  <PalletIdField
+                    ref={pidFieldRef}
                     label="Pallet ID"
-                    value={pidField.value}
-                    onFocus={focusPidField}
-                    active={pidField.isActive}
+                    value={pidValue}
+                    onChange={handlePidVerify}
+                    boxClass="h-[72px] px-5 rounded-[12px]"
+                    valueClass="text-[32px] font-medium tracking-[0.04em]"
+                    caretClass="w-[3px] h-[38px]"
+                    onActiveChange={setPidActive}
                   />
                   {/* Issue #82 — UPC and Location, side by side, replacing the old combined
                       Alternate ID field. Each is independently scannable/enterable; confirming

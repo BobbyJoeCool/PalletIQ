@@ -11,6 +11,10 @@ interface CodePickerFieldProps {
    *  is already known (e.g. an aisle already entered) to know what's actually available,
    *  or the full reference list otherwise (issue #80). */
   options: CodeOption[];
+  /** See `useCodePickerField`'s own doc — the list `strict`/the reactive `invalid` state
+   *  actually check against, when it needs to differ from what's shown in the popup
+   *  (`options`). Defaults to `options` when omitted. */
+  validOptions?: CodeOption[];
   optionsLoading?: boolean;
   panel: 'keyboard' | 'numpad';
   /** Fixed entry length that auto-commits without an explicit OK tap (see useNumpadField's
@@ -47,9 +51,17 @@ interface CodePickerFieldProps {
   strict?: boolean;
   /** Required when `strict` is true — called with the rejected value in place of `onChange`. */
   onInvalid?: (code: string) => void;
-  /** Applies the app-wide red-wash treatment (see `src/lib/invalidWash.ts`) instead of the
-   *  plain active-only border — reserved for an actual validation failure the caller has
-   *  already determined, same precedence as PAR's `FieldBox` (invalid wins over active). */
+  /** See `useCodePickerField`'s own doc — fires reactively whenever the field's own
+   *  computed validity (current `value` vs. `options`) changes, independent of `strict`.
+   *  Lets a caller hook a side effect (message-bar text, `playAlert`) without owning the
+   *  check itself (Feature 10). */
+  onValidityChange?: (invalid: boolean) => void;
+  /** Forces the app-wide red-wash treatment on, on top of whatever the field's own
+   *  internal value-vs-options check already computes (see `useCodePickerField`) — the
+   *  two are OR'd together. Reserved for the genuine cross-cutting cases that aren't about
+   *  this field's own value in isolation (a form-level reset, a group-wash spanning
+   *  several boxes) per Feature 10; not needed for the ordinary "does my current value
+   *  match my own options" case, which the field already handles on its own. */
   invalid?: boolean;
 }
 
@@ -72,11 +84,12 @@ export interface CodePickerFieldHandle {
  * or full) and entry-field specifics (maxLength, uppercasing, styling).
  */
 export const CodePickerField = forwardRef<CodePickerFieldHandle, CodePickerFieldProps>(function CodePickerField({
-  value, onChange, options, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false, closeOnAutoSubmit = false, earlyCommit, strict = false, onInvalid, invalid = false,
+  value, onChange, options, validOptions, optionsLoading = false, panel, maxLength, transform, size = 'default', width, label, ariaLabel, disabled = false, closeOnAutoSubmit = false, earlyCommit, strict = false, onInvalid, onValidityChange, invalid: forcedInvalid = false,
 }, ref) {
-  const { field, open, setOpen, wrapperRef, focusField, selectOption } = useCodePickerField(value, onChange, options, {
-    panel, maxLength, transform, earlyCommit, disabled, strict, onInvalid, optionsLoading, closeOnAutoSubmit,
+  const { field, open, setOpen, wrapperRef, focusField, selectOption, invalid: computedInvalid } = useCodePickerField(value, onChange, options, {
+    panel, maxLength, transform, earlyCommit, disabled, strict, onInvalid, onValidityChange, optionsLoading, closeOnAutoSubmit, validOptions,
   });
+  const invalid = forcedInvalid || computedInvalid;
 
   useImperativeHandle(ref, () => ({ focus: focusField }));
 

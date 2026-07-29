@@ -4,6 +4,7 @@ import { DataRow } from '../components/shared/DataRow';
 import { DemoPicker } from '../components/shared/DemoPicker';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
@@ -19,10 +20,7 @@ import { type SDPDirectedResult, useSDP } from '../context/SDPContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
-import { SIZE_NAMES } from '../lib/sizes';
-import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
-import { useNumpadField } from '../lib/useNumpadField';
-import { useStorageCodes } from '../lib/useStorageCodes';
+import { useAisleField } from '../lib/useAisleField';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -186,6 +184,7 @@ export function SDPPage() {
   // failure clears the field atomically instead (see handleAisleConfirm), so it isn't washed
   // for the same reason PIP's PID/UPC/Location aren't.
   const [palletInvalid, setPalletInvalid] = useState(false);
+  const [palletIdValue, setPalletIdValue] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [confirmBlock, setConfirmBlock] = useState(false);
   // Demo-only "which invalid pallet" picker (shared DemoPicker component) — see
@@ -218,9 +217,29 @@ export function SDPPage() {
   loadingRef.current     = loading;
   directedRef.current    = directed;
 
-  // padOnSubmit: typing "5" and hitting OK is accepted as "005" (see LocationEntryFields).
-  const aisleField    = useNumpadField('numpad', 3, true);
-  const palletField   = useNumpadField();
+  const palletFieldRef = useRef<PalletIdFieldHandle>(null);
+  // Aisle entry field (issue #161) — existence check now owned internally (previously
+  // this screen's own `handleAisleConfirm`, reusing `GET /api/locations/empty-by-zone`
+  // purely for its NOT_FOUND side effect, discarding the actual zone-map payload; switched
+  // to the purpose-built `aisle-exists` endpoint, confirmed to check the identical
+  // condition server-side — see useAisleField's own doc). On success, advances to Pallet
+  // ID; on failure, clears and re-focuses for retry (this screen's own pre-existing
+  // behavior — Aisle is never washed here, matching PIP/PID's "clear rather than wash"
+  // convention, see the comment further down at handlePalletScan's own error path).
+  const aisleFields = useAisleField({
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    onResolved: useCallback(() => {
+      clearMessage();
+      setTimeout(() => palletFieldRef.current?.focus(), 50);
+    }, [clearMessage]),
+    onNotFound: useCallback((aisle) => {
+      playAlert('error');
+      aisleFields.clear();
+      aisleFields.focusField();
+      setMessage({ type: 'error', text: `Aisle ${aisle} does not exist` });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [setMessage]),
+  });
   // Bumped to remount (and thereby clear + re-autofocus) the Confirm Location
   // LocationEntryFields panel — matches PIP's resetLocationField pattern; the component
   // has no imperative clear method of its own, only the external `value`/`''` prefill
@@ -236,23 +255,16 @@ export function SDPPage() {
   // fix for the same race) closes the window instead of racing it.
   const [locationActive, setLocationActive] = useState(false);
 
-  // Narrows the Storage Code/Size override dropdown-helpers (issue #80) to what's actually
-  // present once an aisle is entered — Zone override never narrows (a straight 1-4
-  // dropdown, per the issue) and Aisle/Bin/Pallet ID aren't candidates for this treatment
-  // at all (too impractical as a list, per the issue's own scope note).
-  const aisleNum = parseInt(aisleField.value, 10);
-  const aisleTypes = useAisleFreightTypes(isNaN(aisleNum) ? null : aisleNum);
-  const fullStorageCodes = useStorageCodes();
-  const storageCodeOptions = aisleTypes && fullStorageCodes
-    ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
-    : undefined;
-  const sizeOptions = aisleTypes
-    ? aisleTypes.sizesFor(storageOverride || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
-    : undefined;
+  // StorageCodeField/SizeField now own their own aisle-narrowing internally (Feature 10)
+  // — passing `aisle` below is all that's needed. Zone override never narrows (a straight
+  // 1-4 dropdown, per issue #80) and Aisle/Bin/Pallet ID aren't candidates for this
+  // treatment at all (too impractical as a list, per the issue's own scope note).
+  const aisleNum = parseInt(aisleFields.field.value, 10);
+  const overrideAisle = isNaN(aisleNum) ? null : aisleNum;
 
   // Pre-populate the Aisle field from router state (e.g. SAR's row-select navigation) on mount.
   useEffect(() => {
-    if (prefill?.aisle != null) aisleField.set(String(prefill.aisle));
+    if (prefill?.aisle != null) aisleFields.field.set(String(prefill.aisle));
     // Field setters are stable across the lifetime of the hook — only run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -260,10 +272,10 @@ export function SDPPage() {
   // handlePalletScan can run from a closure captured well before the aisle was typed —
   // the aisle-confirm → focusPalletField chain registers it once, immediately after the
   // aisle field is first focused (empty), and that registration is never refreshed by
-  // typing. Reading aisleField.value directly there would silently see "" forever, so
-  // every pallet scan resulting from the normal aisle-then-scan flow needs this ref instead.
-  const aisleValueRef = useRef(aisleField.value);
-  aisleValueRef.current = aisleField.value;
+  // typing. Reading aisleFields.field.value directly there would silently see "" forever,
+  // so every pallet scan resulting from the normal aisle-then-scan flow needs this ref instead.
+  const aisleValueRef = useRef(aisleFields.field.value);
+  aisleValueRef.current = aisleFields.field.value;
 
   // Same stale-closure hazard as aisleValueRef above: handlePalletScan is registered with
   // palletField once per entry into 'entry' state and not re-registered when consolidating
@@ -280,15 +292,10 @@ export function SDPPage() {
 
   // ── Focus management ────────────────────────────────────────────────────────
 
-  /** Registers the Aisle field's numpad handler, wired to handleAisleConfirm on confirm. */
-  const focusAisleField = useCallback(() => {
-    aisleField.focus(handleAisleConfirm);
-  }, [aisleField]);
-
-  /** Registers the Pallet ID field's numpad handler, wired to handlePalletScan on confirm. */
+  /** (Re-)focuses the Pallet ID field for another attempt — e.g. after a failed scan. */
   const focusPalletField = useCallback(() => {
-    palletField.focus(handlePalletScan);
-  }, [palletField]);
+    palletFieldRef.current?.focus();
+  }, []);
 
   /** Storage Code override committed via the shared field's onChange — advances to Pallet ID, matching the old numpad-driven behavior. */
   const handleStorageOverrideChange = useCallback((v: string) => {
@@ -301,7 +308,7 @@ export function SDPPage() {
       const target = postResetFocusRef.current;
       const id = setTimeout(() => {
         if (target === 'pallet') focusPalletField();
-        else focusAisleField();
+        else aisleFields.focusField();
       }, 50);
       return () => clearTimeout(id);
     }
@@ -359,51 +366,13 @@ export function SDPPage() {
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   /**
-   * Submit handler for the Aisle field. A location-barcode scan (or anything longer than
-   * 3 digits) is truncated to its leading 3 digits — the Aisle — rather than rejected,
-   * since scanning a location placard instead of hand-typing the aisle number is a normal
-   * path. Then validates the aisle actually exists (`GET /api/locations/empty-by-zone`,
-   * the same endpoint already narrowing the Storage Code/Size dropdowns for this aisle —
-   * reused here for a guaranteed-synchronous-with-this-confirm check rather than relying
-   * on that reactive fetch's own timing) before moving focus to the Pallet ID field.
-   */
-  async function handleAisleConfirm(value: string) {
-    const v = value.trim();
-    if (!v) return;
-    const truncated = v.slice(0, 3);
-    if (truncated !== v) aisleField.set(truncated);
-
-    const aisle = parseInt(truncated, 10);
-    if (isNaN(aisle)) return;
-
-    try {
-      await apiFetch(`/api/locations/empty-by-zone?aisle=${aisle}`, token!);
-      clearMessage();
-    } catch (err) {
-      const code = err instanceof Error ? err.message : '';
-      if (code === 'NOT_FOUND') {
-        playAlert('error');
-        aisleField.clear();
-        aisleField.focus(handleAisleConfirm);
-        setMessage({ type: 'error', text: `Aisle ${aisle} does not exist` });
-        return;
-      }
-      // Any other failure (network hiccup, etc.) doesn't block the worker — the
-      // downstream Directed Put call will surface its own error if the aisle turns out
-      // to be unusable.
-    }
-
-    // Aisle confirmed — move focus to pallet field.
-    setTimeout(() => focusPalletField(), 50);
-  }
-
-  /**
    * Submit handler for the Pallet ID field. Calls POST /api/puts/directed with the aisle,
    * pallet ID, and any IM+ overrides. On success, sets directed state and transitions to
    * the directed screen state. Shows a warning if the pallet is already stored (move scenario).
    */
   async function handlePalletScan(value: string) {
     const v = value.trim();
+    setPalletIdValue(v);
     if (!v || loadingRef.current || screenStateRef.current !== 'entry') return;
     if (!aisleValueRef.current.trim()) return;
     // Read synchronously, before any await below — isScanningRef.current is still true
@@ -634,7 +603,7 @@ export function SDPPage() {
       const code = err instanceof Error ? err.message : '';
       if (code === 'NO_LOCATIONS') {
         playAlert('error');
-        setMessage({ type: 'error', text: `Hold Both placed — no further locations available in aisle ${aisleField.value}` });
+        setMessage({ type: 'error', text: `Hold Both placed — no further locations available in aisle ${aisleFields.field.value}` });
         stopPolling();
         resetToEntry(true);
       } else if (code === 'NOT_FOUND') {
@@ -660,14 +629,14 @@ export function SDPPage() {
   function resetToEntry(full = false) {
     setDirected(null);
     setScreenState('entry');
-    palletField.clear();
+    setPalletIdValue('');
     setPalletInvalid(false);
     // No explicit clear for the Confirm Location panel — it's only ever rendered while
     // screenState === 'directed', so leaving that state unmounts it, which wipes its
     // internal state for free (see LocationEntryFields).
     if (full) {
       postResetFocusRef.current = 'aisle';
-      aisleField.clear();
+      aisleFields.clear();
       setSizeOverride('');
       setStorageOverride('');
       setZoneOverride(null);
@@ -684,7 +653,7 @@ export function SDPPage() {
   /**
    * Fetches a real unlocated pallet id and delivers it as a simulated Pallet ID scan.
    * Constrained to the currently-entered Aisle's Storage Code (reads aisleValueRef, not
-   * aisleField.value directly, to avoid a stale closure the same way handlePalletScan
+   * aisleFields.field.value directly, to avoid a stale closure the same way handlePalletScan
    * does) — without this, a random pallet's Storage Code frequently wouldn't match the
    * aisle already typed in, correctly but unhelpfully failing the resulting demo put with
    * NO_LOCATIONS now that Directed Put enforces Storage Code matching. A no-op filter
@@ -800,9 +769,9 @@ export function SDPPage() {
           <div className="w-[280px] shrink-0">
             <FieldDisplay
               label="Aisle"
-              value={aisleField.value}
-              onFocus={focusAisleField}
-              active={aisleField.isActive}
+              value={aisleFields.field.value}
+              onFocus={aisleFields.focusField}
+              active={aisleFields.field.isActive}
               locked={locked}
               size="large"
             />
@@ -816,7 +785,7 @@ export function SDPPage() {
               stay IM+-gated entirely — a Worker doesn't need it echoed back at them. */}
           <div className="flex-1 flex gap-4 min-w-0">
             <div className="flex-1 max-w-[220px] flex flex-col gap-1 min-w-0">
-              <SizeField value={sizeOverride} onChange={setSizeOverride} options={sizeOptions} width="w-full" disabled={locked} />
+              <SizeField value={sizeOverride} onChange={setSizeOverride} aisle={overrideAisle} storageCode={storageOverride} width="w-full" disabled={locked} />
               {isIM && (
                 <button
                   type="button"
@@ -832,7 +801,7 @@ export function SDPPage() {
             {isIM && (
               <>
                 <div className="flex-1 flex flex-col gap-1 min-w-0">
-                  <StorageCodeField value={storageOverride} onChange={handleStorageOverrideChange} options={storageCodeOptions} label="Storage" width="w-full" disabled={locked} />
+                  <StorageCodeField value={storageOverride} onChange={handleStorageOverrideChange} aisle={overrideAisle} label="Storage" width="w-full" disabled={locked} />
                   <button
                     type="button"
                     onClick={() => setStorageLocked(l => !l)}
@@ -944,13 +913,15 @@ export function SDPPage() {
         )}
 
         {/* Pallet scan field */}
-        <FieldDisplay
+        <PalletIdField
+          ref={palletFieldRef}
           label="Scan Pallet ID"
-          value={palletField.value}
-          onFocus={focusPalletField}
-          active={palletField.isActive}
-          disabled={!aisleField.value.trim()}
-          locked={locked}
+          value={palletIdValue}
+          onChange={handlePalletScan}
+          boxClass="h-[72px] px-5 rounded-[12px]"
+          valueClass="text-[32px] font-medium tracking-[0.04em]"
+          caretClass="w-[3px] h-[38px]"
+          disabled={!aisleFields.field.value.trim() || locked}
           invalid={palletInvalid}
         />
 

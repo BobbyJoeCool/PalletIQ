@@ -1,0 +1,86 @@
+# LocationEntryFields
+
+**Category:** entry field (chrome + partial validation ownership)
+**File:** `apps/floor-app/src/components/shared/LocationEntryFields.tsx`
+
+## What it is
+
+Shared three-field Aisle/Bin/Level entry with auto-advance, plus an always-on full 8-digit
+barcode-scan override (or 6-digit, when `levelOptional`) — genuinely, fully adopted
+everywhere Location ID is entered: WLH, LII, MNP, PIP, SDP, PAR, and STG's own render of it
+where applicable. Predates Feature 10 (this doc was written retroactively, issue #162) —
+originally pure rendering, taking `invalid`/`aisleInvalid`/`binInvalid`/`levelInvalid`/
+`groupInvalid` as caller-supplied booleans with no endpoint call of its own.
+
+**Issue #162 gave it optional internal ownership of the Aisle/Bin progressive existence
+checks** (not the full Level resolution — see Data flow below) — but only PAR opted in
+this round, per direct instruction (a deliberate, confirmed scope decision, not an
+oversight): LII/MNP/PIP/SDP/WLH each either have no per-box check today, or push their
+"is this valid" question onto a compound domain endpoint (MNP's confirm, PIP's verify) that
+isn't a pure existence check at all — extending internal ownership to them was deferred,
+not attempted. `checkAisle`/`checkAisleBin` are additive, optional props; every existing
+caller's own `aisleInvalid`/`binInvalid` external-prop usage keeps working unchanged when
+those props are omitted.
+
+## Props / Hook API
+
+| Name | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `onResolved` | `(locationId: string, wasScanned: boolean) => void` | yes | | Fires once a full Aisle+Bin(+Level) value resolves, by scan or by completing every non-locked manual field |
+| `autoFocus` | `boolean` | no | `true` | Auto-focuses the first non-locked field on mount |
+| `value` | `string` | no | | External prefill/clear — `''` clears all three boxes, an 8-digit string fills them directly. Also clears internal Aisle/Bin invalid state (see Data flow) |
+| `highlight` | `boolean` | no | `false` | Legacy border-only whole-group highlight, unused by any current caller |
+| `onActiveChange` | `(active: boolean) => void` | no | | Fires whenever the aggregate active state (any of the 3 boxes focused) changes |
+| `lockedAisle` / `lockedLevel` | `string` | no | | Locks a box to a fixed value, shown disabled |
+| `size` | `'default' \| 'large'` | no | `'default'` | `'large'` is SDP's Confirm Location panel |
+| `levelOptional` | `boolean` | no | `false` | A manually-typed Aisle+Bin (no Level) is sufficient to resolve — used by MNP, whose Level comes from its own modal |
+| `checkAisle` | `(aisle: string) => Promise<{exists: boolean}>` | no | | **Issue #162.** When provided, the component owns the Aisle existence check internally instead of a caller computing its own `aisleInvalid` |
+| `checkAisleBin` | `(aisle: string, bin: string) => Promise<unknown>` | no | | Same internal-ownership shape, one box further in; skipped while Aisle is already known invalid |
+| `onAisleValidityChange` / `onBinValidityChange` | `(invalid: boolean) => void` | no | | Fires when the internal check's result changes — only meaningful alongside `checkAisle`/`checkAisleBin` |
+| `aisleInvalid` / `binInvalid` | `boolean` | no | `false` | External override — ignored for whichever box has its own internal check active |
+| `levelInvalid` | `boolean` | no | `false` | Always externally supplied — the full Level resolution stays screen-owned (see Data flow) |
+| `groupInvalid` | `boolean` | no | `false` | Whole-group wash for a caller whose failure can't be attributed to one box (WLH's whole-location lookup) |
+
+## Output
+
+Renders the 3-box Aisle/Bin/Level chain. No return value (it's a component, not a hook).
+
+## Data flow
+
+Deliberately split ownership, not all-or-nothing:
+
+- **Aisle/Bin progressive existence** (`checkAisle`/`checkAisleBin`) — internal when
+  provided, mirroring `useAisleField`/`useUpcField`'s `fetch` contract exactly. A full
+  8-digit (or 6-digit, `levelOptional`) barcode-scan override, or a fresh `value` prefill,
+  clears any internal invalid state left over from a prior manual attempt — the same
+  "override bypasses the interactive chain, and stale per-box state no longer means
+  anything" reasoning `useDpciFields`/`useUpcField` already established.
+- **Full Level resolution** — deliberately **not** absorbed into this component, even for
+  PAR. Every caller's own "what does a fully-resolved location actually mean" question is
+  irreducibly different: PAR fetches rich occupied/held/contraction status for a
+  warn-then-allow popup; WLH does a plain existence lookup to gate its Hold panel; MNP
+  defers the entire question to a server confirm call with occupied/contracted/hold gates;
+  PIP has no client-side check at all, just a compound pull-verify POST. Forcing a single
+  shape onto all of that would either lose real behavior or turn this component into a
+  kitchen-sink API. Each caller keeps its own final resolve logic and passes `levelInvalid`
+  in externally, unchanged by issue #162.
+
+## Consumers
+
+- `PARPage.tsx` — full internal Aisle/Bin ownership (`checkAisle`/`checkAisleBin`, issue
+  #162); own `levelInvalid` via `checkLocation`
+- `LIIPage.tsx` — plain rendering, single external `onResolved`, no per-box props
+- `MNPPage.tsx` — `levelOptional`, no invalid-wash props (message-bar + remount instead)
+- `PIPPage.tsx` — `lockedAisle`/`lockedLevel`, `onActiveChange`, no invalid-wash props
+- `SDPPage.tsx` — `size="large"`, `onActiveChange`, no invalid-wash props
+- `WLHPage.tsx` — `groupInvalid` (the prop's own original motivating example)
+- `STGPage.tsx` — does not use this component at all (Aisle-only, no Bin/Level concept —
+  see `useAisleField`'s own doc)
+
+## Related
+
+- [`useAisleField`](useAisleField.md) — the bare single-box Aisle filter this component's
+  own 3-box chain is explicitly distinct from; its `checkAisle`/`checkAisleBin` props
+  mirror that hook's `fetch` contract
+- [`useDpciFields`](useDpciFields.md) / [`useUpcField`](useUpcField.md) — the precedent for
+  an override/prefill clearing stale internal invalid state

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import type { ISILocationEntry, ISISearchState } from '../context/ISIContext';
@@ -9,7 +10,8 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { INVALID_WASH } from '../lib/invalidWash';
-import { useNumpadField } from '../lib/useNumpadField';
+import { useDpciFields } from '../lib/useDpciFields';
+import { useUpcField } from '../lib/useUpcField';
 
 interface LocationsResponse {
   descShort: string;
@@ -33,130 +35,61 @@ export function ISIPage() {
   const [searchParams] = useSearchParams();
   const { search, setSearch } = useISI();
 
-  // Same three-field Dept/Class/Item entry pattern as IID (issue #16) — auto-advances
-  // Dept → Class → Item, then resolves once all three are filled. deptValueRef/
-  // classValueRef hold the accumulated values live across the chain (see IIDPage.tsx's
-  // identical pattern for why refs are needed instead of reading field.value directly).
-  // padOnSubmit: typing "5" and hitting OK on Dept is accepted as "005" (same treatment
-  // as every other fixed-width numeric code in the app — see LocationEntryFields).
-  const deptField = useNumpadField('numpad', 3, true);
-  const classField = useNumpadField('numpad', 2, true);
-  const itemField = useNumpadField('numpad', 4, true);
-  // UPC is numeric-only, so it opens the Numpad rather than the full Keyboard (same
-  // reasoning as IID's own UPC field — issue #56).
-  const upcField = useNumpadField('numpad');
-  const deptValueRef = useRef('');
-  const classValueRef = useRef('');
-
   const [loading, setLoading] = useState(false);
-  // Red-wash invalid state (App-Wide item 9, v1.7.0) — DPCI is a single composite existence
-  // lookup with no per-box check, so it group-washes (same reasoning as PAR's DPCI); UPC is
-  // its own single box, so it washes individually. Mirrors PAR's loadByDpci/loadByUpc
-  // precedent exactly: each lookup clears the *other* field's invalid flag (since each
-  // lookup also clears the other field's boxes), sets its own flag false on success and
-  // true on failure.
-  const [dpciInvalid, setDpciInvalid] = useState(false);
-  const [upcInvalid, setUpcInvalid] = useState(false);
 
   const locations = search?.locations ?? null;
   const selected = search?.selected ?? null;
 
-  /** Populates the three DPCI display boxes from a dash-joined string — callers that supply a whole DPCI at once (demo buttons, deep links, context restore) otherwise leave the boxes on their "—" placeholders. */
-  const populateDpciBoxes = useCallback((dpci: string) => {
-    const [d, c, i] = dpci.split('-');
-    if (d != null && c != null && i != null) {
-      deptField.set(d);
-      classField.set(c);
-      itemField.set(i);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Forward reference for dpciFields' onBeforeResolve (declared next) to clear the UPC
+  // field — same pattern as IIDPage.tsx/PARPage.tsx's identical forward-reference need.
+  const clearUpcFieldRef = useRef(() => {});
 
-  /** Looks up every stored location for a DPCI via the API. On failure, the bad DPCI stays visible in the three boxes (not cleared) so the worker can see what didn't resolve. */
-  const loadByDpci = useCallback(async (dpci: string) => {
-    populateDpciBoxes(dpci);
-    upcField.clear();
-    setUpcInvalid(false);
-    clearMessage();
-    setLoading(true);
-    try {
-      const data = await apiFetch<LocationsResponse>(`/api/items/dpci/${encodeURIComponent(dpci)}/locations`, token!);
+  /** DPCI entry chain (issue #159, shared with PAR/IID/PII's Edit mode) — looks up every
+   *  stored location for a DPCI. On failure, the bad DPCI stays visible in the three boxes
+   *  (not cleared) so the worker can see what didn't resolve. */
+  const dpciFields = useDpciFields<LocationsResponse>({
+    fetch: useCallback((dpci) => apiFetch<LocationsResponse>(`/api/items/dpci/${dpci}/locations`, token!), [token]),
+    onBeforeResolve: useCallback(() => {
+      clearUpcFieldRef.current();
+      clearMessage();
+      setLoading(true);
+    }, [clearMessage]),
+    onResolved: useCallback((data, dpci) => {
       setSearch({ mode: 'dpci', query: dpci, descShort: data.descShort, locations: data.locations, selected: null });
-      setDpciInvalid(false);
-    } catch {
+      setLoading(false);
+    }, []), // eslint-disable-line react-hooks/exhaustive-deps
+    onNotFound: useCallback(() => {
       playAlert('error');
       setMessage({ type: 'error', text: 'Item not found' });
       setSearch(null);
-      setDpciInvalid(true);
-    } finally {
       setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, clearMessage]);
+    }, [setMessage]), // eslint-disable-line react-hooks/exhaustive-deps
+  });
+  const { deptField, classField, itemField, dpciInvalid, focusDeptField, focusClassField, focusItemField } = dpciFields;
 
-  /** Looks up every stored location for a UPC via the API (fix-list item 02). On failure, the bad UPC stays visible (not cleared) so the worker can see what didn't resolve. */
-  const loadByUpc = useCallback(async (upc: string) => {
-    const trimmed = upc.trim();
-    if (!trimmed) return;
-    upcField.set(trimmed);
-    deptField.clear();
-    classField.clear();
-    itemField.clear();
-    setDpciInvalid(false);
-    clearMessage();
-    setLoading(true);
-    try {
-      const data = await apiFetch<LocationsResponse>(`/api/items/upc/${encodeURIComponent(trimmed)}/locations`, token!);
-      setSearch({ mode: 'upc', query: trimmed, descShort: data.descShort, locations: data.locations, selected: null });
-      setUpcInvalid(false);
-    } catch {
+  /** UPC entry field (issue #160, shared with IID/PAR) — looks up every stored location
+   *  for a UPC (fix-list item 02). On failure, the bad UPC stays visible (not cleared) so
+   *  the worker can see what didn't resolve. */
+  const upcFields = useUpcField<LocationsResponse>({
+    fetch: useCallback((upc) => apiFetch<LocationsResponse>(`/api/items/upc/${encodeURIComponent(upc)}/locations`, token!), [token]),
+    onBeforeResolve: useCallback(() => {
+      dpciFields.clear();
+      clearMessage();
+      setLoading(true);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [clearMessage]),
+    onResolved: useCallback((data, upc) => {
+      setSearch({ mode: 'upc', query: upc, descShort: data.descShort, locations: data.locations, selected: null });
+      setLoading(false);
+    }, []), // eslint-disable-line react-hooks/exhaustive-deps
+    onNotFound: useCallback(() => {
       playAlert('error');
       setMessage({ type: 'error', text: 'Item not found' });
       setSearch(null);
-      setUpcInvalid(true);
-    } finally {
       setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, clearMessage]);
-
-  /** Registers the Dept field's numpad handler; on confirm (3 digits), advances to Class. */
-  function focusDeptField() {
-    deptField.focus(handleDeptConfirm);
-  }
-  /** Registers the Class field's numpad handler; on confirm (2 digits), advances to Item. */
-  function focusClassField() {
-    classField.focus(handleClassConfirm);
-  }
-  /** Registers the Item field's numpad handler; on confirm (4 digits), resolves the full DPCI lookup. */
-  function focusItemField() {
-    itemField.focus(handleItemConfirm);
-  }
-  /** Registers the UPC field's numpad handler, wired to loadByUpc on confirm. */
-  const focusUpcField = useCallback(() => upcField.focus(loadByUpc), [upcField, loadByUpc]);
-
-  /** Dept field submit: records the value and advances to Class once exactly 3 digits are entered. */
-  function handleDeptConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 3) return;
-    deptValueRef.current = v;
-    setTimeout(() => focusClassField(), 50);
-  }
-
-  /** Class field submit: records the value and advances to Item once exactly 2 digits are entered. */
-  function handleClassConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 2) return;
-    classValueRef.current = v;
-    setTimeout(() => focusItemField(), 50);
-  }
-
-  /** Item field submit: once exactly 4 digits are entered, combines Dept+Class+Item and resolves the lookup. */
-  function handleItemConfirm(value: string) {
-    const v = value.trim();
-    if (v.length !== 4) return;
-    void loadByDpci(`${deptValueRef.current}-${classValueRef.current}-${v}`);
-  }
+    }, [setMessage]), // eslint-disable-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => { clearUpcFieldRef.current = upcFields.clear; });
 
   useEffect(() => {
     const id = setTimeout(() => focusDeptField(), 50);
@@ -172,11 +105,11 @@ export function ISIPage() {
   const upcParam = searchParams.get('upc');
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount effect (URL ?dpci=/?upc= pre-population), same as IIDPage's identical pattern
-    if (dpciParam) void loadByDpci(dpciParam);
-    else if (upcParam) void loadByUpc(upcParam);
+    if (dpciParam) dpciFields.loadDpci(dpciParam);
+    else if (upcParam) upcFields.loadUpc(upcParam);
     else if (search) {
-      if (search.mode === 'dpci') populateDpciBoxes(search.query);
-      else upcField.set(search.query);
+      if (search.mode === 'dpci') dpciFields.setFromDpci(search.query);
+      else upcFields.field.set(search.query);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dpciParam, upcParam]);
@@ -196,31 +129,31 @@ export function ISIPage() {
   const demoScan = useCallback(async () => {
     try {
       const data = await apiFetch<{ dpci: string; upc: string }>('/api/items/sample', token!);
-      if (upcField.isActive) void loadByUpc(data.upc);
-      else void loadByDpci(data.dpci);
+      if (upcFields.field.isActive) upcFields.loadUpc(data.upc);
+      else dpciFields.loadDpci(data.dpci);
     } catch {
       setMessage({ type: 'error', text: 'Demo scan unavailable' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, upcField.isActive]);
+  }, [token, upcFields.field.isActive]);
 
   /** Looks up a DPCI/UPC that doesn't exist, simulating a not-found scan — targets whichever entry method currently has focus. */
   const demoBad = useCallback(
-    () => (upcField.isActive ? void loadByUpc('999999999999') : void loadByDpci('999-99-9999')),
-    [upcField.isActive, loadByDpci, loadByUpc],
+    () => (upcFields.field.isActive ? upcFields.loadUpc('999999999999') : dpciFields.loadDpci('999-99-9999')),
+    [upcFields.field.isActive], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   /** Footer demo-button slot content: a good scan and a bad scan trigger. Labels switch to "...UPC" whenever the UPC field has focus, matching demoScan/demoBad's own targeting. */
   const demoSlot = useMemo(() => (
     <>
       <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">
-        {upcField.isActive ? '✓ Scan UPC' : '✓ Scan DPCI'}
+        {upcFields.field.isActive ? '✓ Scan UPC' : '✓ Scan DPCI'}
       </button>
       <button type="button" onClick={demoBad} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#660000] hover:bg-[#770000] text-white transition-colors">
-        {upcField.isActive ? '✗ Bad UPC' : '✗ Bad DPCI'}
+        {upcFields.field.isActive ? '✗ Bad UPC' : '✗ Bad DPCI'}
       </button>
     </>
-  ), [demoScan, demoBad, upcField.isActive]);
+  ), [demoScan, demoBad, upcFields.field.isActive]);
 
   useDemoSlot(demoSlot);
 
@@ -270,21 +203,17 @@ export function ISIPage() {
           </div>
         </div>
 
-        <div className="w-[260px]">
-          <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">UPC</span>
-          <button
-            type="button"
-            onClick={focusUpcField}
-            className={`flex items-center h-[64px] w-full px-5 mt-1 rounded-[12px] border-2 transition-colors ${
-              upcInvalid ? INVALID_WASH : upcField.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
-            }`}
-          >
-            <span className="font-data text-[26px] font-medium text-white">
-              {upcField.value || <span className="text-[#444]">—</span>}
-            </span>
-            {upcField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-          </button>
-        </div>
+        <NumpadFieldBox
+          label="UPC"
+          value={upcFields.field.value}
+          onFocus={upcFields.focusField}
+          active={upcFields.field.isActive}
+          invalid={upcFields.upcInvalid}
+          width="w-[260px]"
+          boxClass="h-[64px] px-5 rounded-[12px]"
+          valueClass="text-[26px] font-medium"
+          caretClass="w-[2px] h-[28px]"
+        />
 
         {selectedEntry && (
           <div className="flex items-center gap-3">

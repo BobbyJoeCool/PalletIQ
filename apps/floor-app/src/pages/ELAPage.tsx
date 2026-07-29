@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AisleSizeTable, type AisleSizeRow, type AisleSizeSort } from '../components/shared/AisleSizeTable';
-import { CodePickerField } from '../components/shared/CodePickerField';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
+import { WorkstationField } from '../components/shared/WorkstationField';
 import { useAuth } from '../context/AuthContext';
 import { useELA } from '../context/ELAContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
-import { SIZES } from '../lib/sizes';
-import { useNumpadField } from '../lib/useNumpadField';
+import { useAisleField } from '../lib/useAisleField';
 import { useStorageCodes } from '../lib/useStorageCodes';
 import { useWorkstations, type Workstation } from '../lib/useWorkstations';
 
@@ -138,38 +137,34 @@ export function ELAPage() {
     setSelected(null);
   }, [setStorageCode, setSelected]);
 
-  // Aisle Range (GitHub #124) — plain numpad-entry fields, no lookup/validation beyond
-  // "is this a number" (any non-negative range is syntactically valid even if it happens
-  // to match zero aisles, unlike a specific-aisle field elsewhere in the app).
-  const aisleStartField = useNumpadField('numpad', 3);
-  const aisleEndField = useNumpadField('numpad', 3);
-  useEffect(() => { aisleStartField.set(aisleStart); }, [aisleStart]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { aisleEndField.set(aisleEnd); }, [aisleEnd]); // eslint-disable-line react-hooks/exhaustive-deps
-  const focusAisleStartField = useCallback(() => {
-    aisleStartField.focus((v) => { setAisleStart(v.trim()); setSelected(null); hidePanel(); });
-  }, [aisleStartField, setAisleStart, setSelected, hidePanel]);
-  const focusAisleEndField = useCallback(() => {
-    aisleEndField.focus((v) => { setAisleEnd(v.trim()); setSelected(null); hidePanel(); });
-  }, [aisleEndField, setAisleEnd, setSelected, hidePanel]);
+  // Aisle Range (GitHub #124) — each end independently existence-checked (issue #161;
+  // previously "is this a number" was the only check, per this screen's own doc note that
+  // "any non-negative range is syntactically valid even if it happens to match zero
+  // aisles"). The range filter still applies whatever was typed regardless of validity
+  // (via `onConfirm`, which fires before the async check settles) — an aisle range
+  // legitimately matching zero results isn't an error the way a single specific-aisle
+  // field's bad value is; `invalid` only drives a visual hint, not a block.
+  const aisleStartFields = useAisleField({
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    onConfirm: useCallback((v) => { setAisleStart(v); setSelected(null); hidePanel(); }, [setAisleStart, setSelected, hidePanel]),
+  });
+  const aisleEndFields = useAisleField({
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    onConfirm: useCallback((v) => { setAisleEnd(v); setSelected(null); hidePanel(); }, [setAisleEnd, setSelected, hidePanel]),
+  });
+  useEffect(() => { aisleStartFields.field.set(aisleStart); }, [aisleStart]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { aisleEndFields.field.set(aisleEnd); }, [aisleEnd]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Workstation restrict-to filter (GitHub #124). `workstationInvalid` drives the
-   *  app-wide red-wash treatment (#109) — an invalid entry no longer clears itself (see
-   *  useCodePickerField's new default), so this field needs its own tracked flag the same
-   *  way STG's equivalent fields do. */
-  const [workstationInvalid, setWorkstationInvalid] = useState(false);
+  /** Workstation restrict-to filter (GitHub #124). The wash itself is automatic now
+   *  (Feature 10 — `CodePickerField` computes and washes its own invalid state); this only
+   *  drives the message-bar side effect, reactively rather than commit-only. */
   const handleWorkstationChange = useCallback((v: string) => {
-    setWorkstationInvalid(false);
     setWorkstation(v);
     setSelected(null);
   }, [setWorkstation, setSelected]);
-  const handleInvalidWorkstation = useCallback(() => {
-    setWorkstationInvalid(true);
-    setMessage({ type: 'error', text: 'Invalid Workstation' });
+  const handleWorkstationValidityChange = useCallback((inv: boolean) => {
+    if (inv) setMessage({ type: 'error', text: 'Invalid Workstation' });
   }, [setMessage]);
-  const workstationOptions = useMemo(
-    () => (workstations ?? []).map((w) => ({ code: w.id, desc: w.name })),
-    [workstations],
-  );
 
   /** Workstation exclude filter (GitHub #125) — toggling the filter chip itself, or
    *  toggling one workstation's membership in the excluded set. */
@@ -190,12 +185,12 @@ export function ELAPage() {
     () => storageCodes?.find((c) => c.code === storageCode)?.desc ?? null,
     [storageCodes, storageCode],
   );
-  // Only meaningful once the reference list has loaded — stays `false` (not yet flagged
-  // invalid) while `storageCodes` is still `null`, so a code isn't wrongly flagged invalid
-  // before the list has had a chance to arrive.
-  const isInvalidCode = !!storageCode && storageCodes != null && storageDesc == null;
-  // Size is a fixed static list (unlike Storage Code, no async reference fetch needed).
-  const isInvalidSize = !!size && !SIZES.includes(size);
+  // Sourced from StorageCodeField/SizeField's own reactive validity (Feature 10) instead
+  // of re-deriving the same full-list-membership check here — the fetch effect below still
+  // needs to know, to gate the actual query/skip a doomed lookup, not just for the wash
+  // (which is automatic now).
+  const [isInvalidCode, setIsInvalidCode] = useState(false);
+  const [isInvalidSize, setIsInvalidSize] = useState(false);
 
   // Query trigger: auto-run once Storage Code has a value (Size narrows further but is no
   // longer required — Storage-Code-only browsing). Selection is cleared by the field
@@ -285,15 +280,16 @@ export function ELAPage() {
       {/* Top bar: filter fields + navigation actions */}
       <div className="flex items-end justify-between gap-4 shrink-0 flex-wrap">
         <div className="flex items-end gap-4 flex-wrap">
-          <StorageCodeField value={storageCode} onChange={handleStorageCodeChange} closeOnAutoSubmit invalid={isInvalidCode} />
-          <SizeField value={size} onChange={(v) => { setSize(v); setSelected(null); }} invalid={isInvalidSize} />
+          <StorageCodeField value={storageCode} onChange={handleStorageCodeChange} closeOnAutoSubmit onValidityChange={setIsInvalidCode} />
+          <SizeField value={size} onChange={(v) => { setSize(v); setSelected(null); }} onValidityChange={setIsInvalidSize} />
           {/* Aisle Range (GitHub #124) — restricts results to aisles within [start, end]. */}
           <div className="flex items-end gap-2">
             <NumpadFieldBox
               label="Start Aisle"
-              value={aisleStartField.value}
-              onFocus={focusAisleStartField}
-              active={aisleStartField.isActive}
+              value={aisleStartFields.field.value}
+              onFocus={aisleStartFields.focusField}
+              active={aisleStartFields.field.isActive}
+              invalid={aisleStartFields.invalid}
               width="w-[110px]"
               boxClass="h-[64px] px-4 rounded-[12px]"
               valueClass="text-[26px] font-medium"
@@ -302,9 +298,10 @@ export function ELAPage() {
             <span className="font-ui text-[16px] text-[#555] pb-4">–</span>
             <NumpadFieldBox
               label="End Aisle"
-              value={aisleEndField.value}
-              onFocus={focusAisleEndField}
-              active={aisleEndField.isActive}
+              value={aisleEndFields.field.value}
+              onFocus={aisleEndFields.focusField}
+              active={aisleEndFields.field.isActive}
+              invalid={aisleEndFields.invalid}
               width="w-[110px]"
               boxClass="h-[64px] px-4 rounded-[12px]"
               valueClass="text-[26px] font-medium"
@@ -313,19 +310,12 @@ export function ELAPage() {
           </div>
           {/* Workstation restrict-to (GitHub #124) — independent of the exclude-bubble
               Workstation filter below; both can be active at once. */}
-          <CodePickerField
+          <WorkstationField
             value={workstation}
             onChange={handleWorkstationChange}
-            options={workstationOptions}
-            panel="keyboard"
-            label="Workstation"
-            ariaLabel="Workstation"
             size="compact"
-            maxLength={4}
-            transform={(v) => v.toUpperCase()}
-            strict={workstations !== null}
-            onInvalid={handleInvalidWorkstation}
-            invalid={workstationInvalid}
+            strict
+            onValidityChange={handleWorkstationValidityChange}
           />
           {/* Filter-button system (GitHub #125) — currently just the one Workstation
               exclude filter; a generic multi-filter framework isn't built out further

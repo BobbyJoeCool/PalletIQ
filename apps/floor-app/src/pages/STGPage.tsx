@@ -20,6 +20,7 @@ import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
 import { INVALID_WASH } from '../lib/invalidWash';
 import { SIZE_NAMES } from '../lib/sizes';
 import { effectiveStack } from '../lib/stagingHelpers';
+import { useAisleField } from '../lib/useAisleField';
 import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
 import { useCodePickerField } from '../lib/useCodePickerField';
 import { useNumpadField } from '../lib/useNumpadField';
@@ -79,14 +80,15 @@ async function fetchStagingLocations(
  *  field, not one of the shared field types from issue #78 (unlike Storage Code/Size,
  *  which now use StorageCodeField/SizeField below). */
 function FieldDisplay({
-  label, value, onFocus, active = false, width = 'w-[160px]',
-}: { label: string; value: string; onFocus: () => void; active?: boolean; width?: string }) {
+  label, value, onFocus, active = false, width = 'w-[160px]', invalid = false,
+}: { label: string; value: string; onFocus: () => void; active?: boolean; width?: string; invalid?: boolean }) {
   return (
     <NumpadFieldBox
       label={label}
       value={value}
       onFocus={onFocus}
       active={active}
+      invalid={invalid}
       width={width}
       centered
       labelClass="text-[12px]"
@@ -195,42 +197,77 @@ function OverrideToggle({ active, onClick, ariaLabel }: { active: boolean; onCli
 /**
  * Pallet-styled entry + dropdown-helper field — PalletBox's own visual chrome (flex-1
  * height, `rounded-[5px]`, slat lines, corner label baked into the box) with
- * CodePickerField's tap-to-type-or-pick-from-popup interaction, narrowed to whatever
- * `options` the caller supplies. Used for Storage/Size on a stack (STG's per-stack
- * scoped-entry checklist item) — CodePickerField itself isn't reskinnable to this box's
- * exact rounding/height/label position via its own props (its `size` variants target
- * filter-bar-style boxes, not this pallet-slat look), so this is a dedicated local
- * component rather than a StorageCodeField/SizeField call site, reimplementing just enough
- * of CodePickerField's own field+popup logic to match.
+ * CodePickerField's tap-to-type-or-pick-from-popup interaction. Used for Storage/Size on
+ * a stack (STG's per-stack scoped-entry checklist item) — CodePickerField itself isn't
+ * reskinnable to this box's exact rounding/height/label position via its own props (its
+ * `size` variants target filter-bar-style boxes, not this pallet-slat look), so this is a
+ * dedicated local component reimplementing just enough of CodePickerField's own
+ * field+popup logic to match, rather than a StorageCodeField/SizeField call site directly.
+ *
+ * Owns its own aisle-narrowing internally (Feature 10) via `field`/`aisle`/
+ * `storageCodeForSize` — same `useAisleFreightTypes`-backed mechanism `StorageCodeField`/
+ * `SizeField` use, so STG's callers (StackBox/MasterControl) no longer need to compute
+ * `storageOptions`/`sizeOptions`/`storageStrict`/`sizeStrict` themselves. Always validates
+ * against the narrowed (not full) list — matching STG's own established intent ("a typed
+ * value not actually present in this aisle" should be flagged, see the callers' own prior
+ * comment) — unlike `StorageCodeField`'s default, since a stack's value must actually
+ * resolve within its own aisle to be usable at all. `field: 'zone'` skips narrowing
+ * entirely (Zone never narrows by aisle, matching `ZoneField`'s own fixed 4-value list) —
+ * still routed through this same component rather than the shared `ZoneField` purely for
+ * chrome (see this component's own top doc), not because Zone shares Storage/Size's
+ * dependency-prop shape.
  */
 function PalletCodePicker({
-  label, ariaLabel, value, onChange, options, maxLength, transform, earlyCommit, strict, onInvalid, tinted = false, invalid = false,
+  label, ariaLabel, value, onChange, field: fieldKind, aisle, storageCodeForSize, maxLength, transform, earlyCommit, onInvalid, onValidityChange, tinted = false, invalid: forcedInvalid = false,
 }: {
   label: string;
   ariaLabel: string;
   value: string;
   onChange: (v: string) => void;
-  options: CodeOption[];
+  /** Discriminates which narrowing this instance needs — Storage narrows by aisle alone,
+   *  Size narrows by aisle *and* the stack's own current Storage Code, Zone never narrows. */
+  field: 'storageCode' | 'size' | 'zone';
+  /** Dependency prop (Feature 10) — the stack's own *effective* Aisle (inherited or
+   *  overridden), `null` while not yet resolved/parseable. Ignored when `field === 'zone'`. */
+  aisle: number | null;
+  /** Only meaningful when `field === 'size'` — the stack's own *effective* Storage Code,
+   *  further narrowing Size within `aisle`. */
+  storageCodeForSize?: string;
   maxLength?: number;
   transform?: (raw: string) => string;
   earlyCommit?: (value: string) => boolean;
-  /** See CodePickerField's own doc — rejects a typed value not present in `options`
-   *  instead of committing it (calls `onInvalid` in place of `onChange`) — the value stays
-   *  visible, washed red via `invalid` below, rather than clearing (#109). */
-  strict?: boolean;
+  /** Fires on a strict-mode commit-reject (the value stays visible, washed, rather than
+   *  clearing — #109). Strict is always on here (STG's own established intent), gated
+   *  automatically while the narrowing data is still loading, same as every other field. */
   onInvalid?: (code: string) => void;
+  /** See `useCodePickerField`'s own doc — fires reactively on this field's own computed
+   *  validity (Feature 10), independent of the commit-time `onInvalid` above. */
+  onValidityChange?: (invalid: boolean) => void;
   /** 50%-transparent blue field background — set whenever this field's override is active
    *  (issue #99; PalletCodePicker is only ever rendered for Storage/Size while overridden,
    *  see StackBox, so every call site passes this as always-true). */
   tinted?: boolean;
-  /** Applies the app-wide red-wash treatment (#109), same precedence as CodePickerField's
-   *  own `invalid` prop — wins over `tinted`/active. Caller-driven: set true by the
-   *  `onInvalid` handler below, cleared once the field commits a valid value. */
+  /** Forces the wash on top of this field's own internal narrowed-list check — not needed
+   *  for the ordinary case, which the field now handles on its own (Feature 10). */
   invalid?: boolean;
 }) {
-  const { field, open, setOpen, wrapperRef, focusField, selectOption } = useCodePickerField(value, onChange, options, {
-    panel: 'keyboard', maxLength, transform, earlyCommit, strict, onInvalid,
+  // Always called (Rules of Hooks) — internally no-ops (returns null) while `aisle` is
+  // null, and simply unused for `field === 'zone'`.
+  const aisleTypes = useAisleFreightTypes(fieldKind === 'zone' ? null : aisle);
+  const fullStorageCodes = useStorageCodes();
+  const options: CodeOption[] = fieldKind === 'zone'
+    ? ZONE_OPTIONS
+    : aisleTypes
+      ? fieldKind === 'storageCode'
+        ? (fullStorageCodes ?? []).filter((c) => aisleTypes.storageCodes.includes(c.code))
+        : aisleTypes.sizesFor(storageCodeForSize || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
+      : [];
+  const optionsLoading = fieldKind === 'zone' ? false : aisleTypes === null || (fieldKind === 'storageCode' && fullStorageCodes === null);
+
+  const { field, open, setOpen, wrapperRef, focusField, selectOption, invalid: computedInvalid } = useCodePickerField(value, onChange, options, {
+    panel: 'keyboard', maxLength, transform, earlyCommit, strict: true, onInvalid, onValidityChange, optionsLoading,
   });
+  const invalid = forcedInvalid || computedInvalid;
 
   return (
     <div ref={wrapperRef} className="relative flex-1 min-h-0 flex items-stretch gap-1">
@@ -382,105 +419,67 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   // #99). Every non-Qty field below reads from here, never straight off `stack.*`.
   const effective = effectiveStack(stack, master);
 
-  const aisleField = useNumpadField('numpad');
   const quantityField = useNumpadField('numpad');
 
-  // Invalid-entry wash state (#109) — an invalid entry no longer clears itself (the
-  // typed/scanned value stays visible so the worker can see what they entered), so each
-  // field needs its own tracked flag to drive the red wash instead of relying on the
-  // absence of a value. Cleared the moment that field's own handler next resolves
-  // successfully (Aisle: a real API confirmation; Storage/Size/Zone: PalletCodePicker's
-  // own `onChange`, since a fresh commit only ever fires for a value that passed strict
-  // validation).
-  const [aisleInvalid, setAisleInvalid] = useState(false);
-  const [storageInvalid, setStorageInvalid] = useState(false);
-  const [sizeInvalid, setSizeInvalid] = useState(false);
-  const [zoneInvalid, setZoneInvalid] = useState(false);
+  // Aisle entry field (issue #161) — existence check now owned internally by the shared
+  // hook (previously this stack's own `handleAisleConfirm`, reusing `GET /api/locations/
+  // empty-by-zone` purely for its NOT_FOUND side effect; switched to the purpose-built
+  // `aisle-exists` endpoint, confirmed to check the identical condition server-side — see
+  // useAisleField's own doc). `PalletBox`'s own distinct pallet-slat chrome (deliberately
+  // not one of the generic shared field components — see its own doc comment) is kept
+  // exactly as-is; only the data/validation source changes here.
+  const aisleFields = useAisleField({
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    onConfirm: useCallback((v) => { hidePanel(); updateStack(index, { aisle: v }); }, [hidePanel, index, updateStack]),
+    onResolved: useCallback(() => { clearMessage(); }, [clearMessage]),
+    onNotFound: useCallback(() => {
+      playAlert('error');
+      setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Aisle - Invalid Entry` });
+    }, [index, setMessage]),
+  });
 
   // Keep the on-screen field displays in sync with context — covers the worker's own
   // confirm, an override toggling on (pre-filled from Master Control), route-state
   // pre-population from ELA/ELZ, and queue compaction after a sibling stage, all of which
   // mutate context directly rather than going through these field hooks.
-  useEffect(() => { aisleField.set(stack.aisle); }, [stack.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { aisleFields.field.set(stack.aisle); }, [stack.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { quantityField.set(stack.quantity); }, [stack.quantity]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Storage/Size are entry-with-dropdown-helper fields (StorageCodeField/SizeField, same
-  // shared components Master Control uses) narrowed to this stack's own *effective* Aisle/
-  // StorageCode (the open STG validation-checklist item — "storage and size should be
-  // entries with scoped dropdowns based on the aisle for that stack" — corrected from an
-  // earlier plain-`<select>` pass to match Master Control's own entry-box-plus-popup
-  // interaction, per direct instruction). A typed value is now validated the same as a
-  // popup selection would be (`strict` below) — previously a worker typing a code not
-  // actually present in this aisle committed silently with no error, unlike Aisle just
-  // below. Gated on the narrowing data actually being ready (an Aisle entered, and — for
-  // Storage — the reference list loaded) so a value typed before that data arrives isn't
-  // rejected just for being temporarily unverifiable.
+  // Storage/Size are PalletCodePicker instances (STG's own chrome, StorageCodeField/
+  // SizeField's shared shape) narrowed to this stack's own *effective* Aisle/StorageCode
+  // (the open STG validation-checklist item — "storage and size should be entries with
+  // scoped dropdowns based on the aisle for that stack" — corrected from an earlier plain-
+  // `<select>` pass to match Master Control's own entry-box-plus-popup interaction, per
+  // direct instruction). A typed value is validated the same as a popup selection would be
+  // — previously a worker typing a code not actually present in this aisle committed
+  // silently with no error, unlike Aisle just below. `PalletCodePicker` now owns its own
+  // narrowing fetch and validity computation internally (Feature 10) — this stack only
+  // needs to pass its own effective Aisle/Storage Code as dependency props.
   const stackAisleNum = parseInt(effective.aisle, 10);
-  const aisleTypes = useAisleFreightTypes(isNaN(stackAisleNum) ? null : stackAisleNum);
-  const fullStorageCodes = useStorageCodes();
-  const storageOptions = aisleTypes && fullStorageCodes
-    ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
-    : [];
-  const sizeOptions = aisleTypes
-    ? aisleTypes.sizesFor(effective.storageCode || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
-    : [];
-  const storageStrict = aisleTypes !== null && fullStorageCodes !== null;
-  const sizeStrict = aisleTypes !== null;
-  /** A typed value that isn't in this stack's own (narrowed-or-full) options list never
-   *  flagged an error before — it just silently never matched anything downstream. Mirrors
-   *  the Aisle field's own invalid-entry message format (same pattern as MasterControl's
-   *  identical pair). */
-  const handleInvalidStorage = useCallback(() => {
-    playAlert('error');
-    setStorageInvalid(true);
-    setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Storage Code - Invalid Entry` });
-  }, [index, setMessage]);
-  const handleInvalidSize = useCallback(() => {
-    playAlert('error');
-    setSizeInvalid(true);
-    setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Size - Invalid Entry` });
-  }, [index, setMessage]);
-  const handleInvalidZone = useCallback(() => {
-    playAlert('error');
-    setZoneInvalid(true);
-    setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Zone - Invalid Entry` });
-  }, [index, setMessage]);
-
-  /** Validates a confirmed Aisle entry actually exists (the other open STG validation-
-   *  checklist item), mirroring SDP's own `handleAisleConfirm` — reports `"{Stack} Stack -
-   *  Aisle - Invalid Entry"` on the status bar if not, otherwise commits it into
-   *  StagingContext. Only ever wired up while Aisle is overridden (see render below), so
-   *  this always writes the stack's own override value, never Master Control's. Keeps the
-   *  typed value in the field either way (#109 — "the vast majority of invalid entries
-   *  SHOULD stay so the user sees what they entered"), washed red via `aisleInvalid` while
-   *  it hasn't yet been confirmed to exist. */
-  const handleAisleConfirm = useCallback(async (v: string) => {
-    const trimmed = v.trim();
-    hidePanel();
-    const aisleNum = parseInt(trimmed, 10);
-    if (trimmed && !isNaN(aisleNum)) {
-      try {
-        await apiFetch(`/api/locations/empty-by-zone?aisle=${aisleNum}`, token!);
-        clearMessage();
-        setAisleInvalid(false);
-      } catch (err) {
-        const code = err instanceof Error ? err.message : '';
-        if (code === 'NOT_FOUND') {
-          playAlert('error');
-          setAisleInvalid(true);
-          updateStack(index, { aisle: trimmed });
-          setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Aisle - Invalid Entry` });
-          return;
-        }
-      }
+  const stackAisle = isNaN(stackAisleNum) ? null : stackAisleNum;
+  /** Reacts to `PalletCodePicker`'s own reactive validity (Feature 10) — plays the same
+   *  error tone/message-bar line this always has, now sourced from the field's internal
+   *  check instead of a commit-only callback (also catches a value that becomes invalid
+   *  later because Aisle changed underneath it, not just at the moment of typing). The
+   *  wash itself no longer needs tracking here at all — `PalletCodePicker` washes itself. */
+  const handleStorageValidityChange = useCallback((inv: boolean) => {
+    if (inv) {
+      playAlert('error');
+      setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Storage Code - Invalid Entry` });
     }
-    updateStack(index, { aisle: trimmed });
-  }, [hidePanel, index, updateStack, token, setMessage, clearMessage]);
-
-  /** Registers this stack's Aisle field numpad handler. */
-  const focusAisleField = useCallback(() => {
-    aisleField.focus(handleAisleConfirm);
-  }, [aisleField, handleAisleConfirm]);
+  }, [index, setMessage]);
+  const handleSizeValidityChange = useCallback((inv: boolean) => {
+    if (inv) {
+      playAlert('error');
+      setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Size - Invalid Entry` });
+    }
+  }, [index, setMessage]);
+  const handleZoneValidityChange = useCallback((inv: boolean) => {
+    if (inv) {
+      playAlert('error');
+      setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Zone - Invalid Entry` });
+    }
+  }, [index, setMessage]);
 
   /** Registers this stack's Quantity field numpad handler; writes the confirmed value into StagingContext. */
   const focusQuantityField = useCallback(() => {
@@ -493,37 +492,37 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   // while not overridden anyway — effectiveStack always reads Master Control for it — but
   // clearing it avoids a stale value quietly resurfacing next time the override arms again).
   const toggleAisleOverride = useCallback(() => {
-    setAisleInvalid(false);
+    aisleFields.clear();
     updateStack(index, stack.aisleOverride ? { aisleOverride: false, aisle: '' } : { aisleOverride: true, aisle: master.aisle });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, stack.aisleOverride, master.aisle, updateStack]);
   const toggleStorageOverride = useCallback(() => {
-    setStorageInvalid(false);
     updateStack(index, stack.storageCodeOverride ? { storageCodeOverride: false, storageCode: '' } : { storageCodeOverride: true, storageCode: master.storageCode });
   }, [index, stack.storageCodeOverride, master.storageCode, updateStack]);
   const toggleSizeOverride = useCallback(() => {
-    setSizeInvalid(false);
     updateStack(index, stack.sizeOverride ? { sizeOverride: false, size: '' } : { sizeOverride: true, size: master.size });
   }, [index, stack.sizeOverride, master.size, updateStack]);
   // Zone has no Master Control field to pre-fill from (unlike Aisle/Storage/Size) — arming
   // just starts it blank, disarming clears it back out the same as the others.
   const toggleZoneOverride = useCallback(() => {
-    setZoneInvalid(false);
     updateStack(index, stack.zoneOverride ? { zoneOverride: false, zone: '' } : { zoneOverride: true, zone: '' });
   }, [index, stack.zoneOverride, updateStack]);
 
   /** Clears this one stack's Aisle/Storage/Size/Zone/Qty (and any active overrides on them)
    *  and any computed locations/shortfall — the single-slot version of `clearForks()`'s own
-   *  logic, independent of the other two stacks (mirrors STG#06's per-stack scoping). */
+   *  logic, independent of the other two stacks (mirrors STG#06's per-stack scoping).
+   *  Storage/Size/Zone's own invalid state no longer needs resetting here (Feature 10) —
+   *  clearing `value` to `''` below already reads as valid via each field's own internal
+   *  check; only Aisle still needs an explicit reset since its own existence check isn't
+   *  routed through useCodePickerField at all. */
   const clearStack = useCallback(() => {
-    setAisleInvalid(false);
-    setStorageInvalid(false);
-    setSizeInvalid(false);
-    setZoneInvalid(false);
+    aisleFields.clear();
     updateStack(index, {
       aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0,
       aisleOverride: false, storageCodeOverride: false, sizeOverride: false,
       zone: '', zoneOverride: false,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, updateStack]);
 
   return (
@@ -556,7 +555,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
         <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
           <OverrideToggle active={stack.aisleOverride} onClick={toggleAisleOverride} ariaLabel={`${STACK_LABELS[index]} Aisle override`} />
           {stack.aisleOverride ? (
-            <PalletBox label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} tinted reserveToggleSpace invalid={aisleInvalid} />
+            <PalletBox label="Aisle" value={aisleFields.field.value} onFocus={aisleFields.focusField} active={aisleFields.field.isActive} tinted reserveToggleSpace invalid={aisleFields.invalid} />
           ) : (
             <InheritedDisplay label="Aisle" value={master.aisle} onActivate={toggleAisleOverride} reserveToggleSpace />
           )}
@@ -572,13 +571,12 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               label="Zone"
               ariaLabel={`${STACK_LABELS[index]} Zone`}
               value={stack.zone}
-              onChange={(v) => { setZoneInvalid(false); updateStack(index, { zone: v }); }}
-              options={ZONE_OPTIONS}
+              onChange={(v) => updateStack(index, { zone: v })}
+              field="zone"
+              aisle={null}
               maxLength={1}
-              strict
-              onInvalid={handleInvalidZone}
+              onValidityChange={handleZoneValidityChange}
               tinted
-              invalid={zoneInvalid}
             />
           ) : (
             <InheritedDisplay label="Zone" value="" onActivate={toggleZoneOverride} reserveToggleSpace />
@@ -591,14 +589,13 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               label="Storage"
               ariaLabel={`${STACK_LABELS[index]} Storage Code`}
               value={stack.storageCode}
-              onChange={(v) => { setStorageInvalid(false); updateStack(index, { storageCode: v }); }}
-              options={storageOptions}
+              onChange={(v) => updateStack(index, { storageCode: v })}
+              field="storageCode"
+              aisle={stackAisle}
               maxLength={2}
               transform={(v) => v.toUpperCase()}
-              strict={storageStrict}
-              onInvalid={handleInvalidStorage}
+              onValidityChange={handleStorageValidityChange}
               tinted
-              invalid={storageInvalid}
             />
           ) : (
             <InheritedDisplay label="Storage" value={master.storageCode} onActivate={toggleStorageOverride} reserveToggleSpace />
@@ -611,15 +608,15 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               label="Size"
               ariaLabel={`${STACK_LABELS[index]} Size`}
               value={stack.size}
-              onChange={(v) => { setSizeInvalid(false); updateStack(index, { size: v }); }}
-              options={sizeOptions}
+              onChange={(v) => updateStack(index, { size: v })}
+              field="size"
+              aisle={stackAisle}
+              storageCodeForSize={effective.storageCode}
               maxLength={2}
               transform={(v) => v.toUpperCase()}
               earlyCommit={(v) => ['S', 'M', 'L'].includes(v)}
-              strict={sizeStrict}
-              onInvalid={handleInvalidSize}
+              onValidityChange={handleSizeValidityChange}
               tinted
-              invalid={sizeInvalid}
             />
           ) : (
             <InheritedDisplay label="Size" value={master.size} onActivate={toggleSizeOverride} reserveToggleSpace />
@@ -1572,49 +1569,49 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
 }) {
   const { master, setMaster } = useStaging();
   const { hidePanel } = useNumpad();
+  const { token } = useAuth();
   const { setMessage } = useMessageBar();
-  // Fixed 3-character field — auto-commits like every other screen's Aisle field (ELZ/SDP/
-  // LocationEntryFields), which Feature 2's live info panel relies on for its "no explicit
-  // submit step" behavior, same reasoning as the Storage Code field below. padOnSubmit:
-  // typing "5" and hitting OK is accepted as "005", same as those other screens.
-  const aisleField = useNumpadField('numpad', 3, true);
+  // Fixed 3-character field, existence-checked (issue #161 — previously this field had no
+  // validation at all, an inconsistency with the per-stack override's own `handleAisleConfirm`
+  // below, which already checked). Auto-commits like every other screen's Aisle field
+  // (ELZ/SDP/LocationEntryFields), which Feature 2's live info panel relies on for its "no
+  // explicit submit step" behavior, same reasoning as the Storage Code field below. Commits
+  // to shared `master` state regardless of validity (via `onConfirm`) — `invalid` only
+  // washes the box and drives the message bar; `InfoPanel` already shows its own "no data"
+  // state for a bad aisle independently of this field's own wash.
+  const aisleFields = useAisleField({
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    onConfirm: useCallback((v) => { setMaster({ aisle: v }); hidePanel(); }, [setMaster, hidePanel]),
+    onNotFound: useCallback(() => {
+      playAlert('error');
+      setMessage({ type: 'error', text: 'Master Control - Aisle - Invalid Entry' });
+    }, [setMessage]),
+  });
 
-  useEffect(() => { aisleField.set(master.aisle); }, [master.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { aisleFields.field.set(master.aisle); }, [master.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Registers the master Aisle field's numpad handler; writes the confirmed value into the shared master state. */
-  const focusAisleField = useCallback(() => {
-    aisleField.focus((v) => { setMaster({ aisle: v.trim() }); hidePanel(); });
-  }, [aisleField, hidePanel, setMaster]);
-
-  // Narrows the Storage Code/Size dropdown-helpers (issue #80) to what's actually present
-  // once an aisle is entered — the live info panel below stays fully unfiltered regardless.
+  // StorageCodeField/SizeField now own their own aisle-narrowing internally (Feature 10)
+  // — passing `aisle` below is all that's needed; `strictToAisle`/no-narrowing-toggle
+  // equivalent isn't needed for Size (it has no such toggle, always validates narrowed)
+  // and is explicitly turned on for Storage (matching STG's own established intent — a
+  // typed value must actually resolve within this aisle to count as valid here, unlike
+  // ELZ's read-only-report use of the same field).
   const aisleNum = parseInt(master.aisle, 10);
-  const aisleTypes = useAisleFreightTypes(isNaN(aisleNum) ? null : aisleNum);
-  const fullStorageCodes = useStorageCodes();
-  const storageCodeOptions = aisleTypes && fullStorageCodes
-    ? fullStorageCodes.filter((c) => aisleTypes.storageCodes.includes(c.code))
-    : undefined;
-  const sizeOptions = aisleTypes
-    ? aisleTypes.sizesFor(master.storageCode || undefined).map((s) => ({ code: s, desc: SIZE_NAMES[s] }))
-    : undefined;
+  const masterAisle = isNaN(aisleNum) ? null : aisleNum;
 
-  // Invalid-entry wash state (#109) — see StackBox's identical pair for why these are
-  // needed now that an invalid entry no longer clears itself.
-  const [storageInvalid, setStorageInvalid] = useState(false);
-  const [sizeInvalid, setSizeInvalid] = useState(false);
-
-  /** A typed value that isn't in the field's own (narrowed-or-full) options list never
-   *  flagged an error before — it just silently never matched anything downstream. Mirrors
-   *  the Aisle field's own invalid-entry message format. */
-  const handleInvalidStorage = useCallback(() => {
-    playAlert('error');
-    setStorageInvalid(true);
-    setMessage({ type: 'error', text: 'Master Control - Storage Code - Invalid Entry' });
+  /** Reacts to the field's own reactive validity (Feature 10) — the wash itself is now
+   *  automatic; this only drives the message-bar/alert side effect, same text as before. */
+  const handleStorageValidityChange = useCallback((inv: boolean) => {
+    if (inv) {
+      playAlert('error');
+      setMessage({ type: 'error', text: 'Master Control - Storage Code - Invalid Entry' });
+    }
   }, [setMessage]);
-  const handleInvalidSize = useCallback(() => {
-    playAlert('error');
-    setSizeInvalid(true);
-    setMessage({ type: 'error', text: 'Master Control - Size - Invalid Entry' });
+  const handleSizeValidityChange = useCallback((inv: boolean) => {
+    if (inv) {
+      playAlert('error');
+      setMessage({ type: 'error', text: 'Master Control - Size - Invalid Entry' });
+    }
   }, [setMessage]);
 
   return (
@@ -1646,23 +1643,23 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
         <div className="flex items-end gap-4">
           <StorageCodeField
             value={master.storageCode}
-            onChange={(v) => { setStorageInvalid(false); setMaster({ storageCode: v }); }}
-            options={storageCodeOptions}
+            onChange={(v) => setMaster({ storageCode: v })}
+            aisle={masterAisle}
+            strictToAisle
             size="compact"
             strict
-            onInvalid={handleInvalidStorage}
-            invalid={storageInvalid}
+            onValidityChange={handleStorageValidityChange}
           />
-          <FieldDisplay label="Aisle" value={aisleField.value} onFocus={focusAisleField} active={aisleField.isActive} width="w-[120px]" />
+          <FieldDisplay label="Aisle" value={aisleFields.field.value} onFocus={aisleFields.focusField} active={aisleFields.field.isActive} invalid={aisleFields.invalid} width="w-[120px]" />
           <SizeField
             value={master.size}
-            onChange={(v) => { setSizeInvalid(false); setMaster({ size: v }); }}
-            options={sizeOptions}
+            onChange={(v) => setMaster({ size: v })}
+            aisle={masterAisle}
+            storageCode={master.storageCode}
             size="compact"
             ariaLabel="Master Size"
             strict
-            onInvalid={handleInvalidSize}
-            invalid={sizeInvalid}
+            onValidityChange={handleSizeValidityChange}
           />
         </div>
 

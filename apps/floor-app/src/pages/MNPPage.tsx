@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DataRow } from '../components/shared/DataRow';
 import { HoldPanel } from '../components/shared/HoldPanel';
-import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
@@ -16,7 +16,6 @@ import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { useDigitInput } from '../lib/useDigitInput';
-import { useNumpadField } from '../lib/useNumpadField';
 import { fmtLocation } from '../lib/fmt';
 import { hasMinRole, type Role } from '@shared/index';
 
@@ -63,42 +62,6 @@ type GateState =
   | { kind: 'combine'; occupantPalletId: number | null; occupantDpci: string | null };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Input display field driven by NumpadContext.
- *
- * @param label - Label shown above the input box
- * @param value - Current value (from useNumpadField)
- * @param onFocus - Called on tap; should register the field's submit handler with the numpad
- * @param active - Shows blinking cursor when true
- * @param disabled - Prevents interaction (used for pallet field once pallet is scanned)
- */
-function FieldDisplay({
-  label,
-  value,
-  onFocus,
-  active = false,
-  disabled = false,
-}: {
-  label: string;
-  value: string;
-  onFocus: () => void;
-  active?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <NumpadFieldBox
-      label={label}
-      value={value}
-      onFocus={onFocus}
-      active={active}
-      disabled={disabled}
-      boxClass="h-[72px] px-5 rounded-[12px]"
-      valueClass="text-[32px] font-medium tracking-[0.04em]"
-      caretClass="w-[3px] h-[38px]"
-    />
-  );
-}
 
 /** Colored footer demo button; `color` selects a background from a small fixed palette. */
 function DemoBtn({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
@@ -337,14 +300,15 @@ export function MNPPage() {
 
   const role = (user?.role ?? 'WORKER') as Role;
 
-  const palletField = useNumpadField();
+  const palletFieldRef = useRef<PalletIdFieldHandle>(null);
+  const [palletIdValue, setPalletIdValue] = useState('');
 
   // ── Focus management ─────────────────────────────────────────────────────────
 
-  /** Registers the Pallet ID field's numpad handler, wired to handlePalletScan on confirm. */
+  /** (Re-)focuses the Pallet ID field for another attempt — e.g. after a failed scan. */
   const focusPalletField = useCallback(() => {
-    palletField.focus(handlePalletScan);
-  }, [palletField]);
+    palletFieldRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     if (screenState === 'ready') {
@@ -363,6 +327,7 @@ export function MNPPage() {
    */
   async function handlePalletScan(value: string) {
     const v = value.trim();
+    setPalletIdValue(v);
     if (!v || loadingRef.current || screenStateRef.current !== 'ready') return;
 
     const palletId = parseInt(v, 10);
@@ -389,7 +354,7 @@ export function MNPPage() {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
-      palletField.clear();
+      setPalletIdValue('');
       if (code === 'PALLET_NOT_FOUND') {
         setMessage({ type: 'error', text: 'Pallet not found' });
       } else if (code === 'NO_CARTONS') {
@@ -705,7 +670,7 @@ export function MNPPage() {
     acknowledgeContractionRef.current = false;
     acknowledgeHoldRef.current = false;
     setScreenState('ready');
-    palletField.clear();
+    setPalletIdValue('');
   }
 
   // ── Demo buttons ──────────────────────────────────────────────────────────────
@@ -820,11 +785,14 @@ export function MNPPage() {
     <div className="absolute inset-0 flex select-none">
       {/* Left column */}
       <div className="flex-1 flex flex-col p-6 gap-4 overflow-y-auto">
-        <FieldDisplay
+        <PalletIdField
+          ref={palletFieldRef}
           label="Scan Pallet ID"
-          value={palletField.value}
-          onFocus={focusPalletField}
-          active={palletField.isActive}
+          value={palletIdValue}
+          onChange={handlePalletScan}
+          boxClass="h-[72px] px-5 rounded-[12px]"
+          valueClass="text-[32px] font-medium tracking-[0.04em]"
+          caretClass="w-[3px] h-[38px]"
           disabled={screenState !== 'ready'}
         />
 
