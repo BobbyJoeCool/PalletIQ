@@ -6,7 +6,7 @@
       "localStorage": [
         {
           "name": "palletiq_token",
-          "value": "eyJhbGciOiJIUzI1NiJ9.eyJ6TnVtYmVyIjoiejAwMnAyMSIsInJvbGUiOiJXT1JLRVIiLCJpYXQiOjE3ODUxNzg4MjAsImV4cCI6MTc4NTIyMjAyMH0.wyzDglUuWA9IzA3U1JkLUppBb2ZkxLz9JJREqObvFLs"
+          "value": "eyJhbGciOiJIUzI1NiJ9.eyJ6TnVtYmVyIjoiejAwMnAyMSIsInJvbGUiOiJXT1JLRVIiLCJpYXQiOjE3ODUyNzg5NDUsImV4cCI6MTc4NTMyMjE0NX0.6ZEdaPsLVPqYuIxPt_PMZYSYurHJpYjU7xRefH-F_MY"
         },
         {
           "name": "palletiq_user",
