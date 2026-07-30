@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { DemoPicker } from '../components/shared/DemoPicker';
 import { HOLD_LABELS, type HoldCategory } from '../components/shared/HoldPanel';
+import { ItemDemoScannerBar } from '../components/shared/ItemDemoScannerBar';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
@@ -30,7 +30,6 @@ type Mode = 'single' | 'multiple';
 // as `PARItemLookup`, imported above rather than redeclared.
 interface ReinstateRowResult { palletId: number; cartons: number; ssps: number; cartonsPerPallet: number; status: 'PUT_PENDING' | 'STORED'; locationId: string | null }
 interface ReinstateResult { pallets: ReinstateRowResult[] }
-interface SampleReinstate { dpci: string; upc: string; vcp: number; ssp: number; cartons: number; ssps: number }
 interface LocationStatusInfo { status: string; holdCategory: HoldCategory | null; contraction: boolean; storageCode: string; size: string }
 /** One row in the session-local Reinstate Log (v1.7.0) — `key` doubles as React's list key
  *  since a Pallet ID is already unique per row. `locationId` is null for a PUT_PENDING
@@ -95,7 +94,7 @@ function PlainText({
  *  printer-picker popup exists yet, no code-list to pick from, so there's nothing for it
  *  to open). No format/existence validation on the typed value (direct instruction — "no
  *  typechecking"); this app has no printer concept anywhere else (no field on
- *  `Pallet`/`Label`, no endpoint) for a typed value to be checked against yet. Visually
+ *  `Pallet`/`Container`, no endpoint) for a typed value to be checked against yet. Visually
  *  matches the entry-box + dropdown-helper shape used elsewhere in the app (e.g.
  *  `CodePickerField`) without wiring up any actual popup/selection logic on the dropdown
  *  half. */
@@ -807,99 +806,26 @@ export function PARPage() {
     void doSubmit(true);
   }
 
-  // ── Demo buttons (v1.6.11) — one per identifier, each opens a DemoPicker popup instead
-  // of a fixed good/bad pair, direct instruction. ───────────────────────────────
+  // ── Demo buttons ──────────────────────────────────────────────────────────
 
-  /** requiresExpirationDate is passed through to `sampleReinstate`'s own optional filter
-   *  (undefined = either, matching the plain "Valid" option's original random-pick
-   *  behavior) so the DPCI/UPC pickers' "w/ Expiration"/"w/o Expiration" options can land
-   *  deterministically on an item that does or doesn't require one, for exercising PAR's
-   *  own required-Expiration-Date gate on demand instead of re-rolling "Valid" repeatedly. */
-  const fillSample = useCallback(async (requiresExpirationDate?: boolean): Promise<SampleReinstate | null> => {
-    try {
-      const qs = requiresExpirationDate != null ? `?requiresExpirationDate=${requiresExpirationDate}` : '';
-      return await apiFetch<SampleReinstate>(`/api/pallets/sample-reinstate${qs}`, token!);
-    } catch {
-      setMessage({ type: 'error', text: 'Demo fill unavailable' });
-      return null;
-    }
-  }, [token, setMessage]);
+  // Location's own demo picker (Empty/Occupied/Invalid/Hold/Contraction/Wrong Storage
+  // Type) is retired — LocationEntryFields' `demoScanner` prop below now owns that
+  // registration internally (Feature 9, Phase 2), with "Wrong Storage Type" covered via
+  // its `demoItemStorageCode` escape hatch (only offered once an item is resolved).
 
-  const [dpciPickerOpen, setDpciPickerOpen] = useState(false);
-  const [upcPickerOpen, setUpcPickerOpen] = useState(false);
-  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
-
-  type IdentifierDemoKey = 'valid' | 'validWithExpiration' | 'validWithoutExpiration' | 'invalid';
-
-  /** DPCI picker: "Valid" fills a random real, resolvable DPCI (either expiration
-   *  behavior); "Valid w/ Expiration"/"Valid w/o Expiration" fill one guaranteed to
-   *  require (or not require) an Expiration Date; "Invalid" fills one that doesn't exist. */
-  const pickDpci = useCallback(async (key: IdentifierDemoKey) => {
-    setDpciPickerOpen(false);
-    if (key === 'invalid') {
-      dpciFields.loadDpci('999999000');
-      return;
-    }
-    const requiresExpirationDate = key === 'validWithExpiration' ? true : key === 'validWithoutExpiration' ? false : undefined;
-    const sample = await fillSample(requiresExpirationDate);
-    if (!sample) return;
-    dpciFields.loadDpci(sample.dpci);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fillSample]);
-
-  /** UPC picker: same 4 options as the DPCI picker, filling the UPC field instead. */
-  const pickUpc = useCallback(async (key: IdentifierDemoKey) => {
-    setUpcPickerOpen(false);
-    if (key === 'invalid') {
-      upcFields.loadUpc('999999999999');
-      return;
-    }
-    const requiresExpirationDate = key === 'validWithExpiration' ? true : key === 'validWithoutExpiration' ? false : undefined;
-    const sample = await fillSample(requiresExpirationDate);
-    if (!sample) return;
-    upcFields.loadUpc(sample.upc);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fillSample]);
-
-  /** Location picker: fills the Location field with a real location matching the picked
-   *  status (or a nonexistent one for "Invalid") — same as scanning/typing one in, nothing
-   *  more; the live checkLocation() this triggers is what actually surfaces the result.
-   *  Every status option besides Invalid is now scoped to the resolved item's own Storage
-   *  Code (v1.7.0), so all of them land on a genuinely valid put target storage-code-wise;
-   *  "Wrong Storage Type" is the deliberate exception, finding a mismatch on purpose to
-   *  exercise the new Storage-Code warn-then-allow flow. */
-  const pickLocation = useCallback(async (key: 'empty' | 'occupied' | 'invalid' | 'held' | 'contracted' | 'wrongType') => {
-    setLocationPickerOpen(false);
-    if (key === 'invalid') {
-      handleLocationResolved('99999999');
-      return;
-    }
-    if (!item) {
-      setMessage({ type: 'error', text: 'Resolve a DPCI/UPC first' });
-      return;
-    }
-    try {
-      const qs = `status=${key}&storageCode=${encodeURIComponent(item.storageCode)}`;
-      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>(`/api/demo/location?${qs}`, token!);
-      handleLocationResolved(locationId + String(level).padStart(2, '0'));
-    } catch {
-      setMessage({ type: 'error', text: 'Demo fill unavailable' });
-    }
-  }, [token, item, handleLocationResolved, setMessage]);
-
+  /** Footer demo-button slot: DPCI/UPC's Feature 9 Demo Scanner (replaces the old
+   *  DemoPicker-based "Valid/Valid w/ Expiration/Valid w/o Expiration/Invalid" pickers,
+   *  one per identifier). A single group labeled "Item" (direct instruction) rather than
+   *  two separate DPCI/UPC groups — PAR shows this unconditionally instead of gating on
+   *  which of its two fields currently has focus, and 6 simultaneous buttons (3 each)
+   *  would overflow the footer's fixed-height, non-wrapping row. Targets whichever field
+   *  currently has focus, same "default to DPCI unless UPC is active" convention
+   *  IID/ISI's own single-group footer already uses. */
   const demoSlot = useMemo(() => (
-    <>
-      <button type="button" onClick={() => setDpciPickerOpen(true)} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#003366] hover:bg-[#004488] text-white transition-colors">
-        DPCI
-      </button>
-      <button type="button" onClick={() => setUpcPickerOpen(true)} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#003366] hover:bg-[#004488] text-white transition-colors">
-        UPC
-      </button>
-      <button type="button" onClick={() => setLocationPickerOpen(true)} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#003366] hover:bg-[#004488] text-white transition-colors">
-        Location
-      </button>
-    </>
-  ), []);
+    upcFields.field.isActive
+      ? <ItemDemoScannerBar idType="upc" onFill={upcFields.loadUpc} label="Item" />
+      : <ItemDemoScannerBar idType="dpci" onFill={dpciFields.loadDpci} label="Item" />
+  ), [upcFields.field.isActive, upcFields.loadUpc, dpciFields.loadDpci]);
 
   useDemoSlot(isIM ? demoSlot : null);
 
@@ -1203,6 +1129,8 @@ export function PARPage() {
               onAisleValidityChange={setAisleInvalid}
               onBinValidityChange={setBinInvalid}
               levelInvalid={locationInvalid}
+              demoScanner
+              demoItemStorageCode={item?.storageCode}
             />
           </div>
           {/* Location's own Storage Code/Size (v1.7.0, direct instruction — moved here from
@@ -1268,50 +1196,6 @@ export function PARPage() {
           variant="danger"
           onConfirm={() => void doSubmit()}
           onCancel={() => setConfirming(false)}
-        />
-      )}
-
-      {dpciPickerOpen && (
-        <DemoPicker
-          title="Simulate which DPCI?"
-          options={[
-            { key: 'valid', label: 'Valid' },
-            { key: 'validWithExpiration', label: 'Valid w/ Expiration' },
-            { key: 'validWithoutExpiration', label: 'Valid w/o Expiration' },
-            { key: 'invalid', label: 'Invalid' },
-          ]}
-          onPick={(k) => void pickDpci(k)}
-          onCancel={() => setDpciPickerOpen(false)}
-        />
-      )}
-
-      {upcPickerOpen && (
-        <DemoPicker
-          title="Simulate which UPC?"
-          options={[
-            { key: 'valid', label: 'Valid' },
-            { key: 'validWithExpiration', label: 'Valid w/ Expiration' },
-            { key: 'validWithoutExpiration', label: 'Valid w/o Expiration' },
-            { key: 'invalid', label: 'Invalid' },
-          ]}
-          onPick={(k) => void pickUpc(k)}
-          onCancel={() => setUpcPickerOpen(false)}
-        />
-      )}
-
-      {locationPickerOpen && (
-        <DemoPicker
-          title="Simulate which Location?"
-          options={[
-            { key: 'empty', label: 'Empty' },
-            { key: 'occupied', label: 'Occupied' },
-            { key: 'invalid', label: 'Invalid' },
-            { key: 'held', label: 'Hold' },
-            { key: 'contracted', label: 'Contraction' },
-            { key: 'wrongType', label: 'Wrong Storage Type' },
-          ]}
-          onPick={(k) => void pickLocation(k)}
-          onCancel={() => setLocationPickerOpen(false)}
         />
       )}
 

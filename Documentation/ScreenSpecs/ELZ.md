@@ -43,11 +43,25 @@ can set or lift Contraction from ELZ.
      `StorageCodeField`'s `invalid` prop, same as ELA.
 4. Once Aisle resolves, the screen shows:
    - **Left/center:** the physical aisle grid (`AisleGrid`) — 8 columns (Zone 1-4 ×
-     Odd/Even), Level 1 at the bottom, highest level at top. Always unfiltered by
+     Odd/Even). **Revised 2026-07-28 (issue #126):** each column is its own list of that
+     zone/side's occupied levels only (no fixed one-row-per-level grid, no empty
+     placeholder cells) — every entry shows a small Level badge before its
+     `{StorageCode}-{Size}` text, sorted highest level first (top) down to Level 1
+     (bottom). Every column fills the full grid height regardless of entry count — each
+     entry's own box height is weighted by its physical Size (`SIZE_WEIGHTS`, same formula
+     this grid used pre-#126 for whole rows), so a sparsely-occupied column gets visibly
+     larger boxes rather than leaving empty space, and columns are no longer level-aligned
+     with each other (the same physical level can land at a different height in each
+     column). Always unfiltered by
      Storage Code — it's a physical map of everything in the aisle, not a filtered view.
    - **Right:** a per-zone summary panel (Zone 1 through Zone 4), each zone's combined
      Odd+Even empty/staged counts broken down by Storage Code-Size, narrowed to whichever
-     Storage Code was entered (or every code present, if none was).
+     Storage Code was entered (or every code present, if none was). **Revised 2026-07-28
+     (direct instruction):** one column per Storage Code (freight type) present in that
+     zone, alphabetical left to right; within each column, badges are sorted largest Size
+     first (top) down to smallest (bottom) — replaces the previous flat, horizontally-
+     wrapped badge list. Shared `groupBreakdownByStorageCode` helper
+     (`lib/zoneSummary.ts`) — STG's own Zone Summary panel uses the identical layout.
 5. Worker taps **Stage Aisle** at the bottom of the summary panel → navigates to STG
    (`/stage`) with router state `{ aisle, storageCode }`. As with ELA, this only ever
    pre-fills STG's Master Control — the worker still fills stacks themselves via "Fill
@@ -175,11 +189,17 @@ is choosing what type a cell holds, not confirming it's currently stageable). Th
 hook backs STG's and SDP's equivalent narrowing, so the fix applies to all three
 screens, not just ELZ.
 
-**Row height weighting:** `AisleGrid` never scrolls — each level's row gets a share of
-the fixed grid height proportional to `SIZE_WEIGHTS[size]` (L=1, M=.667, S=.5, HS=.25,
-XS=.125), read off the first cell present at that level (a level's Size is constant
-across every zone/side within it, per `seed.ts`'s `getSize`). This means an aisle with
-many levels still fits without a scrollbar or any level-count threshold.
+**Column sizing (revised 2026-07-28, issue #126, refined same day):** `AisleGrid` no
+longer renders a fixed level-row grid — each of the 8 zone/side columns is now its own
+list of only its occupied levels (see the Layout section above), and each column
+independently fills its full available height: every entry within a column gets a share
+of that column's height weighted by `SIZE_WEIGHTS[size]` (L=1, M=.667, S=.5, HS=.25,
+XS=.125) — the same formula and weights this grid used pre-#126, just applied per entry
+within an independently-populated column now instead of per row shared across every
+column. The outer grid kept `overflow-y-auto` (switched from the original never-scrolling
+design) as a safety net for a column dense enough that its weighted entries would
+otherwise shrink below a readable size — not yet confirmed whether real aisle data ever
+actually triggers that scroll in practice.
 
 **Per-zone bin range:** `zoneBinRanges` is computed as one min/max pass over every
 location in the aisle per zone (both sides combined, since bin numbering is
@@ -217,6 +237,11 @@ component with no per-caller divergence left.
 | Date | Change |
 |---|---|
 | 2026-07-28 (Feature 10 / #161) | Internal-only: the Aisle field's hand-rolled box markup replaced with the shared `NumpadFieldBox` primitive (same visual sizing). This screen deliberately stayed off the new `useAisleField` hook (unlike ELA/SDP/STG/WLH) — its existence check is inherently a side effect of the `empty-by-zone` fetch it needs regardless for its own real data, so a separate dedicated check would just be a redundant network call. |
+| 2026-07-28 (#126) | `AisleGrid` redesigned: each of the 8 zone/side columns is now its own list of occupied levels (Level badge + `{StorageCode}-{Size}`, highest level first) instead of a fixed one-row-per-level grid — no more empty placeholder cells for unoccupied levels, and columns are no longer level-aligned with each other. Issue #126 was originally filed against "ELA" — corrected to ELZ (ELA doesn't render this grid at all) as part of this update. Shared with STG, which also picks up this change. |
+| 2026-07-28 (#126, same-day refinement) | Every column now fills the grid's full height regardless of entry count, instead of being natural-height — each entry's box is weighted by `SIZE_WEIGHTS[size]` (the same L/M/S/HS/XS formula the pre-#126 grid used per row) and grows to fill its share of the column, so a sparsely-occupied column gets visibly larger boxes rather than empty space. |
+| 2026-07-28 (Level badge sizing) | The `AisleGrid` Level badge (introduced in the #126 redesign above) enlarged twice in the same session — first to 1.75x its original size, then reduced to 1.5x (27×24px, 15px text) at direct instruction. |
+| 2026-07-28 (Zone Summary columns) | Zone Summary panel: one column per Storage Code (alphabetical), each column's badges sorted largest Size first (top) down to smallest (bottom) — replaces the previous flat, wrapped badge list. Shared with STG's own Zone Summary via the new `groupBreakdownByStorageCode` helper (`lib/zoneSummary.ts`). |
+| 2026-07-28 (Seed data — Aisle 730/200 zone direction) | `api/prisma/seed.ts`'s `foldedZoneOf` (the zone-assignment formula for Aisle 730's RF/RS and Aisle 200's BS "folded" shape) was backwards — Zone 1 (the 96-bin XS zone) sat at bins 1-96 with Zones 2-4 following at 97-192, the opposite of the standard aisle's low-bin-is-Zone-4/high-bin-is-Zone-1 direction. Corrected to bins 1-32/33-64/65-96 = Zones 4/3/2, bins 97-192 = Zone 1, matching `getZone128`'s own direction. **Database was reseeded** to apply this to already-stored Aisle 730/200 location data (direct instruction — this discarded all other locally-seeded/test state from this session as a side effect, confirmed acceptable before running). |
 | 2026-07-27 (Feature 10) | Internal-only: Storage Code's aisle-narrowing and invalid-check now live inside `StorageCodeField` itself (an `aisle` dependency prop) instead of this screen computing a narrowed options list and an `isInvalidStorageCode` flag externally. No change to the documented wash/message conditions below — a real code just absent from the queried aisle still isn't treated as invalid (broad validation), only genuinely unknown codes wash. |
 | 2026-07-16 (v1.6.5) | Grid rows now weighted by physical Size instead of scrolling (superseded the originally-scoped ">10 levels" special case with a more general fix, also applied to STG's embedded map); curated per-Storage-Code text coloring added; per-zone "BINS: {max} - {min}" header line added; heavier/more visible cell dividers, with a distinct heavier zone-to-zone boundary color; invalid-Storage-Code and invalid-Aisle message-bar errors added, matching ELA's existing pattern; Storage Code field now dismisses the keyboard on its 2-character auto-commit. Also app-wide this version: Size field early-commit for single-letter S/M/L codes. |
 | 2026-07-12 (v1.5.0) | The zone map now renders from Aisle alone — Storage Code is no longer required to see the physical layout grid (#60), matching ELA's already-optional pattern. |

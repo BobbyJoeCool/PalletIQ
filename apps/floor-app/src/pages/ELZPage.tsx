@@ -10,6 +10,7 @@ import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { useNumpadField } from '../lib/useNumpadField';
+import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 
 interface Breakdown {
   storageCode: string;
@@ -205,10 +206,17 @@ export function ELZPage() {
                 <div key={z.zone} className="px-5 py-3 border-b border-[#1A1A1A]">
                   <span className="font-ui text-[15px] font-semibold text-white">Zone {z.zone}</span>
                   {/* Color-coded badges (v1.6.6, matching STG's own Zone Summary) — larger
-                      here than STG's compact version, this panel's own full width. */}
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {z.breakdown.map((b) => (
-                      <ZoneCodeBadge key={`${b.storageCode}-${b.size}`} storageCode={b.storageCode} size={b.size} empty={b.empty} staged={b.staged} />
+                      here than STG's compact version, this panel's own full width.
+                      2026-07-28: one column per Storage Code, each column's own badges
+                      sorted largest Size first (top) down to smallest (bottom), instead
+                      of a flat wrapped list — see groupBreakdownByStorageCode. */}
+                  <div className="flex gap-3 mt-2">
+                    {groupBreakdownByStorageCode(z.breakdown).map((col) => (
+                      <div key={col.storageCode} className="flex flex-col gap-1.5">
+                        {col.entries.map((b) => (
+                          <ZoneCodeBadge key={`${b.storageCode}-${b.size}`} storageCode={b.storageCode} size={b.size} empty={b.empty} staged={b.staged} />
+                        ))}
+                      </div>
                     ))}
                   </div>
                 </div>

@@ -83,6 +83,7 @@ async function main() {
     cartonsPerPallet: number;
     vcp: number; ssp: number;
     status: string;
+    storageCode: string; size: string;
     locationAisle: null; locationBin: null; locationLevel: null;
     receivedByZ: string; receivedAt: Date;
     poNumber: string; apptNumber: string;
@@ -120,6 +121,12 @@ async function main() {
         vcp,
         ssp,
         status: 'PUT_PENDING',
+        // A pallet always has a Storage Code/Size, even before its first put — the combo
+        // it was generated for here, later overwritten by `placePallet` to match wherever
+        // it's actually stored. Previously left unset despite this loop already iterating
+        // real (storageCode, size) combos.
+        storageCode: combo.storageCode,
+        size: combo.size,
         locationAisle: null, locationBin: null, locationLevel: null,
         receivedByZ: 'z002p21',
         receivedAt: now,

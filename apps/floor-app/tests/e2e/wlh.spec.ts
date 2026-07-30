@@ -1,9 +1,22 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 /**
  * Covers WLH's location resolution, hold placement + reason-code entry, hold removal,
  * and role-gated visibility of hold-type buttons. See DevNotes/Screen-Specs/WLH.md.
  */
+
+/** Opens the Location ID Demo Scanner's Filter popup, sets the Hold dropdown, and submits
+ *  (Feature 9, Phase 2) — used in place of WLH's now-retired "Find Held/Available
+ *  Location" buttons, which the Hold axis's "Any Status" default reproduces exactly
+ *  (those buttons never cared about occupancy either). */
+async function findByHold(page: Page, holdLabel: string) {
+  await page.getByRole('button', { name: 'Location by Filter' }).click();
+  const holdDropdown = page.locator('div.relative.inline-flex', { hasText: 'Hold' }).first();
+  await holdDropdown.getByRole('button').first().click();
+  await holdDropdown.getByRole('button', { name: holdLabel, exact: true }).click();
+  await page.getByRole('button', { name: 'Find', exact: true }).click();
+}
+
 test.describe('WLH — Warehouse Location Hold', () => {
   test.use({ storageState: 'playwright/.auth/im.json' });
 
@@ -12,27 +25,27 @@ test.describe('WLH — Warehouse Location Hold', () => {
   });
 
   test('loading a valid location shows the hold panel with no current hold', async ({ page }) => {
-    await page.getByRole('button', { name: '✓ Load Location' }).click();
+    await page.getByRole('button', { name: '✓ Valid Location' }).click();
     await expect(page.getByText('Current Hold', { exact: true })).toBeVisible();
     await expect(page.getByText('None', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Hold Inbound' })).toBeVisible();
   });
 
   test('an unknown location shows a not-found error', async ({ page }) => {
-    await page.getByRole('button', { name: '✗ Bad Location' }).click();
+    await page.getByRole('button', { name: '✗ Invalid Location' }).click();
     await expect(page.getByText('Location not found')).toBeVisible();
   });
 
   // Issue #15 — must run before any test below places a hold (e.g. "placing a hold
   // requires a reason code" deliberately leaves its hold in place), since this asserts
   // on the state where nothing anywhere is on hold yet — true only at fresh-seed state.
-  test('Find Held Location shows a not-found message when nothing is currently on hold', async ({ page }) => {
-    await page.getByRole('button', { name: 'Find Held Location' }).click();
-    await expect(page.getByText('No locations currently on hold.')).toBeVisible();
+  test('finding a Hold Any location shows a not-found message when nothing is currently on hold', async ({ page }) => {
+    await findByHold(page, 'Hold Any');
+    await expect(page.getByText('Demo location unavailable')).toBeVisible();
   });
 
   test('placing a hold requires a reason code and shows a success message', async ({ page }) => {
-    await page.getByRole('button', { name: '✓ Load Location' }).click();
+    await page.getByRole('button', { name: '✓ Valid Location' }).click();
     await page.getByRole('button', { name: 'Hold Both' }).click();
 
     const confirmBtn = page.getByRole('button', { name: 'Confirm Hold' });
@@ -46,7 +59,7 @@ test.describe('WLH — Warehouse Location Hold', () => {
   });
 
   test('removing an active hold clears it back to None', async ({ page }) => {
-    await page.getByRole('button', { name: '✓ Load Location' }).click();
+    await page.getByRole('button', { name: '✓ Valid Location' }).click();
     await page.getByRole('button', { name: 'Hold Both' }).click();
     await page.getByLabel('Reason code').selectOption('B01');
     await page.getByRole('button', { name: 'Confirm Hold' }).click();
@@ -57,22 +70,23 @@ test.describe('WLH — Warehouse Location Hold', () => {
     await expect(page.getByText('None', { exact: true })).toBeVisible();
   });
 
-  // Issue #15 — helper-bar buttons to find a held/unheld location without typing one in blind.
-  test('Find Available Location loads some location with no current hold', async ({ page }) => {
-    await page.getByRole('button', { name: 'Find Available Location' }).click();
+  // Issue #15 — Hold axis in the Demo Scanner's Filter popup, replacing WLH's own
+  // dedicated "Find Held/Available Location" buttons.
+  test('finding a Not Held location loads some location with no current hold', async ({ page }) => {
+    await findByHold(page, 'Not Held');
     await expect(page.getByText('Current Hold', { exact: true })).toBeVisible();
     await expect(page.getByText('None', { exact: true })).toBeVisible();
   });
 
-  test('Find Held Location loads a location once one is actually on hold', async ({ page }) => {
-    // Place a hold first (seed data starts with none), then confirm the helper button can find it.
-    await page.getByRole('button', { name: '✓ Load Location' }).click();
+  test('finding a Hold Any location loads one once one is actually on hold', async ({ page }) => {
+    // Place a hold first (seed data starts with none), then confirm the Hold Any filter can find it.
+    await page.getByRole('button', { name: '✓ Valid Location' }).click();
     await page.getByRole('button', { name: 'Hold Both' }).click();
     await page.getByLabel('Reason code').selectOption('B01');
     await page.getByRole('button', { name: 'Confirm Hold' }).click();
     await expect(page.getByText(/Hold Both placed on/)).toBeVisible();
 
-    await page.getByRole('button', { name: 'Find Held Location' }).click();
+    await findByHold(page, 'Hold Any');
     await expect(page.getByText('Current Hold', { exact: true })).toBeVisible();
     await expect(page.getByText('None', { exact: true })).not.toBeVisible();
   });
@@ -83,7 +97,7 @@ test.describe('WLH — Worker role gating', () => {
 
   test('Worker only sees Hold Both among placeable hold types', async ({ page }) => {
     await page.goto('/hold');
-    await page.getByRole('button', { name: '✓ Load Location' }).click();
+    await page.getByRole('button', { name: '✓ Valid Location' }).click();
 
     await expect(page.getByRole('button', { name: 'Hold Both' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Hold Inbound' })).not.toBeVisible();

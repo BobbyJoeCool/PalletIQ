@@ -6,8 +6,8 @@ import { requireAuth, requireRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { generateUniquePid } from '../lib/palletId.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
-import { TERMINAL_LABEL_STATUSES } from '../lib/eligibility.js';
-import { parseDpci, formatDpci } from '../lib/dpci.js';
+import { TERMINAL_CONTAINER_STATUSES } from '../lib/eligibility.js';
+import { parseDpci } from '../lib/dpci.js';
 
 /**
  * Retrieves all fields of a pallet, including item UPC/description, current location,
@@ -71,15 +71,15 @@ async function getPallet(req: HttpRequest, _ctx: InvocationContext): Promise<unk
  * Updates one or more editable fields on a pallet. Requires IM+ role.
  *
  * DPCI change rules:
- *   - Blocked if any open (non-terminal) labels exist for this pallet, since those labels
- *     are keyed to the old DPCI and would become inconsistent.
+ *   - Blocked if any open (non-terminal) containers exist for this pallet, since those
+ *     containers are keyed to the old DPCI and would become inconsistent.
  *   - The new DPCI must exist in the Item table.
- *   - When allowed, the DPCI update cascades to all labels for this pallet in one transaction.
+ *   - When allowed, the DPCI update cascades to all containers for this pallet in one transaction.
  *
  * Quantity edit rules:
  *   - Quantities cannot go negative.
  *   - Total effective cartons (pallets × cartons-per-pallet + loose cartons) must not fall
- *     below the total committed to pending pull labels; same check for SSPs.
+ *     below the total committed to pending pull containers; same check for SSPs.
  *   - SSP must evenly divide VCP (`INVALID_VCP_SSP_RATIO` otherwise) — both are
  *     item-quantities (VCP = items/carton, SSP = items/store-ship-unit), and `vcp/ssp` is
  *     the resulting SSPs-per-carton count.
@@ -111,7 +111,7 @@ async function getPallet(req: HttpRequest, _ctx: InvocationContext): Promise<unk
  *   400 SSPS_EXCEED_CARTON if currentSSPs is at or above one full carton's worth (vcp/ssp);
  *   403 FORBIDDEN if caller is not IM+;
  *   404 NOT_FOUND if pallet or new DPCI does not exist;
- *   409 BLOCKED_BY_PENDING_PULL if open labels block a DPCI change;
+ *   409 BLOCKED_BY_PENDING_PULL if open containers block a DPCI change;
  *   409 INSUFFICIENT_QUANTITY if new quantities are below pending pull commitments;
  *   409 EXPIRATION_NEEDS_CONFIRM if the new date is 1-3 months out and not yet confirmed
  */
@@ -198,9 +198,9 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
      body.dpci.item !== pallet.item);
 
   if (dpciChanging) {
-    // Block the DPCI change if any labels are still open (not terminal).
-    const pendingCount = await prisma.label.count({
-      where: { pid, status: { notIn: TERMINAL_LABEL_STATUSES } },
+    // Block the DPCI change if any containers are still open (not terminal).
+    const pendingCount = await prisma.container.count({
+      where: { pid, status: { notIn: TERMINAL_CONTAINER_STATUSES } },
     });
     if (pendingCount > 0) {
       throw Object.assign(new Error('BLOCKED_BY_PENDING_PULL'), { status: 409 });
@@ -218,9 +218,9 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
     body.currentSSPs    != null;
 
   if (quantityChanging) {
-    // Sum up quantities already committed to open labels so we can enforce a floor.
-    const pending = await prisma.label.aggregate({
-      where: { pid, status: { notIn: TERMINAL_LABEL_STATUSES } },
+    // Sum up quantities already committed to open containers so we can enforce a floor.
+    const pending = await prisma.container.aggregate({
+      where: { pid, status: { notIn: TERMINAL_CONTAINER_STATUSES } },
       _sum: { quantity: true, sspQuantity: true },
     });
     const pendingCartons = pending._sum.quantity    ?? 0;
@@ -268,10 +268,10 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   if (expirationChanging) updateData['expirationDate'] = newExpirationDate;
 
   if (dpciChanging) {
-    // Cascade the DPCI change to all labels in the same transaction.
+    // Cascade the DPCI change to all containers in the same transaction.
     await prisma.$transaction([
       prisma.pallet.update({ where: { pid }, data: updateData }),
-      prisma.label.updateMany({
+      prisma.container.updateMany({
         where: { pid },
         data: { dept: body.dpci!.dept, class: body.dpci!.class, item: body.dpci!.item },
       }),
@@ -435,7 +435,7 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   // Resolve the item by whichever identifier was given — DPCI is the anchor everywhere
   // else in the app (frontend never populates UPC back from a DPCI search, only the
   // reverse), but either one is enough to key the new row(s) off dept/class/item.
-  let dept: number, cls: number, itm: number, requiresExpirationDate: boolean;
+  let dept: number, cls: number, itm: number, requiresExpirationDate: boolean, itemStorageCode: string;
   if (body.dpci) {
     const parsed = parseDpci(body.dpci);
     if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
@@ -443,11 +443,13 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
     const item = await prisma.item.findUnique({ where: { DPCI: { dept, class: cls, item: itm } } });
     if (!item) throw Object.assign(new Error('DPCI_NOT_FOUND'), { status: 404 });
     requiresExpirationDate = item.requiresExpirationDate;
+    itemStorageCode = item.storageCode;
   } else if (body.upc) {
     const item = await prisma.item.findUnique({ where: { upc: body.upc } });
     if (!item) throw Object.assign(new Error('UPC_NOT_FOUND'), { status: 404 });
     dept = item.dept; cls = item.class; itm = item.item;
     requiresExpirationDate = item.requiresExpirationDate;
+    itemStorageCode = item.storageCode;
   } else {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
@@ -548,13 +550,15 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
         vcp: body.vcp!, ssp: body.ssp!,
         status,
         locationAisle, locationBin, locationLevel,
-        // Inherited from the reinstated location, same as any other put (placePallet) —
-        // null (nothing to inherit) when reinstated without a location, i.e. PUT_PENDING.
-        // Size falls back to the worker-entered `body.size` when no location was given —
-        // unlike Storage Code, Item has no intrinsic Size to fall back on (see the Item
-        // model's own comment), so without this a PUT_PENDING pallet would have nothing at
-        // all for SDP's default location search to match on until its first put.
-        storageCode: locationRow?.storageCode ?? null,
+        // Inherited from the reinstated location, same as any other put (placePallet).
+        // Storage Code falls back to the item's own intrinsic Storage Code (the exact
+        // fallback Directed Put's own default location search already reads at runtime
+        // when a pallet's own Storage Code is null — see samplePallet's doc comment) so a
+        // pallet actually gets a real Storage Code at creation, not just an unstored
+        // runtime fallback. Size falls back to the worker-entered `body.size` — unlike
+        // Storage Code, Item has no intrinsic Size to fall back on (see the Item model's
+        // own comment), so this screen requires Size whenever no Location is given.
+        storageCode: locationRow?.storageCode ?? itemStorageCode,
         size:        locationRow?.size ?? body.size ?? null,
         zone:        locationRow?.zone ?? null,
         receivedByZ: auth.zNumber,
@@ -612,49 +616,12 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   };
 }
 
-// ── GET /api/pallets/sample-reinstate ─────────────────────────────────────────
-
-/**
- * Demo helper for PAR's DPCI/UPC picker options — returns a valid DPCI+UPC pair plus a
- * plausible VCP/SSP/Single-mode quantity set the worker can submit as-is for a valid
- * reinstate.
- *
- * @param requiresExpirationDate - Optional `?requiresExpirationDate=true|false` filter
- *   (v1.6.11, new) — lets PAR's demo picker deliberately land on an item that does or
- *   doesn't require an Expiration Date, instead of only ever getting a random one, so the
- *   worker can exercise the required-Expiration-Date gate on demand rather than re-rolling
- *   the plain "Valid" option until one happens to land.
- * @returns `{ dpci: string; upc: string; vcp: number; ssp: number; cartons: number; ssps: number }`
- * @throws 404 NOT_FOUND if no Item row matches (the table is empty, or the filter has no matches)
- */
-async function sampleReinstate(req: HttpRequest): Promise<unknown> {
-  await requireAuth(req);
-
-  const requiresExpirationDateParam = new URL(req.url).searchParams.get('requiresExpirationDate');
-  const where = requiresExpirationDateParam != null ? { requiresExpirationDate: requiresExpirationDateParam === 'true' } : {};
-
-  const count = await prisma.item.count({ where });
-  if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  const skip = Math.floor(Math.random() * count);
-  const item = await prisma.item.findFirst({ where, skip, select: { dept: true, class: true, item: true, upc: true } });
-
-  return {
-    dpci: formatDpci(item!.dept, item!.class, item!.item),
-    upc: item!.upc,
-    vcp: 12,
-    ssp: 12,
-    cartons: 12,
-    ssps: 0,
-  };
-}
-
 app.http('getPallet', {
   methods: ['GET'],
   authLevel: 'anonymous',
   // {id:int} (not the unconstrained {id}) so this doesn't greedily swallow the literal
-  // pallets/reinstate and pallets/sample-reinstate routes below — pallet IDs are always
-  // numeric (see generateUniquePid), so this is a non-breaking constraint.
+  // pallets/reinstate route below — pallet IDs are always numeric (see
+  // generateUniquePid), so this is a non-breaking constraint.
   route: 'pallets/{id:int}',
   handler: withHandler(getPallet),
 });
@@ -673,9 +640,6 @@ app.http('reinstatePallet', {
   handler: withHandler(reinstatePallet),
 });
 
-app.http('sampleReinstate', {
-  methods: ['GET'],
-  authLevel: 'anonymous',
-  route: 'pallets/sample-reinstate',
-  handler: withHandler(sampleReinstate),
-});
+// sampleReinstate / GET /api/pallets/sample-reinstate retired (Feature 9, DPCI/UPC phase)
+// — PAR's DPCI/UPC Demo Scanner now uses the shared /api/items/sample endpoint (same
+// filters, no dead vcp/ssp/cartons/ssps fields that were never consumed by any caller).

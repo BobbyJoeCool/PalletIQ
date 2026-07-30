@@ -16,9 +16,11 @@ export interface DpciFieldsOptions<T> {
    *  screen-specific side effect (message-bar text, clearing other state). */
   onNotFound?: (dpci: string) => void;
   /** Fires immediately before every resolve attempt — e.g. clearing a sibling UPC field
-   *  and its own invalid flag, matching PAR/IID/ISI's existing "entering a DPCI clears
-   *  UPC" rule, or closing the numpad panel (IID's `hidePanel`). Not every screen needs
-   *  this (ISI doesn't clear a panel; PII has no UPC field in Edit mode). */
+   *  and its own invalid flag, matching IID/ISI/PAR's established "entering a DPCI clears
+   *  UPC" rule (the asymmetric counterpart to `useUpcField`'s own "entering a UPC backfills
+   *  DPCI" rule — see that hook's own doc comment for the full established convention), or
+   *  closing the numpad panel (IID's `hidePanel`). Not every screen needs this (ISI doesn't
+   *  clear a panel; PII has no UPC field in Edit mode). */
   onBeforeResolve?: () => void;
 }
 
@@ -139,8 +141,8 @@ export function useDpciFields<T>({ fetch, onResolved, onNotFound, onBeforeResolv
 
   /** Populates all 3 boxes from a formatted `"ddd-cc-iiii"` DPCI string (the server's
    *  canonical `formatDpci` shape) without triggering a resolve — for a caller that
-   *  already knows the value is valid (PAR's UPC-resolves-DPCI backfill, PII's edit-mode
-   *  seed from the already-loaded pallet). One-time imperative populate, not a reactive
+   *  already knows the value is valid (IID/ISI/PAR's UPC-resolves-DPCI backfill, PII's
+   *  edit-mode seed from the already-loaded pallet). One-time imperative populate, not a reactive
    *  sync — mirrors `useExpirationDateFields`'s `setFromIso`. Updates the refs directly
    *  too (not just via the `.value`-watching effect), so an immediately-following manual
    *  edit of just one box sees the other two correctly without waiting a render. */

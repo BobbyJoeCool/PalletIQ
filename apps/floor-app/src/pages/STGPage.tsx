@@ -25,6 +25,7 @@ import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
 import { useCodePickerField } from '../lib/useCodePickerField';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useStorageCodes } from '../lib/useStorageCodes';
+import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 
 interface NavState {
   aisle?: number;
@@ -1058,12 +1059,17 @@ function ElzFormat({ result, label, aisle }: { result: ZoneMapResult; label: str
               result.zoneSummary.map((z) => (
                 <div key={z.zone} className="mb-3">
                   <span className="font-ui text-[14px] font-semibold text-white">Zone {z.zone}</span>
-                  {/* Badges wrap horizontally (v1.6.6) rather than one type per line, so
-                      STG's narrower summary half stays compact — matching-color pill per
-                      Storage Code, same palette AisleGrid's own cells use. */}
-                  <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    {z.breakdown.map((b) => (
-                      <ZoneCodeBadge key={`${b.storageCode}-${b.size}`} storageCode={b.storageCode} size={b.size} empty={b.empty} staged={b.staged} badgeSize="compact" />
+                  {/* One column per Storage Code, matching-color pill per Storage Code
+                      (same palette AisleGrid's own cells use), each column's own badges
+                      sorted largest Size first (top) down to smallest (bottom) —
+                      2026-07-28, matches ELZ's own Zone Summary layout. */}
+                  <div className="flex gap-2 mt-1.5">
+                    {groupBreakdownByStorageCode(z.breakdown).map((col) => (
+                      <div key={col.storageCode} className="flex flex-col gap-1">
+                        {col.entries.map((b) => (
+                          <ZoneCodeBadge key={`${b.storageCode}-${b.size}`} storageCode={b.storageCode} size={b.size} empty={b.empty} staged={b.staged} badgeSize="compact" />
+                        ))}
+                      </div>
                     ))}
                   </div>
                 </div>

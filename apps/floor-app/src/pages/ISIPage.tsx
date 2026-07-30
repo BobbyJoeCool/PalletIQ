@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ItemDemoScannerBar } from '../components/shared/ItemDemoScannerBar';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
@@ -14,6 +15,7 @@ import { useDpciFields } from '../lib/useDpciFields';
 import { useUpcField } from '../lib/useUpcField';
 
 interface LocationsResponse {
+  dpci: string;
   descShort: string;
   locations: ISILocationEntry[];
 }
@@ -68,18 +70,20 @@ export function ISIPage() {
   const { deptField, classField, itemField, dpciInvalid, focusDeptField, focusClassField, focusItemField } = dpciFields;
 
   /** UPC entry field (issue #160, shared with IID/PAR) — looks up every stored location
-   *  for a UPC (fix-list item 02). On failure, the bad UPC stays visible (not cleared) so
-   *  the worker can see what didn't resolve. */
+   *  for a UPC (fix-list item 02), then backfills the DPCI boxes with the resolved item's
+   *  own DPCI (asymmetric with the reverse direction — DPCI entry still clears UPC below,
+   *  matching PAR's own already-established rule, now the universal convention for this
+   *  hook pairing; see useUpcField's own doc comment). On failure, the bad UPC stays
+   *  visible (not cleared) so the worker can see what didn't resolve. */
   const upcFields = useUpcField<LocationsResponse>({
     fetch: useCallback((upc) => apiFetch<LocationsResponse>(`/api/items/upc/${encodeURIComponent(upc)}/locations`, token!), [token]),
     onBeforeResolve: useCallback(() => {
-      dpciFields.clear();
       clearMessage();
       setLoading(true);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [clearMessage]),
     onResolved: useCallback((data, upc) => {
       setSearch({ mode: 'upc', query: upc, descShort: data.descShort, locations: data.locations, selected: null });
+      dpciFields.setFromDpci(data.dpci);
       setLoading(false);
     }, []), // eslint-disable-line react-hooks/exhaustive-deps
     onNotFound: useCallback(() => {
@@ -125,35 +129,14 @@ export function ISIPage() {
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
-  /** Fetches a real DPCI/UPC from the item catalogue and looks it up, simulating a scan (may legitimately return zero locations) — targets whichever entry method (DPCI or UPC) currently has focus. */
-  const demoScan = useCallback(async () => {
-    try {
-      const data = await apiFetch<{ dpci: string; upc: string }>('/api/items/sample', token!);
-      if (upcFields.field.isActive) upcFields.loadUpc(data.upc);
-      else dpciFields.loadDpci(data.dpci);
-    } catch {
-      setMessage({ type: 'error', text: 'Demo scan unavailable' });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, upcFields.field.isActive]);
-
-  /** Looks up a DPCI/UPC that doesn't exist, simulating a not-found scan — targets whichever entry method currently has focus. */
-  const demoBad = useCallback(
-    () => (upcFields.field.isActive ? upcFields.loadUpc('999999999999') : dpciFields.loadDpci('999-99-9999')),
-    [upcFields.field.isActive], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  /** Footer demo-button slot content: a good scan and a bad scan trigger. Labels switch to "...UPC" whenever the UPC field has focus, matching demoScan/demoBad's own targeting. */
+  /** Footer demo-button slot: DPCI/UPC's Feature 9 Demo Scanner, targeting whichever entry
+   *  method (DPCI or UPC) currently has focus — same targeting `demoScan`/`demoBad` used
+   *  before this component replaced them. */
   const demoSlot = useMemo(() => (
-    <>
-      <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">
-        {upcFields.field.isActive ? '✓ Scan UPC' : '✓ Scan DPCI'}
-      </button>
-      <button type="button" onClick={demoBad} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#660000] hover:bg-[#770000] text-white transition-colors">
-        {upcFields.field.isActive ? '✗ Bad UPC' : '✗ Bad DPCI'}
-      </button>
-    </>
-  ), [demoScan, demoBad, upcFields.field.isActive]);
+    upcFields.field.isActive
+      ? <ItemDemoScannerBar idType="upc" onFill={upcFields.loadUpc} />
+      : <ItemDemoScannerBar idType="dpci" onFill={dpciFields.loadDpci} />
+  ), [upcFields.field.isActive, upcFields.loadUpc, dpciFields.loadDpci]);
 
   useDemoSlot(demoSlot);
 

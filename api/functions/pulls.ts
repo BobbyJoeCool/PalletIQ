@@ -7,13 +7,13 @@ import { writeLog } from '../lib/activityLog.js';
 import { parseFullLocationBarcode } from '../lib/locationParser.js';
 
 /**
- * Confirms a label pull via one of three independent verification paths: Pallet ID, UPC,
+ * Confirms a container pull via one of three independent verification paths: Pallet ID, UPC,
  * or Location. Exactly one of `palletId` / `upc` / `location` is expected per request (issue
  * #82 — previously a single `alternateId` string whose format was guessed as either UPC or
  * location; now the frontend has two separate fields and sends only the one the worker just
  * confirmed, so there's no format-guessing left to do here).
  *
- * Pallet ID path: the submitted pallet ID must exactly match the label's pallet.
+ * Pallet ID path: the submitted pallet ID must exactly match the container's pallet.
  *
  * UPC path: looks up the item by UPC and compares its DPCI to the pallet's DPCI.
  *
@@ -43,34 +43,36 @@ import { parseFullLocationBarcode } from '../lib/locationParser.js';
  * An aisle+bin mismatch is always an outright ALTERNATE_MISMATCH, regardless of pull
  * function or entry method (issue #49).
  *
- * On success: marks the label PULLED, deducts the label's carton and SSP quantities
+ * On success: marks the container PULLED, deducts the container's carton and SSP quantities
  * from the pallet, and writes a PULL activity log entry with before/after quantities.
  * The pallet's full-pallet count (pallets field) is always set to 0 after any carton pull.
  *
  * `wasScanned` also doubles as the activity log's verification-method record (see
  * writeLog below): whichever of palletId/upc/location was actually submitted becomes
- * `verifiedVia` ('PID' | 'UPC' | 'LID'), paired with this same `wasScanned` flag. For PID/
+ * `verifiedVia` ('PID' | 'UPC' | 'LID'), paired with this same `wasScanned` flag — note
+ * `'LID'` here means Location ID (the third, location-based verification path), an
+ * unrelated pre-existing use of the abbreviation, not this container's own CID. For PID/
  * UPC the frontend derives it from NumpadContext's isScanningRef read synchronously at
  * the top of the field's submit handler (still true at that point for a scan's trailing
  * synthetic Enter — see NumpadContext's deliverScan); for Location it's the structural
  * scanned-vs-hand-entered signal already described above.
  *
  * @param req - HTTP request with body:
- *   `{ labelId: string; pullFunction: string; palletId?: number | string; wasScanned?: boolean }` or
- *   `{ labelId: string; pullFunction: string; upc?: string; wasScanned?: boolean }` or
- *   `{ labelId: string; pullFunction: string; location?: string; wasScanned?: boolean; confirmLevelMismatch?: boolean }`
+ *   `{ containerId: string; pullFunction: string; palletId?: number | string; wasScanned?: boolean }` or
+ *   `{ containerId: string; pullFunction: string; upc?: string; wasScanned?: boolean }` or
+ *   `{ containerId: string; pullFunction: string; location?: string; wasScanned?: boolean; confirmLevelMismatch?: boolean }`
  * @returns `{ location: string | null; updatedQuantity: { pallets, cartons, ssps } }`
  * @throws 400 INVALID_INPUT for missing fields or PALLET_MISMATCH / ALTERNATE_MISMATCH on wrong IDs;
  *   400 LEVEL_MISMATCH (scanned FP only) if aisle+bin match but level doesn't, and the request
  *   didn't set confirmLevelMismatch — response body includes `{ scannedLevel, actualLevel }`;
- *   404 NOT_FOUND if label does not exist or is not in PRINTED status;
- *   409 WRONG_PULL_FUNCTION if the label's pull function does not match the submitted function
+ *   404 NOT_FOUND if container does not exist or is not in PRINTED status;
+ *   409 WRONG_PULL_FUNCTION if the container's pull function does not match the submitted function
  */
 async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
   const auth = await requireAuth(req);
 
   const body = await req.json() as {
-    labelId: string;
+    containerId: string;
     pullFunction: string;
     palletId?: number | string;
     upc?: string;
@@ -79,14 +81,14 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
     confirmLevelMismatch?: boolean;
   };
 
-  if (!body.labelId) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  if (!body.containerId) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   if (!body.pullFunction) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   if (!body.palletId && !body.upc && !body.location) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
 
-  const label = await prisma.label.findUnique({
-    where: { lid: body.labelId },
+  const container = await prisma.container.findUnique({
+    where: { cid: body.containerId },
     include: {
       pallet: {
         include: {
@@ -96,15 +98,15 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
     },
   });
 
-  if (!label || label.status !== 'PRINTED') {
+  if (!container || container.status !== 'PRINTED') {
     throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
   }
 
-  if (label.pullFunction !== body.pullFunction) {
+  if (container.pullFunction !== body.pullFunction) {
     throw Object.assign(new Error('WRONG_PULL_FUNCTION'), { status: 409 });
   }
 
-  const pallet = label.pallet;
+  const pallet = container.pallet;
 
   // The level the worker attested to when resubmitting past a LEVEL_MISMATCH (issue
   // #72) — the frontend's correction popup replaces the originally-scanned (wrong)
@@ -200,10 +202,10 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
   // so this unambiguously identifies which field actually verified the pull.
   const verifiedVia = body.palletId != null ? 'PID' : body.upc != null ? 'UPC' : 'LID';
 
-  // Deduct the label's quantities from the pallet; floor at 0.
+  // Deduct the container's quantities from the pallet; floor at 0.
   // Any carton pull always zeroes the pallet count (breaks full-pallet status).
-  const newCartons = Math.max(0, pallet.currentCartons - label.quantity);
-  const newSSPs    = Math.max(0, pallet.currentSSPs    - label.sspQuantity);
+  const newCartons = Math.max(0, pallet.currentCartons - container.quantity);
+  const newSSPs    = Math.max(0, pallet.currentSSPs    - container.sspQuantity);
   const newPallets = 0;
 
   // FP pulls consume the whole pallet's full-pallet count; CA/CF pulls never touch it.
@@ -211,20 +213,20 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
 
   const loc = pallet.location;
 
-  // Mark the label as PULLED and update pallet quantities in one atomic transaction. A
-  // pallet can have more than one label outstanding at once (e.g. a CA pull and an FP
+  // Mark the container as PULLED and update pallet quantities in one atomic transaction. A
+  // pallet can have more than one container outstanding at once (e.g. a CA pull and an FP
   // pull, or multiple CA pulls, against the same location) — only clear its
-  // CA_PULL_PEND/FP_PULL_PEND status back to STORED once every one of its labels has
+  // CA_PULL_PEND/FP_PULL_PEND status back to STORED once every one of its containers has
   // actually been pulled, not just this one. Uses the interactive transaction form (not
   // the array form) since the pallet update depends on a read that must happen after this
-  // label's own status write.
+  // container's own status write.
   await prisma.$transaction(async (tx) => {
-    await tx.label.update({
-      where: { lid: label.lid },
+    await tx.container.update({
+      where: { cid: container.cid },
       data: { status: 'PULLED' },
     });
 
-    const remainingPending = await tx.label.count({
+    const remainingPending = await tx.container.count({
       where: { pid: pallet.pid, status: { in: ['AVAILABLE', 'PRINTED'] } },
     });
 
@@ -255,9 +257,9 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
     // completeness, though nothing produces a real BK pull today).
     functionCode: body.pullFunction,
     details: {
-      labelId: label.lid,
+      containerId: container.cid,
       pullFunction: body.pullFunction,
-      pulled: { pallets: pulledPallets, cartons: label.quantity, ssps: label.sspQuantity },
+      pulled: { pallets: pulledPallets, cartons: container.quantity, ssps: container.sspQuantity },
       remaining: { pallets: newPallets, cartons: newCartons, ssps: newSSPs },
       verifiedVia,
       wasScanned: body.wasScanned === true,

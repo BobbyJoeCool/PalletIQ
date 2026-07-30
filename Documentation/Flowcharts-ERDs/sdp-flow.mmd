@@ -19,7 +19,7 @@ flowchart TD
     API_DIR --> DIR_OK{Result?}
     DIR_OK -->|PALLET_NOT_FOUND| ERR_P1[Error: Pallet not found\npalletField kept — re-focused for retry]
     DIR_OK -->|CANCELED| ERR_P4[Error: Pallet canceled\npalletField kept — re-focused for retry]
-    DIR_OK -->|BLOCKED_BY_PENDING_PULL| ERR_P5[Error: Open Label pending\npalletField kept — re-focused for retry]
+    DIR_OK -->|BLOCKED_BY_PENDING_PULL| ERR_P5[Error: Open Container pending\npalletField kept — re-focused for retry]
     DIR_OK -->|NO_CARTONS| ERR_P2[Error: No stored cartons\npalletField kept — re-focused for retry]
     DIR_OK -->|NO_LOCATIONS| ERR_P3[Error: No eligible locations\nin requested aisle\npalletField kept — re-focused for retry]
     DIR_OK -->|OK| DIR_RESULT[Returns reservationId\ndirectedLocation\npallet details\nalreadyStored flag]

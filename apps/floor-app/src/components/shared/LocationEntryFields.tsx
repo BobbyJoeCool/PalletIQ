@@ -1,20 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNumpad } from '../../context/NumpadContext';
+import { useDemoSlot } from '../../context/FooterDemoContext';
 import { INVALID_WASH } from '../../lib/invalidWash';
 import { useNumpadField } from '../../lib/useNumpadField';
+import { LocationDemoScannerBar } from './LocationDemoScannerBar';
 
 interface LocationEntryFieldsProps {
-  /** Called once a location is resolved, either by a barcode scan (in any field) or by
-   *  completing every non-locked manual field in sequence. `wasScanned` is true only for
-   *  a scanned-override path (8-digit always; 6-digit too when `levelOptional` — see its
-   *  doc comment) — a scan atomically delivers a value longer than the receiving field's
-   *  own maxLength, which manual typing structurally cannot produce (each field
-   *  auto-submits at its own maxLength before a longer value could accumulate), so this
-   *  distinction is exact, not a heuristic. `locationId` is normally a full 8-digit
-   *  Aisle+Bin+Level id; when `levelOptional` is set, it may instead be a 6-digit
-   *  Aisle+Bin id — either from a 6-digit scan (`wasScanned: true`) or from the worker
-   *  completing Aisle+Bin manually in sequence (`wasScanned: false`). */
-  onResolved: (locationId: string, wasScanned: boolean) => void;
+  /** Called once a location is resolved, either by a barcode scan (in any field), by
+   *  completing every non-locked manual field in sequence, or by the built-in Demo Scanner
+   *  (`demoScanner` below). `wasScanned` is true only for a scanned-or-demo-override path
+   *  (8-digit always; 6-digit too when `levelOptional` — see its doc comment) — a scan (or
+   *  a demo fill, which reuses the identical override path) atomically delivers a value
+   *  longer than the receiving field's own maxLength, which manual typing structurally
+   *  cannot produce (each field auto-submits at its own maxLength before a longer value
+   *  could accumulate), so this distinction is exact, not a heuristic. `locationId` is
+   *  normally a full 8-digit Aisle+Bin+Level id; when `levelOptional` is set, it may
+   *  instead be a 6-digit Aisle+Bin id — from a 6-digit scan/demo fill (`wasScanned:
+   *  true`) or from the worker completing Aisle+Bin manually in sequence (`wasScanned:
+   *  false`). `demoLevel` is populated only for a `levelOptional` demo fill (MNP) — the
+   *  exact level of the row the Demo Scanner happened to pick, which the 6-digit value
+   *  itself can't carry; a caller with a Level Confirmation step of its own (MNP) reads
+   *  this to pre-fill it. Every other caller ignores the extra argument. */
+  onResolved: (locationId: string, wasScanned: boolean, demoLevel?: number) => void;
   /** Auto-focuses the first non-locked field on mount — off by default so callers with
    *  their own entry-point logic (e.g. pre-populated from a scan) can opt out. */
   autoFocus?: boolean;
@@ -113,6 +120,19 @@ interface LocationEntryFieldsProps {
    *  exactly: individual boxes keep their normal styling, the wrapper alone carries the
    *  wash. */
   groupInvalid?: boolean;
+  /** Opts into the built-in Location ID Demo Scanner (Feature 9, Phase 2) — registered via
+   *  the shared footer demo-slot only while one of this component's three boxes has focus
+   *  (`isActive`, same gate `PalletIdField`'s own `demoScanner` prop uses), so it never
+   *  competes with another field's demo buttons. WLH/LII/MNP/PAR opt in; PIP/SDP don't —
+   *  their own Location ✓/✗ buttons stay screen-owned (see `onResolved`'s doc comment and
+   *  `Feature-9-AppWide-Demo-Scanner.md`'s Implementation-detail resolutions for why). */
+  demoScanner?: boolean;
+  /** PAR's own "Wrong Storage Type" Demo Scanner option — the already-resolved item's own
+   *  Storage Code, passed through to `LocationDemoScannerBar`. Omit for every other caller. */
+  demoItemStorageCode?: string;
+  /** MNP's own "Consolidate" Demo Scanner option — the already-scanned pallet's own id,
+   *  passed through to `LocationDemoScannerBar`. Omit for every other caller. */
+  demoScannedPalletId?: number;
 }
 
 /**
@@ -133,7 +153,7 @@ export function LocationEntryFields({
   onResolved, autoFocus = true, value, highlight = false, onActiveChange, lockedAisle, lockedLevel, size = 'default',
   levelOptional = false, checkAisle, checkAisleBin, onAisleValidityChange, onBinValidityChange,
   aisleInvalid: externalAisleInvalid = false, binInvalid: externalBinInvalid = false, levelInvalid = false,
-  groupInvalid = false,
+  groupInvalid = false, demoScanner = false, demoItemStorageCode, demoScannedPalletId,
 }: LocationEntryFieldsProps) {
   const { hidePanel } = useNumpad();
   // maxLength auto-advances once the fixed-length manual entry is complete (3/3/2 digits);
@@ -151,6 +171,35 @@ export function LocationEntryFields({
   useEffect(() => {
     onActiveChangeRef.current?.(isActive);
   }, [isActive]);
+
+  // Built-in Demo Scanner (Feature 9, Phase 2) — `LocationDemoScannerBar` always resolves
+  // a 6-digit Aisle+Bin id plus the exact level of the row it picked (the demo endpoint
+  // never returns a full 8-digit id itself), except for the Invalid sentinel, which is
+  // already a complete 8-digit override with no level to splice in. `levelOptional`
+  // determines the assembly, exactly mirroring what a real scan of that length would do:
+  // deliver the 6-digit id as-is (plus `demoLevel`, for MNP's Level Confirmation pre-fill)
+  // when the field accepts that; otherwise splice `level` in to form a full 8-digit value.
+  const handleDemoFill = useCallback((locationId: string, level?: number) => {
+    hidePanel();
+    clearInternalInvalid();
+    if (level == null) {
+      onResolved(locationId, true);
+      return;
+    }
+    if (levelOptional) {
+      onResolved(locationId, true, level);
+      return;
+    }
+    onResolved(locationId + String(level).padStart(2, '0'), true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onResolved, levelOptional, hidePanel]);
+
+  const demoBarContent = useMemo(() => (
+    demoScanner && isActive
+      ? <LocationDemoScannerBar onFill={handleDemoFill} itemStorageCode={demoItemStorageCode} scannedPalletId={demoScannedPalletId} />
+      : null
+  ), [demoScanner, isActive, handleDemoFill, demoItemStorageCode, demoScannedPalletId]);
+  useDemoSlot(demoBarContent);
 
   // Internal progressive existence-check state (issue #162) — only ever populated when
   // `checkAisle`/`checkAisleBin` are provided; otherwise stays permanently false and the

@@ -4,7 +4,7 @@ import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { NOT_HELD_FILTER } from '../lib/zoneLogic.js';
 import { writeLog } from '../lib/activityLog.js';
-import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genLid } from '../prisma/demoUtils.js';
+import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genCid } from '../prisma/demoUtils.js';
 
 /** The interactive-transaction client type, derived from `prisma.$transaction` itself
  *  rather than importing a `Prisma` namespace type — lets the worker-shift simulator
@@ -12,16 +12,22 @@ import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePi
  *  being defined inline inside the transaction callback. */
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
-/** Put pallets created per (storageCode, size) combo, and the label target per (storageCode, pullFunction) combo for CF/FP. */
+/** Put pallets created per (storageCode, size) combo, and the container target per (storageCode, pullFunction) combo for CF/FP. */
 const ROWS_PER_COMBO = 36;
-/** CA labels specifically need a higher per-combo cap than ROWS_PER_COMBO (#130) — Tyler's
+/** CA containers specifically need a higher per-combo cap than ROWS_PER_COMBO (#130) — Tyler's
  *  (z002p21) Carton Air shift simulator (`simulateCartonAirPulls`) consumes these at a fixed
  *  200 cartons/hour, and a full 6AM-4PM shift needs ~2000 cartons of source data to avoid
- *  running the CA label pool dry before shiftEnd. Measured against this app's real combo
- *  count/average label size (8 CA-eligible storage codes, ~7.2 cartons/label), 24/combo
- *  (192 labels, ~1384 cartons) fell well short; 48/combo comfortably clears the target with
+ *  running the CA container pool dry before shiftEnd. Measured against this app's real combo
+ *  count/average container size (8 CA-eligible storage codes, ~7.2 cartons/container), 24/combo
+ *  (192 containers, ~1384 cartons) fell well short; 48/combo comfortably clears the target with
  *  margin to spare. */
-const CA_LABEL_ROWS_PER_COMBO = 48;
+const CA_CONTAINER_ROWS_PER_COMBO = 48;
+/** Guaranteed floor of PUT_PENDING pallets per (storageCode, size) combo *after*
+ *  `simulateRackPuts` has run (direct instruction — the "10+ per combo" ask must survive
+ *  the same reseed's own simulated rack-put activity, not just describe the pool right
+ *  after generation). Comfortably over "10+"; matches `api/prisma/seed.ts`'s own
+ *  `PENDING_PALLETS_PER_COMBO`, kept in sync deliberately rather than coincidentally. */
+const PENDING_MIN_PER_COMBO = 12;
 /** Seeded demo Worker account used as the receivedByZ attribution on generated put pallets. */
 const SEED_USER_Z = 'z002p21';
 const VCP_OPTIONS = [6, 8, 10, 12, 16, 20, 24];
@@ -58,7 +64,7 @@ function randomExponentialAgeSeconds(mean: number): number {
 // (or from 6AM, if nothing's been generated yet today) up to "now" — repeated same-day
 // clicks extend the log instead of duplicating or resetting it. Whatever a prior day
 // generated is left alone (same "history stays put" philosophy the rest of this endpoint
-// already follows for PULLED labels), so nothing here needs to be wiped/undone on a new
+// already follows for PULLED containers), so nothing here needs to be wiped/undone on a new
 // day; each worker just starts a fresh 6AM baseline for the new date.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -109,12 +115,12 @@ async function getShiftResumePoint(tx: TxClient, zNumber: string, w: ShiftWindow
 
 /**
  * z002p21 — Carton Air pulls, ~200 cartons/hour. Consumes AVAILABLE/PRINTED `pullFunction:
- * 'CA'` labels one at a time, marking each PULLED and deducting its quantity from the
+ * 'CA'` containers one at a time, marking each PULLED and deducting its quantity from the
  * pallet — mirrors `verifyPull`'s (pulls.ts) real completion logic exactly, including
  * clearing CA_PULL_PEND/FP_PULL_PEND back to STORED once a pallet's last outstanding
- * label is pulled. The simulated clock advances by however long each label's quantity
+ * container is pulled. The simulated clock advances by however long each container's quantity
  * would take at the target rate, so total elapsed time matches ~200/hr regardless of
- * individual label sizes, rather than a fixed interval per pull.
+ * individual container sizes, rather than a fixed interval per pull.
  */
 async function simulateCartonAirPulls(tx: TxClient, resumeFrom: Date, w: ShiftWindow): Promise<number> {
   const RATE_CARTONS_PER_HOUR = 200;
@@ -122,32 +128,32 @@ async function simulateCartonAirPulls(tx: TxClient, resumeFrom: Date, w: ShiftWi
   let pulled = 0;
 
   while (t < w.shiftEnd) {
-    const label = await tx.label.findFirst({
+    const container = await tx.container.findFirst({
       where: { pullFunction: 'CA', status: { in: ['AVAILABLE', 'PRINTED'] } },
-      select: { lid: true, pid: true, quantity: true, sspQuantity: true, dept: true, class: true, item: true },
+      select: { cid: true, pid: true, quantity: true, sspQuantity: true, dept: true, class: true, item: true },
     });
-    if (!label) break; // CA label pool exhausted for this reseed — nothing left to pull
+    if (!container) break; // CA container pool exhausted for this reseed — nothing left to pull
 
     const pallet = await tx.pallet.findUnique({
-      where: { pid: label.pid },
+      where: { pid: container.pid },
       select: { currentCartons: true, currentSSPs: true, locationAisle: true, locationBin: true, locationLevel: true },
     });
     if (!pallet) {
-      // Orphaned label (its pallet vanished some other way) — cancel it so the loop
-      // doesn't keep re-picking the same dead label forever, then move on.
-      await tx.label.update({ where: { lid: label.lid }, data: { status: 'CANCELED' } });
+      // Orphaned container (its pallet vanished some other way) — cancel it so the loop
+      // doesn't keep re-picking the same dead container forever, then move on.
+      await tx.container.update({ where: { cid: container.cid }, data: { status: 'CANCELED' } });
       continue;
     }
 
-    const newCartons = Math.max(0, pallet.currentCartons - label.quantity);
-    const newSSPs = Math.max(0, pallet.currentSSPs - label.sspQuantity);
+    const newCartons = Math.max(0, pallet.currentCartons - container.quantity);
+    const newSSPs = Math.max(0, pallet.currentSSPs - container.sspQuantity);
 
-    await tx.label.update({ where: { lid: label.lid }, data: { status: 'PULLED' } });
-    const remainingPending = await tx.label.count({
-      where: { pid: label.pid, status: { in: ['AVAILABLE', 'PRINTED'] } },
+    await tx.container.update({ where: { cid: container.cid }, data: { status: 'PULLED' } });
+    const remainingPending = await tx.container.count({
+      where: { pid: container.pid, status: { in: ['AVAILABLE', 'PRINTED'] } },
     });
     await tx.pallet.update({
-      where: { pid: label.pid },
+      where: { pid: container.pid },
       data: {
         currentCartons: newCartons, currentSSPs: newSSPs, currentPallets: 0,
         lastPulledByZ: 'z002p21', lastPulledAt: t,
@@ -157,20 +163,20 @@ async function simulateCartonAirPulls(tx: TxClient, resumeFrom: Date, w: ShiftWi
 
     await writeLog({
       userId: 'z002p21', actionType: 'PULL', timestamp: t,
-      palletId: label.pid,
+      palletId: container.pid,
       locationAisle: pallet.locationAisle ?? undefined, locationBin: pallet.locationBin ?? undefined, locationLevel: pallet.locationLevel ?? undefined,
-      dept: label.dept, class: label.class, item: label.item,
+      dept: container.dept, class: container.class, item: container.item,
       functionCode: 'CA',
       details: {
-        labelId: label.lid, pullFunction: 'CA',
-        pulled: { pallets: 0, cartons: label.quantity, ssps: label.sspQuantity },
+        containerId: container.cid, pullFunction: 'CA',
+        pulled: { pallets: 0, cartons: container.quantity, ssps: container.sspQuantity },
         remaining: { pallets: 0, cartons: newCartons, ssps: newSSPs },
         verifiedVia: 'PID', wasScanned: true, workerLog: true,
       },
     }, tx);
 
     pulled++;
-    const minutesForThisPull = (label.quantity / RATE_CARTONS_PER_HOUR) * 60;
+    const minutesForThisPull = (container.quantity / RATE_CARTONS_PER_HOUR) * 60;
     t = pastBreak(new Date(t.getTime() + minutesForThisPull * 60_000), w);
   }
 
@@ -682,8 +688,8 @@ async function simulateConsolidation(tx: TxClient, resumeFrom: Date, w: ShiftWin
   return count;
 }
 
-interface LabelRow {
-  lid: string;
+interface ContainerRow {
+  cid: string;
   pid: number;
   dept: number;
   class: number;
@@ -708,24 +714,30 @@ function assignPullFunction(level: number, size: string, qty: number, totalCarto
 
 /**
  * Wipes and regenerates the app's test/demo data set for pending put work and scannable
- * pull labels, for the pre-login "Reseed Test Data" dev-tools control (main screen, above
- * the badge scanner). Deletes every PUT_PENDING pallet and every not-yet-pulled label
+ * pull containers, for the pre-login "Reseed Test Data" dev-tools control (main screen, above
+ * the badge scanner). Deletes every PUT_PENDING pallet and every not-yet-pulled container
  * (AVAILABLE/PRINTED — leaves PULLED/DIVERTED/CANCELED/PURGED history untouched), then:
  *
  * - Creates ROWS_PER_COMBO fresh PUT_PENDING pallets for every (storageCode, size) combo
  *   present in the Location table, with a random item/quantity (no realism constraint —
- *   any DPCI/quantity is fine for a put pallet).
- * - Creates up to ROWS_PER_COMBO fresh PRINTED labels for every (storageCode, pullFunction)
- *   combo (CA_LABEL_ROWS_PER_COMBO for CA specifically — see its own doc comment), sourced
+ *   any DPCI/quantity is fine for a put pallet). `simulateRackPuts` (below) then converts
+ *   some of this same fresh stock to STORED as part of its own historical-activity
+ *   simulation — direct instruction: afterward, every combo is topped back up to
+ *   `PENDING_MIN_PER_COMBO` PUT_PENDING pallets (only combos that actually fell short get
+ *   more created), so a "fresh day" reseed's own full-shift rack-put simulation (up to
+ *   ~500 puts, picked with no combo-aware distribution) can't leave specific combos
+ *   depleted below what the Demo Scanner's Storage Code/Size filters need to find.
+ * - Creates up to ROWS_PER_COMBO fresh PRINTED containers for every (storageCode, pullFunction)
+ *   combo (CA_CONTAINER_ROWS_PER_COMBO for CA specifically — see its own doc comment), sourced
  *   only from pallets already STORED at a real location — this does *not* synthesize backing
  *   stock, so a combo with too little real stored inventory at the right level/size will end
- *   up with fewer than that cap's worth of labels (or none). Every
- *   pallet that gets a fresh label also moves to CA_PULL_PEND (CA/CF) or FP_PULL_PEND
- *   (FP) — this is the only place in the app that currently creates labels (PRQ is a
- *   placeholder screen, not a real create-label workflow yet), simulating "an outside
+ *   up with fewer than that cap's worth of containers (or none). Every
+ *   pallet that gets a fresh container also moves to CA_PULL_PEND (CA/CF) or FP_PULL_PEND
+ *   (FP) — this is the only place in the app that currently creates containers (PRQ is a
+ *   placeholder screen, not a real container-creation workflow yet), simulating "an outside
  *   system created a pull request" per direct product decision. Any pallet still
- *   pull-pending from a prior reseed is reset to STORED first, alongside the label wipe
- *   above, since its old labels no longer exist.
+ *   pull-pending from a prior reseed is reset to STORED first, alongside the container wipe
+ *   above, since its old containers no longer exist.
  * - Staging is simulated shift-realistically via `simulateGpmStaging` (see its own doc
  *   comment) — a "triple load" every 5-7 minutes, one aisle at a time, filling each
  *   aisle back-to-front (highest bin first) the same way a real GPMer/`findNextStagingLocation`
@@ -742,7 +754,7 @@ function assignPullFunction(level: number, size: string, qty: number, totalCarto
  * Unauthenticated by design, matching /api/health — called from the pre-login screen
  * before any session exists.
  *
- * @returns `{ putPalletsCreated, labelsCreated, labelsByStorageCodeAndFunction,
+ * @returns `{ putPalletsCreated, containersCreated, containersByStorageCodeAndFunction,
  *   workerActivityLog }` — see the "Worker Activity Log" section comment near the top of
  *   this file for what `workerActivityLog`'s fields mean.
  */
@@ -753,10 +765,10 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
   // same-day "fill in from where it left off" re-run is much faster (only the gap since
   // the last reseed) and never gets close to this ceiling.
   return prisma.$transaction(async (tx) => {
-    await tx.label.deleteMany({ where: { status: { in: ['AVAILABLE', 'PRINTED'] } } });
-    // Every not-yet-pulled label was just wiped, so no pallet has an outstanding pull
+    await tx.container.deleteMany({ where: { status: { in: ['AVAILABLE', 'PRINTED'] } } });
+    // Every not-yet-pulled container was just wiped, so no pallet has an outstanding pull
     // request anymore — reset any pallet still carrying a pull-pending status back to
-    // STORED before regenerating fresh labels below (v1.6.9's CA_PULL_PEND/FP_PULL_PEND
+    // STORED before regenerating fresh containers below (v1.6.9's CA_PULL_PEND/FP_PULL_PEND
     // rule; see pulls.ts's verifyPull for the same "reset once nothing's left pending"
     // logic on the normal completion path).
     await tx.pallet.updateMany({
@@ -778,7 +790,7 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     await tx.pallet.deleteMany({ where: { status: disposablePalletStatus } });
 
     // Clear every prior seeded/real staging log entry before regenerating — same
-    // wipe-then-regenerate pattern as pallets/labels above, so repeated reseeds don't
+    // wipe-then-regenerate pattern as pallets/containers above, so repeated reseeds don't
     // pile up stale STAGE/STAGE_SUM/RESTAGE rows. SAR and the STG live info panel only
     // ever read the *current* STAGED locations and their most recent matching STAGE log
     // entry, so this is safe to clear outright rather than scope to specific locations.
@@ -808,54 +820,75 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     }
 
     const now = new Date();
+
+    /**
+     * Builds one fresh PUT_PENDING (or, per `allowCanceled`, occasionally CANCELED)
+     * pallet row for the given combo — extracted so both the initial full batch below and
+     * the post-simulation top-up (after `simulateRackPuts`, see its own comment) build
+     * identical rows without duplicating the field list.
+     */
+    function makePendingPalletRow(
+      combo: { storageCode: string; size: string },
+      item: { dept: number; class: number; item: number },
+      allowCanceled: boolean,
+    ) {
+      const vcp = randomFrom(VCP_OPTIONS);
+      const ssp = Math.random() < 0.5 ? vcp : vcp / 2;
+      const receivedCartons = randomInt(6, 20);
+      // NOTE (found while adding cartonsPerPallet, not fixed here — pre-existing and out
+      // of scope): this doesn't match the loose-SSPs-below-one-carton's-worth rule
+      // PII/editPallet enforce elsewhere (currentSSPs should be < vcp/ssp); same
+      // pre-existing pattern as seed-pending-pallets.ts.
+      const receivedSSPs = receivedCartons * ssp;
+
+      // A small fraction seeded CANCELED instead of PUT_PENDING — a voided/canceled
+      // receiving record — so SDP's "Invalid Pallet: Canceled" demo option has a real
+      // pallet to find. Never rolled for the post-simulation top-up (`allowCanceled:
+      // false`) — that pass exists specifically to guarantee a PUT_PENDING floor per
+      // combo, so a row that doesn't count toward PUT_PENDING would defeat its own point.
+      const status = allowCanceled && Math.random() < 0.05 ? 'CANCELED' : 'PUT_PENDING';
+
+      return {
+        pid: genPid(),
+        dept: item.dept,
+        class: item.class,
+        item: item.item,
+        receivedPallets: 0,
+        currentPallets: 0,
+        receivedCartons,
+        currentCartons: receivedCartons,
+        receivedSSPs,
+        currentSSPs: receivedSSPs,
+        cartonsPerPallet: cartonsPerPalletFor(receivedCartons, receivedSSPs),
+        vcp,
+        ssp,
+        status,
+        // A pallet always has a Storage Code/Size, even before its first put — initially
+        // the combo it was generated for (matching the item's own intrinsic Storage
+        // Code, per `getItems` above), later overwritten by `placePallet` to match
+        // wherever it's actually stored (see `Pallet.storageCode`'s own doc comment).
+        storageCode: combo.storageCode,
+        size: combo.size,
+        locationAisle: null,
+        locationBin: null,
+        locationLevel: null,
+        receivedByZ: SEED_USER_Z,
+        receivedAt: now,
+      };
+    }
+
     const putPalletRows = [];
     for (const combo of locationCombos) {
       const items = await getItems(combo.storageCode);
       if (items.length === 0) continue;
 
       for (let i = 0; i < ROWS_PER_COMBO; i++) {
-        const item = randomFrom(items);
-        const vcp = randomFrom(VCP_OPTIONS);
-        const ssp = Math.random() < 0.5 ? vcp : vcp / 2;
-        const receivedCartons = randomInt(6, 20);
-        // NOTE (found while adding cartonsPerPallet, not fixed here — pre-existing and out
-        // of scope): this doesn't match the loose-SSPs-below-one-carton's-worth rule
-        // PII/editPallet enforce elsewhere (currentSSPs should be < vcp/ssp); same
-        // pre-existing pattern as seed-pending-pallets.ts.
-        const receivedSSPs = receivedCartons * ssp;
-
-        // A small fraction seeded CANCELED instead of PUT_PENDING — a voided/canceled
-        // receiving record — so SDP's "Invalid Pallet: Canceled" demo option has a real
-        // pallet to find (nothing else in the app currently produces one; there's no
-        // real "cancel a receiving record" workflow yet, only this seed data).
-        const status = Math.random() < 0.05 ? 'CANCELED' : 'PUT_PENDING';
-
-        putPalletRows.push({
-          pid: genPid(),
-          dept: item.dept,
-          class: item.class,
-          item: item.item,
-          receivedPallets: 0,
-          currentPallets: 0,
-          receivedCartons,
-          currentCartons: receivedCartons,
-          receivedSSPs,
-          currentSSPs: receivedSSPs,
-          cartonsPerPallet: cartonsPerPalletFor(receivedCartons, receivedSSPs),
-          vcp,
-          ssp,
-          status,
-          locationAisle: null,
-          locationBin: null,
-          locationLevel: null,
-          receivedByZ: SEED_USER_Z,
-          receivedAt: now,
-        });
+        putPalletRows.push(makePendingPalletRow(combo, randomFrom(items), true));
       }
     }
     if (putPalletRows.length > 0) await tx.pallet.createMany({ data: putPalletRows });
 
-    // ── Labels: up to ROWS_PER_COMBO per (storageCode, pullFunction) combo ────────
+    // ── Containers: up to ROWS_PER_COMBO per (storageCode, pullFunction) combo ────
     const [storedPallets, stores, allLocations] = await Promise.all([
       tx.pallet.findMany({
         where: { locationAisle: { not: null }, currentCartons: { gt: 0 } },
@@ -872,7 +905,7 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     const locByKey = new Map(allLocations.map((l) => [`${l.aisle}-${l.bin}-${l.level}`, l]));
     const batchDate = julianDate(now);
     const purgeDate = new Date(now.getTime() + 7 * 86_400_000);
-    const buckets = new Map<string, LabelRow[]>();
+    const buckets = new Map<string, ContainerRow[]>();
     let storeIdx = 0;
 
     for (const p of shuffle(storedPallets)) {
@@ -889,13 +922,13 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
 
         const key = `${loc.storageCode}|${fn}`;
         const bucket = buckets.get(key) ?? [];
-        const cap = fn === 'CA' ? CA_LABEL_ROWS_PER_COMBO : ROWS_PER_COMBO;
+        const cap = fn === 'CA' ? CA_CONTAINER_ROWS_PER_COMBO : ROWS_PER_COMBO;
         if (bucket.length >= cap) continue;
 
         const store = stores[storeIdx % stores.length];
         storeIdx++;
         bucket.push({
-          lid: genLid(store.id, p.dept, p.class, p.item, p.pid, batchDate),
+          cid: genCid(store.id, p.dept, p.class, p.item, p.pid, batchDate),
           pid: p.pid, dept: p.dept, class: p.class, item: p.item,
           quantity: qty, sspQuantity: 0, batchDate, purgeDate,
           destinationStore: store.id, status: 'PRINTED', pullFunction: fn,
@@ -904,18 +937,18 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
       }
     }
 
-    const labelRows = [...buckets.values()].flat();
-    if (labelRows.length > 0) await tx.label.createMany({ data: labelRows });
+    const containerRows = [...buckets.values()].flat();
+    if (containerRows.length > 0) await tx.container.createMany({ data: containerRows });
 
-    // Every fresh label just created puts its pallet in a pull-pending state — CA/CF
+    // Every fresh container just created puts its pallet in a pull-pending state — CA/CF
     // (carton-granularity) map to CA_PULL_PEND, FP (full-pallet) maps to FP_PULL_PEND. A
-    // pallet can end up with more than one label of different functions in this same
-    // pass (e.g. a non-emptying CA/CF label and an emptying FP label both generated for
+    // pallet can end up with more than one container of different functions in this same
+    // pass (e.g. a non-emptying CA/CF container and an emptying FP container both generated for
     // it); FP_PULL_PEND wins that tie since a full-pallet pull is the more complete/
     // impactful pending action. Location.status is deliberately left untouched — this is
     // a Pallet-only status per direct product decision.
     const pullPendingByPid = new Map<number, 'CA_PULL_PEND' | 'FP_PULL_PEND'>();
-    for (const row of labelRows) {
+    for (const row of containerRows) {
       const target = row.pullFunction === 'FP' ? 'FP_PULL_PEND' : 'CA_PULL_PEND';
       if (pullPendingByPid.get(row.pid) !== 'FP_PULL_PEND') pullPendingByPid.set(row.pid, target);
     }
@@ -927,8 +960,8 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     if (caPids.length > 0) await tx.pallet.updateMany({ where: { pid: { in: caPids } }, data: { status: 'CA_PULL_PEND' } });
     if (fpPids.length > 0) await tx.pallet.updateMany({ where: { pid: { in: fpPids } }, data: { status: 'FP_PULL_PEND' } });
 
-    const labelsByStorageCodeAndFunction: Record<string, number> = {};
-    for (const [key, rows] of buckets) labelsByStorageCodeAndFunction[key] = rows.length;
+    const containersByStorageCodeAndFunction: Record<string, number> = {};
+    for (const [key, rows] of buckets) containersByStorageCodeAndFunction[key] = rows.length;
 
     // ── Worker Activity Log: each of the 5 demo workers' shift simulation ─────────
     //
@@ -1001,6 +1034,29 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     const rackPutResume = await getShiftResumePoint(tx, 'z002p22', shiftWindow);
     const putsSimulated = await simulateRackPuts(tx, rackPutResume, shiftWindow);
 
+    // Top up every combo back to PENDING_MIN_PER_COMBO now that simulateRackPuts has had
+    // its turn (direct instruction — the freshly-generated Put Pending pool above is
+    // exactly what simulateRackPuts consumes to produce realistic historical activity, but
+    // a "fresh day" reseed can run the full 6am-4pm shift at ~50/hour — up to ~500 puts,
+    // picked via a plain `findFirst` with no combo-aware distribution, so specific combos
+    // can end up far more depleted than others even when the overall pool isn't exhausted).
+    // Only tops up combos that actually fell short — a same-day incremental reseed
+    // (simulateRackPuts' own far more common case, resuming from wherever it left off
+    // rather than a full shift) typically doesn't touch this at all.
+    const pendingTopUpRows = [];
+    for (const combo of locationCombos) {
+      const currentCount = await tx.pallet.count({
+        where: { status: 'PUT_PENDING', storageCode: combo.storageCode, size: combo.size },
+      });
+      if (currentCount >= PENDING_MIN_PER_COMBO) continue;
+      const items = await getItems(combo.storageCode);
+      if (items.length === 0) continue;
+      for (let i = currentCount; i < PENDING_MIN_PER_COMBO; i++) {
+        pendingTopUpRows.push(makePendingPalletRow(combo, randomFrom(items), false));
+      }
+    }
+    if (pendingTopUpRows.length > 0) await tx.pallet.createMany({ data: pendingTopUpRows });
+
     const stagingResume = await getShiftResumePoint(tx, 'z002p23', shiftWindow);
     const stagingResult = await simulateGpmStaging(tx, stagingResume, shiftWindow);
     const olderStagedLocations = isFreshDay ? await seedOlderStagedLocations(tx, now) : 0;
@@ -1013,8 +1069,9 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
 
     return {
       putPalletsCreated: putPalletRows.length,
-      labelsCreated: labelRows.length,
-      labelsByStorageCodeAndFunction,
+      putPalletsToppedUp: pendingTopUpRows.length,
+      containersCreated: containerRows.length,
+      containersByStorageCodeAndFunction,
       // Top-level fields the login screen's reseed summary actually reads (ReseedResult in
       // src/lib/api.ts) — previously never populated here, only nested below under
       // workerActivityLog.z002p23*, so LoginPage.tsx's summary always showed "undefined

@@ -14,7 +14,7 @@ test.describe('ISI — Item Storage Inquiry', () => {
   });
 
   test('an unknown DPCI shows a not-found error and leaves the bad DPCI visible', async ({ page }) => {
-    await page.getByRole('button', { name: '✗ Bad DPCI' }).click();
+    await page.getByRole('button', { name: '✗ Invalid DPCI' }).click();
     await expect(page.getByText('Item not found')).toBeVisible();
     // v1.6.8 — the bad DPCI stays in the boxes (not cleared) so the worker can see what
     // didn't resolve, rather than the boxes reverting to "—".
@@ -24,13 +24,30 @@ test.describe('ISI — Item Storage Inquiry', () => {
   test('a valid DPCI (via the demo button) shows either results or the empty-state message', async ({ page }) => {
     await Promise.all([
       page.waitForResponse((r) => r.url().includes('/locations') && r.ok()),
-      page.getByRole('button', { name: '✓ Scan DPCI' }).click(),
+      page.getByRole('button', { name: '✓ Valid DPCI' }).click(),
     ]);
 
     const emptyState = page.getByText('No locations currently storing this item');
     const hasEmptyState = await emptyState.isVisible().catch(() => false);
     const hasRows = await page.getByText(/^Pallet \d+$/).first().isVisible().catch(() => false);
     expect(hasEmptyState || hasRows).toBe(true);
+  });
+
+  // DPCI/UPC Demo Scanner phase (2026-07-30): a valid UPC now backfills the DPCI boxes
+  // instead of clearing them (the established asymmetric convention — see useUpcField.ts's
+  // own doc comment), same rule IID/PAR already followed.
+  test('a valid UPC scan backfills the DPCI fields', async ({ page }) => {
+    const deptField = page.getByRole('button', { name: 'Dept' });
+    await expect(deptField).toHaveText('—');
+
+    const upcField = page.locator('div.w-\\[260px\\]', { hasText: 'UPC' }).getByRole('button');
+    await upcField.click();
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/locations') && r.ok()),
+      page.getByRole('button', { name: '✓ Valid UPC' }).click(),
+    ]);
+
+    await expect(deptField).not.toHaveText('—');
   });
 
   test('Dept/Class/Item fields auto-advance and auto-resolve without an explicit OK tap', async ({ page }) => {
@@ -54,7 +71,7 @@ test.describe('ISI — Item Storage Inquiry', () => {
   test('selecting a result row enables the Location ID / Pallet ID hot buttons', async ({ page }) => {
     await Promise.all([
       page.waitForResponse((r) => r.url().includes('/locations') && r.ok()),
-      page.getByRole('button', { name: '✓ Scan DPCI' }).click(),
+      page.getByRole('button', { name: '✓ Valid DPCI' }).click(),
     ]);
 
     const firstRow = page.getByText(/^Pallet \d+$/).first();

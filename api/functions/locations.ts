@@ -117,6 +117,25 @@ async function getStorageCodes(req: HttpRequest): Promise<unknown> {
 }
 
 /**
+ * Full Size reference list (Feature 9, Demo Scanner Phase 1) — every `{code, desc}` pair,
+ * e.g. `{ code: "M", desc: "Medium" }`. Feeds the Demo Scanner's by-status popup Size
+ * filter dropdown; mirrors getStorageCodes's shape exactly so both can share the same
+ * `CodeOption`-typed dropdown plumbing client-side.
+ *
+ * @returns `{ code: string; desc: string }[]`, sorted alphabetically by code
+ */
+async function getSizes(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+
+  const sizes = await prisma.size.findMany({
+    select: { id: true, desc: true },
+    orderBy: { id: 'asc' },
+  });
+
+  return sizes.map((s) => ({ code: s.id, desc: s.desc }));
+}
+
+/**
  * Full Workstation reference list (GitHub #124/#125) — every `{id, name}` pair, e.g.
  * `{ id: "CR01", name: "Conveyable Reserve 01" }`. Feeds ELA's Workstation restrict-to
  * picker and its exclude-bubble popup.
@@ -384,51 +403,6 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
     .map(([zone, { min, max }]) => ({ zone, minBin: min, maxBin: max }));
 
   return { aisle, levels, zoneSummary, zoneBinRanges };
-}
-
-/**
- * Picks one location currently on hold, at random (issue #15 — WLH's "find a held
- * location" helper-bar button, per DevNotes/DesignPrompts/Feature-4-WLH-Find-Held-Location.md).
- * Not filtered by aisle, hold type, or anything else — works app-wide, and re-rolls a new
- * random pick on every call, letting the worker "find one, then find another" by tapping
- * repeatedly. Uses the same random-skip approach as the demo endpoints in samples.ts.
- *
- * @returns `{ locationId: string }` — 8-digit Aisle+Bin+Level id
- * @throws 404 NOT_FOUND if no locations currently have a hold
- */
-async function getRandomHeldLocation(req: HttpRequest): Promise<unknown> {
-  await requireAuth(req);
-
-  const where = { holdCategory: { not: null } };
-  const count = await prisma.location.count({ where });
-  if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  const skip = Math.floor(Math.random() * count);
-  const location = await prisma.location.findFirst({ where, skip, select: { aisle: true, bin: true, level: true } });
-
-  return { locationId: formatLocationId(location!.aisle, location!.bin, location!.level) };
-}
-
-/**
- * Picks one location currently free of any hold, at random (issue #15's second helper-bar
- * button — the inverse of getRandomHeldLocation). Occupancy status (EMPTY/STORED/RESERVED/
- * STAGED/PULL_PENDING) doesn't matter here — hold is an independent field from status, so
- * any of those qualify as long as holdCategory is null.
- *
- * @returns `{ locationId: string }` — 8-digit Aisle+Bin+Level id
- * @throws 404 NOT_FOUND if every location in the warehouse currently has a hold
- */
-async function getRandomUnheldLocation(req: HttpRequest): Promise<unknown> {
-  await requireAuth(req);
-
-  const where = { holdCategory: null };
-  const count = await prisma.location.count({ where });
-  if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  const skip = Math.floor(Math.random() * count);
-  const location = await prisma.location.findFirst({ where, skip, select: { aisle: true, bin: true, level: true } });
-
-  return { locationId: formatLocationId(location!.aisle, location!.bin, location!.level) };
 }
 
 // ── Range Hold (issue #14) ────────────────────────────────────────────────────
@@ -893,6 +867,13 @@ app.http('getStorageCodes', {
   handler: withHandler(getStorageCodes),
 });
 
+app.http('getSizes', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'sizes',
+  handler: withHandler(getSizes),
+});
+
 app.http('getWorkstations', {
   methods: ['GET'],
   authLevel: 'anonymous',
@@ -912,20 +893,6 @@ app.http('getLocationsEmptyByZone', {
   authLevel: 'anonymous',
   route: 'locations/empty-by-zone',
   handler: withHandler(getLocationsEmptyByZone),
-});
-
-app.http('getRandomHeldLocation', {
-  methods: ['GET'],
-  authLevel: 'anonymous',
-  route: 'locations/random-held',
-  handler: withHandler(getRandomHeldLocation),
-});
-
-app.http('getRandomUnheldLocation', {
-  methods: ['GET'],
-  authLevel: 'anonymous',
-  route: 'locations/random-unheld',
-  handler: withHandler(getRandomUnheldLocation),
 });
 
 app.http('placeHold', {

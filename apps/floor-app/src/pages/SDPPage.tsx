@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
-import { DemoPicker } from '../components/shared/DemoPicker';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
@@ -187,9 +186,6 @@ export function SDPPage() {
   const [palletIdValue, setPalletIdValue] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [confirmBlock, setConfirmBlock] = useState(false);
-  // Demo-only "which invalid pallet" picker (shared DemoPicker component) — see
-  // pickInvalidPallet's comment.
-  const [invalidPalletPickerOpen, setInvalidPalletPickerOpen] = useState(false);
 
   // Screen-locked: while a reservation is active, Back/Home/Jump/Logout are disabled
   // shell-wide so the worker must resolve (complete or unassign) before leaving.
@@ -450,6 +446,11 @@ export function SDPPage() {
         setMessage({ type: 'error', text: 'Invalid Pallet: Pull Pending' });
       } else if (code === 'NO_LOCATIONS') {
         setMessage({ type: 'error', text: `No eligible locations available in aisle ${aisleValueRef.current}` });
+      } else if (code === 'MISSING_SIZE') {
+        // A pallet is expected to always carry a real Size by the time it reaches here
+        // (mandatory at creation) — reaching this means the pallet's own data is broken,
+        // not that the aisle lacks space. Recoverable by any role via the Size override.
+        setMessage({ type: 'error', text: 'This pallet has no Size set — enter a Size override to continue' });
       } else {
         setMessage({ type: 'error', text: 'Put failed — please try again' });
       }
@@ -611,6 +612,13 @@ export function SDPPage() {
         setMessage({ type: 'warning', text: `Reservation expired — location ${d.directedLocation} released` });
         stopPolling();
         resetToEntry(true);
+      } else if (code === 'MISSING_SIZE') {
+        // Same underlying condition as directedPut's own MISSING_SIZE (see that handler's
+        // comment) — re-reached here since blockPut re-derives the same effective criteria.
+        playAlert('error');
+        setMessage({ type: 'error', text: 'This pallet has no Size set — enter a Size override to continue' });
+        stopPolling();
+        resetToEntry(true);
       } else {
         setMessage({ type: 'error', text: 'Block failed — please try again' });
       }
@@ -650,70 +658,6 @@ export function SDPPage() {
 
   // ── Demo buttons ────────────────────────────────────────────────────────────
 
-  /**
-   * Fetches a real unlocated pallet id and delivers it as a simulated Pallet ID scan.
-   * Constrained to the currently-entered Aisle's Storage Code (reads aisleValueRef, not
-   * aisleFields.field.value directly, to avoid a stale closure the same way handlePalletScan
-   * does) — without this, a random pallet's Storage Code frequently wouldn't match the
-   * aisle already typed in, correctly but unhelpfully failing the resulting demo put with
-   * NO_LOCATIONS now that Directed Put enforces Storage Code matching. A no-op filter
-   * (server-side) if the Aisle field is still empty.
-   *
-   * Also excludes any entered Size/Storage Code override from the pick — otherwise the
-   * demo pallet frequently already naturally matches the override, so directing it doesn't
-   * visibly demonstrate the override actually changing anything (direct instruction).
-   */
-  const demoPut = useCallback(async () => {
-    try {
-      const params = new URLSearchParams({ status: 'unlocated', aisle: aisleValueRef.current });
-      if (storageOverride) params.set('excludeStorageCode', storageOverride);
-      const { palletId } = await apiFetch<{ palletId: number }>(`/api/demo/pallet?${params.toString()}`, token!);
-      deliverScan(String(palletId));
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo put: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage, storageOverride]);
-
-  /** Fetches a real already-stored pallet id and delivers it as a simulated Pallet ID scan, simulating a move. Aisle-constrained and override-excluded — see demoPut's comment (Size applies here too, unlike demoPut, since a stored pallet already has its own). */
-  const demoMove = useCallback(async () => {
-    try {
-      const params = new URLSearchParams({ status: 'stored', aisle: aisleValueRef.current });
-      if (storageOverride) params.set('excludeStorageCode', storageOverride);
-      if (sizeOverride) params.set('excludeSize', sizeOverride);
-      const { palletId } = await apiFetch<{ palletId: number }>(`/api/demo/pallet?${params.toString()}`, token!);
-      deliverScan(String(palletId));
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo move: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage, storageOverride, sizeOverride]);
-
-  /**
-   * Dispatches the shared DemoPicker's choice — consolidates what used to be one
-   * "✗ PID" button (not-found only) behind one "⚠ Invalid Pallet" footer button plus
-   * this popup, adding three previously-unreachable checkPalletEligibility paths a worker
-   * can't otherwise produce by scanning normally: "Pulled" (NO_CARTONS — a fully-pulled
-   * pallet has zero cartons left, same case as before, relabeled to match how a worker
-   * actually thinks of it), "Canceled" (a voided/canceled receiving record), and
-   * "Pull Pending" (an open, non-terminal Label already committed against the pallet).
-   * Not-found must be numeric — a non-numeric value fails the API's parseInt check
-   * (INVALID_INPUT, 400) before ever reaching the not-found lookup (PALLET_NOT_FOUND,
-   * 404). Same bug/fix as MNP's demoBadPid (see CHANGELOG.md's Legacy findings).
-   */
-  const pickInvalidPallet = useCallback(async (kind: 'notFound' | 'pulled' | 'canceled' | 'pullPending') => {
-    setInvalidPalletPickerOpen(false);
-    if (kind === 'notFound') {
-      deliverScan('999999999');
-      return;
-    }
-    const status = { pulled: 'no-cartons', canceled: 'canceled', pullPending: 'pull-pending' }[kind];
-    try {
-      const { palletId } = await apiFetch<{ palletId: number }>(`/api/demo/pallet?status=${status}`, token!);
-      deliverScan(String(palletId));
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo pallet: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage]);
-
   /** Delivers the currently directed location, simulating a correct confirm scan. */
   const demoConfirmOk = useCallback(() => {
     if (directedRef.current) deliverScan(directedRef.current.directedLocation);
@@ -736,20 +680,18 @@ export function SDPPage() {
   // state — useDemoSlot's re-sync effect keys off this reference, and an unmemoized
   // JSX literal would recreate it (and re-fire the effect) on every render, looping
   // forever via the FooterDemoContext state update it triggers.
+  // Pallet ID's own demo buttons are no longer built here — PalletIdField's `demoScanner`
+  // prop below owns that registration internally now (Feature 9, Phase 1). This slot only
+  // covers Location Confirm, which stays screen-owned (Location ID's own Demo Scanner phase
+  // hasn't happened yet).
   const demoSlot = useMemo(() => (
-    screenState === 'entry' ? (
-      <>
-        <DemoBtn label="✓ Put"  color="green" onClick={demoPut} />
-        <DemoBtn label="✓ Move" color="blue"  onClick={demoMove} />
-        <DemoBtn label="⚠ Invalid Pallet" color="amber" onClick={() => setInvalidPalletPickerOpen(true)} />
-      </>
-    ) : locationActive ? (
+    locationActive ? (
       <>
         <DemoBtn label="✓ Location" color="green" onClick={demoConfirmOk} />
         <DemoBtn label="✗ Location" color="red"   onClick={demoConfirmBad} />
       </>
     ) : null
-  ), [screenState, locationActive, demoPut, demoMove, demoConfirmOk, demoConfirmBad]);
+  ), [locationActive, demoConfirmOk, demoConfirmBad]);
 
   useDemoSlot(demoSlot);
 
@@ -918,6 +860,8 @@ export function SDPPage() {
           label="Scan Pallet ID"
           value={palletIdValue}
           onChange={handlePalletScan}
+          demoScanner
+          demoAisle={aisleFields.field.value}
           boxClass="h-[72px] px-5 rounded-[12px]"
           valueClass="text-[32px] font-medium tracking-[0.04em]"
           caretClass="w-[3px] h-[38px]"
@@ -1020,19 +964,6 @@ export function SDPPage() {
         />
       )}
 
-      {invalidPalletPickerOpen && (
-        <DemoPicker
-          title="Simulate which invalid pallet?"
-          options={[
-            { key: 'notFound',    label: 'Pallet ID Not Found' },
-            { key: 'pulled',      label: 'Pulled' },
-            { key: 'canceled',    label: 'Canceled' },
-            { key: 'pullPending', label: 'Pull Pending' },
-          ]}
-          onPick={pickInvalidPallet}
-          onCancel={() => setInvalidPalletPickerOpen(false)}
-        />
-      )}
     </div>
   );
 }

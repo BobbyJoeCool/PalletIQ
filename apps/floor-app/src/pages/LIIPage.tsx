@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
-import { DemoPicker } from '../components/shared/DemoPicker';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
-import { useDemoSlot } from '../context/FooterDemoContext';
 import { useLII, type LIILocationData } from '../context/LIIContext';
 import { useMessageBar } from '../context/MessageBarContext';
-import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 
@@ -19,19 +16,6 @@ const HOLD_NAMES: Record<string, string> = {
   HOLD_BOTH: 'Hold Both',
   HOLD_PERM: 'Hold Permanent',
 };
-
-type StatusPickerKey = 'empty' | 'occupied' | 'staged' | 'reserved' | 'pullPending' | 'held' | 'contracted' | 'multiOccupant';
-
-const STATUS_PICKER_OPTIONS: { key: StatusPickerKey; label: string }[] = [
-  { key: 'empty', label: 'Empty' },
-  { key: 'occupied', label: 'Stored' },
-  { key: 'staged', label: 'Staged' },
-  { key: 'reserved', label: 'Reserved' },
-  { key: 'pullPending', label: 'Pull Pending' },
-  { key: 'held', label: 'Held' },
-  { key: 'contracted', label: 'Contraction' },
-  { key: 'multiOccupant', label: 'Multiple Pallet IDs' },
-];
 
 /**
  * LII — Location ID Info. Read-only location lookup for all roles via a three-field
@@ -47,7 +31,6 @@ export function LIIPage() {
   const { setMessage, clearMessage } = useMessageBar();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { hidePanel } = useNumpad();
 
   // LII#01: the loaded location lives in LIIProvider (mounted above the route tree, see
   // App.tsx), not local state, so it survives navigating away and back.
@@ -55,7 +38,6 @@ export function LIIPage() {
   const [loading, setLoading] = useState(false);
   const [entryKey, setEntryKey] = useState(0);
   const [palletIndex, setPalletIndex] = useState(0);
-  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
 
   // Only auto-focus the entry boxes on a genuinely fresh visit — if a location was
   // already restored from LIIContext, yanking focus into the (now-redundant) entry boxes
@@ -115,64 +97,12 @@ export function LIIPage() {
     navigate(`/hold?id=${locationId}`);
   }
 
-  // ── Demo buttons ────────────────────────────────────────────────────────────
-
-  /** Fetches a random real location id from the API and looks it up, simulating a successful scan. */
-  const demoScan = useCallback(async () => {
-    hidePanel();
-    try {
-      // status=any: a genuinely random location regardless of status, matching what a
-      // physical barcode scan could actually land on — the endpoint's bare default
-      // ('empty') only ever surfaced EMPTY locations, which undersold "✓ Scan Location."
-      const { locationId: id, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=any', token!);
-      // /api/demo/location returns a 6-digit Aisle+Bin id plus the exact level of the row
-      // it happened to pick — a bare 6-digit lookup resolves via findFirst on Aisle+Bin
-      // alone (ignoring level), which can land on a *different* level with a completely
-      // different status than the one actually sampled. Combining into the full 8-digit
-      // id forces the exact-match lookup instead.
-      void loadLocation(id + String(level).padStart(2, '0'));
-    } catch {
-      setMessage({ type: 'error', text: 'Demo scan unavailable' });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, hidePanel]);
-
-  /** Looks up a location id that doesn't exist, simulating a not-found scan. */
-  const demoBad = useCallback(() => {
-    hidePanel();
-    void loadLocation('99999999');
-  }, [loadLocation, hidePanel]);
-
-  /** Dispatches the shared DemoPicker's choice — fetches a random location in the chosen state (LII#02). */
-  const pickStatus = useCallback(async (key: StatusPickerKey) => {
-    setStatusPickerOpen(false);
-    hidePanel();
-    try {
-      const { locationId: id, level } = await apiFetch<{ locationId: string; level: number }>(`/api/demo/location?status=${key}`, token!);
-      // See demoScan's comment — the exact level matters, since a 6-digit lookup would
-      // otherwise silently resolve to an arbitrary (possibly different-status) level.
-      void loadLocation(id + String(level).padStart(2, '0'));
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo location: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, loadLocation, hidePanel, setMessage]);
-
-  /** Footer demo-button slot content: a good scan, the status picker, and a bad scan trigger. */
-  const demoSlot = useMemo(() => (
-    <>
-      <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">
-        ✓ Scan Location
-      </button>
-      <button type="button" onClick={() => setStatusPickerOpen(true)} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#003366] hover:bg-[#004488] text-white transition-colors">
-        Find by Status
-      </button>
-      <button type="button" onClick={demoBad} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#660000] hover:bg-[#770000] text-white transition-colors">
-        ✗ Bad Location
-      </button>
-    </>
-  ), [demoScan, demoBad]);
-
-  useDemoSlot(demoSlot);
+  // Demo buttons (Feature 9, Phase 2) — Location ID's own Demo Scanner is now owned
+  // internally by LocationEntryFields itself (`demoScanner` prop below), replacing LII's
+  // own hand-rolled ✓ Scan/Find by Status/✗ Bad buttons and its flat single-select
+  // DemoPicker — the Demo Scanner's Filter popup expresses Status/Hold/Contraction/
+  // Multi-Occupant as four independent axes instead, a genuine capability upgrade over the
+  // old flat 8-option list, which couldn't express combinations.
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -181,7 +111,7 @@ export function LIIPage() {
 
   return (
     <div className="absolute inset-0 flex flex-col p-6 gap-5 select-none">
-      <LocationEntryFields key={entryKey} onResolved={loadLocation} value={locationId ?? ''} autoFocus={initialAutoFocus} />
+      <LocationEntryFields key={entryKey} onResolved={loadLocation} value={locationId ?? ''} autoFocus={initialAutoFocus} demoScanner />
 
       {loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
 
@@ -255,15 +185,6 @@ export function LIIPage() {
             </button>
           </div>
         </div>
-      )}
-
-      {statusPickerOpen && (
-        <DemoPicker
-          title="Find a location with which status?"
-          options={STATUS_PICKER_OPTIONS}
-          onPick={pickStatus}
-          onCancel={() => setStatusPickerOpen(false)}
-        />
       )}
     </div>
   );

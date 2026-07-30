@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
-import { DemoPicker } from '../components/shared/DemoPicker';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
-import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
+import { PALLET_ID_SIZE_PRESETS } from '../components/shared/PalletIdField';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
-import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { usePII, type PIIPalletData, type UserStamp } from '../context/PIIContext';
@@ -17,23 +15,11 @@ import { playAlert } from '../lib/audio';
 import { EDIT_REASON_CODES } from '../lib/editReasonCodes';
 import { fmtDpci } from '../lib/fmt';
 import { INVALID_WASH } from '../lib/invalidWash';
+import { usePalletIdField } from '../lib/usePalletIdField';
 import { useDpciFields } from '../lib/useDpciFields';
 import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
 import { checkSspCap, checkVcpSspRatio } from '../lib/vcpSspValidation';
-import type { PalletStatus } from '@shared/index';
-
-/** Every `PalletStatus` value (see `shared/index.ts`), with a human-readable label, for
- *  PII's "Find by Status" demo picker (v1.7.0, direct instruction). */
-const STATUS_PICKER_OPTIONS: { key: PalletStatus; label: string }[] = [
-  { key: 'PUT_PENDING', label: 'Put Pending' },
-  { key: 'STORED', label: 'Stored' },
-  { key: 'CA_PULL_PEND', label: 'CA Pull Pending' },
-  { key: 'FP_PULL_PEND', label: 'FP Pull Pending' },
-  { key: 'PULLED', label: 'Pulled' },
-  { key: 'CANCELED', label: 'Canceled' },
-  { key: 'CONSOLIDATED', label: 'Consolidated' },
-];
 
 /** Formats a location object as its canonical 8-digit id (Aisle+Bin+Level). */
 function location8(loc: { aisle: number; bin: number; level: number }): string {
@@ -154,18 +140,8 @@ export function PIIPage() {
   // any unsaved Edit Mode changes are never persisted here, so it never restores into 'edit'.
   const { pallet, setPallet } = usePII();
   const [screenState, setScreenState] = useState<ScreenState>(() => (pallet ? 'loaded' : 'ready'));
-  const [loading, setLoading] = useState(false);
-  // Red-wash invalid state (App-Wide item 9, v1.7.0) — Pallet ID stays visible as-typed on a
-  // not-found error (issue PII#01), so it's a genuine individual-wash candidate like PAR's
-  // UPC/ISI's UPC.
-  const [palletInvalid, setPalletInvalid] = useState(false);
-
-  const palletFieldRef = useRef<PalletIdFieldHandle>(null);
-  // The field's displayed value — separate from `pallet.pid` since it must stay visible
-  // as-typed on a not-found error (issue PII#01), when no `pallet` is loaded at all.
-  // Seeded from a persisted pallet on mount (a fresh page load never ran the
-  // focus-and-type flow that would normally populate it).
-  const [pidValue, setPidValue] = useState(() => (pallet ? String(pallet.pid) : ''));
+  const screenStateRef = useRef(screenState);
+  screenStateRef.current = screenState;
 
   // Edit-mode field values, seeded from the loaded pallet on entering edit mode.
   const [editVcp, setEditVcp] = useState('');
@@ -242,66 +218,54 @@ export function PIIPage() {
     focusMonthField, focusDayField, focusYearField,
   } = expirationFields;
 
-  /** Looks up a pallet by id via the API and transitions to the loaded state; resets to ready on failure. */
-  const loadPallet = useCallback(async (idStr: string) => {
-    hidePanel();
-    clearMessage();
-    const pid = parseInt(idStr, 10);
-    if (isNaN(pid)) {
+  /** Self-validating Pallet ID field (Feature 9, Phase 1) — owns its own numpad state,
+   *  existence-check, invalid-wash, and Demo Scanner registration internally; PII only
+   *  supplies the fetch call and reacts to the outcome. Replaces the old `loadPallet`/
+   *  `handlePalletIdChange`/`pidValue`/`palletInvalid`/`palletFieldRef` bundle. */
+  const pidField = usePalletIdField<PIIPalletData>({
+    fetch: useCallback((pid: string) => apiFetch<PIIPalletData>(`/api/pallets/${pid}`, token!), [token]),
+    onBeforeResolve: useCallback(() => {
+      hidePanel();
+      clearMessage();
+      // A new scan while editing discards unsaved changes without a confirmation prompt —
+      // this is a demo-scope simplification of PII.md's confirm-before-discard. Read via
+      // ref (not a direct dependency) since this callback only recreates when `fetch`
+      // does — see usePalletIdField's own doc for why its `resolve` deliberately doesn't
+      // re-subscribe to onBeforeResolve/onResolved/onNotFound on every render.
+      if (screenStateRef.current === 'edit') setScreenState('loaded');
+    }, [hidePanel, clearMessage]),
+    onResolved: useCallback((data: PIIPalletData) => {
+      setPallet(data);
+      setScreenState('loaded');
+    }, [setPallet]),
+    onNotFound: useCallback(() => {
       playAlert('error');
       setMessage({ type: 'error', text: 'Pallet not found' });
       // Field intentionally left as-typed (issue PII#01) — the worker should be able to
       // see and correct what they actually entered, not have it silently wiped.
-      setPalletInvalid(true);
-      return;
-    }
-    setLoading(true);
-    try {
-      const data = await apiFetch<PIIPalletData>(`/api/pallets/${pid}`, token!);
-      setPallet(data);
-      setScreenState('loaded');
-      setPidValue(String(pid));
-      setPalletInvalid(false);
-    } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Pallet not found' });
-      // Same as above — left as-typed rather than cleared (issue PII#01).
       setPallet(null);
       setScreenState('ready');
-      setPalletInvalid(true);
-    } finally {
-      setLoading(false);
-    }
+    }, [setMessage, setPallet]),
+  });
+
+  // Seeds the field's displayed value from a persisted pallet on mount (a fresh page load
+  // never ran the focus-and-type flow that would normally populate it) — mirrors the old
+  // `pidValue` lazy-initializer's one-time-only semantics exactly.
+  useEffect(() => {
+    if (pallet) pidField.field.set(String(pallet.pid));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, hidePanel, clearMessage]);
-
-  /** Wired to the Pallet ID field's onChange; a scan while editing discards unsaved changes and re-loads. */
-  const handlePalletIdChange = useCallback((v: string) => {
-    const trimmed = v.trim();
-    if (!trimmed) return;
-    setPidValue(trimmed);
-    if (screenState === 'edit') {
-      // A new scan while editing discards unsaved changes without a confirmation
-      // prompt — this is a demo-scope simplification of PII.md's confirm-before-discard.
-      setScreenState('loaded');
-    }
-    void loadPallet(trimmed);
-  }, [screenState, loadPallet]);
-
-  const focusPalletField = useCallback(() => {
-    palletFieldRef.current?.focus();
   }, []);
 
   useEffect(() => {
     // React re-runs this effect whenever the dependency's value changes in *either*
     // direction — including the very first successful scan, which flips it true→false
     // (ready→loaded). Without this guard that transition re-scheduled a focus call too,
-    // reopening the numpad right after `loadPallet`'s own `hidePanel()` had just closed it
-    // (issue #55 — only ever visible on the first scan of a session, since every load
-    // after that starts from 'loaded' already, so the dependency stays false→false and
-    // the effect doesn't re-run at all).
+    // reopening the numpad right after the field's own `onBeforeResolve`'s `hidePanel()`
+    // had just closed it (issue #55 — only ever visible on the first scan of a session,
+    // since every load after that starts from 'loaded' already, so the dependency stays
+    // false→false and the effect doesn't re-run at all).
     if (screenState !== 'ready') return;
-    const id = setTimeout(() => focusPalletField(), 50);
+    const id = setTimeout(() => pidField.focusField(), 50);
     return () => clearTimeout(id);
     // Only re-run when returning to the ready state — not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -311,7 +275,7 @@ export function PIIPage() {
   const idParam = searchParams.get('id');
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount effect (URL ?id= pre-population)
-    if (idParam) void loadPallet(idParam);
+    if (idParam) pidField.loadPalletId(idParam);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idParam]);
 
@@ -392,7 +356,7 @@ export function PIIPage() {
       setMessage({ type: 'success', text: `Pallet ${pallet.pid} updated` });
       setExpirationConfirmPending(false);
       setScreenState('loaded');
-      await loadPallet(String(pallet.pid));
+      pidField.loadPalletId(String(pallet.pid));
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       if (code === 'EXPIRATION_NEEDS_CONFIRM') {
@@ -434,62 +398,23 @@ export function PIIPage() {
     navigate(`/location?id=${location8(pallet.location)}`);
   }
 
-  // ── Demo buttons ────────────────────────────────────────────────────────────
-
-  /** Fetches a random real pallet id from the API and loads it, simulating a successful scan. */
-  const demoScan = useCallback(async () => {
-    try {
-      const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet', token!);
-      void loadPallet(String(palletId));
-    } catch {
-      setMessage({ type: 'error', text: 'Demo scan unavailable' });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  /** Looks up a pallet id that doesn't exist, simulating a not-found scan. */
-  const demoBad = useCallback(() => void loadPallet('999999999'), [loadPallet]);
-
-  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
-
-  /** Dispatches the shared DemoPicker's choice — fetches a random pallet with the chosen
-   *  literal `status` value (v1.7.0, direct instruction: "a helper button that finds pallet
-   *  ID on PII by status, with each of those statuses"). */
-  const pickStatus = useCallback(async (status: PalletStatus) => {
-    setStatusPickerOpen(false);
-    try {
-      const { palletId } = await apiFetch<{ palletId: number }>(`/api/demo/pallet-status?status=${status}`, token!);
-      void loadPallet(String(palletId));
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo pallet: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, loadPallet]);
-
-  /** Footer demo-button slot content: a good scan, the status picker, and a bad scan trigger. */
-  const demoSlot = useMemo(() => (
-    <>
-      <button type="button" onClick={demoScan} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">
-        ✓ Scan PID
-      </button>
-      <button type="button" onClick={() => setStatusPickerOpen(true)} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#003366] hover:bg-[#004488] text-white transition-colors">
-        Find by Status
-      </button>
-      <button type="button" onClick={demoBad} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#660000] hover:bg-[#770000] text-white transition-colors">
-        ✗ Bad PID
-      </button>
-    </>
-  ), [demoScan, demoBad]);
-
-  useDemoSlot(demoSlot);
-
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <div className="absolute inset-0 flex flex-col p-6 gap-4 select-none">
-      <PalletIdField ref={palletFieldRef} value={pidValue} onChange={handlePalletIdChange} invalid={palletInvalid} />
+      <NumpadFieldBox
+        label="Pallet ID"
+        value={pidField.field.value}
+        onFocus={pidField.focusField}
+        active={pidField.field.isActive}
+        invalid={pidField.invalid}
+        width={PALLET_ID_SIZE_PRESETS.default.width}
+        boxClass={PALLET_ID_SIZE_PRESETS.default.boxClass}
+        valueClass={PALLET_ID_SIZE_PRESETS.default.valueClass}
+        caretClass={PALLET_ID_SIZE_PRESETS.default.caretClass}
+      />
 
-      {loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
+      {pidField.loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
 
       {pallet && screenState !== 'ready' && (
         <div className={`flex-1 flex flex-col overflow-y-auto ${screenState === 'edit' ? 'max-w-[720px]' : 'max-w-[1100px]'}`}>
@@ -661,14 +586,6 @@ export function PIIPage() {
         </div>
       )}
 
-      {statusPickerOpen && (
-        <DemoPicker
-          title="Find a pallet with which status?"
-          options={STATUS_PICKER_OPTIONS}
-          onPick={pickStatus}
-          onCancel={() => setStatusPickerOpen(false)}
-        />
-      )}
     </div>
   );
 }

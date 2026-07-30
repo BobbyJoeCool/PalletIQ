@@ -8,7 +8,7 @@ const VARIANT_STYLES: Record<StatusVariant, string> = {
   info:    'bg-[#001A33] text-[#4499FF] border-[#003366]',
 };
 
-// Best-effort default coloring across LocationStatus, PalletStatus, and LabelStatus
+// Best-effort default coloring across LocationStatus, PalletStatus, and ContainerStatus
 // (see Documentation/Flowcharts-ERDs/enums.mmd) — callers can always override via the
 // `variant` prop when a specific screen needs different semantics for the same status.
 const KNOWN_VARIANTS: Record<string, StatusVariant> = {
@@ -44,7 +44,7 @@ interface StatusBadgeProps {
 }
 
 /**
- * Generic status pill shared across Pallet, Location, and Label status displays —
+ * Generic status pill shared across Pallet, Location, and Container status displays —
  * deferred from Phase 5.2, built in Phase 9.0. Defaults to `statusVariant(status)`'s
  * best guess; pass `variant` explicitly when a screen needs different semantics
  * (e.g. a status that reads as informational in one context and risky in another).

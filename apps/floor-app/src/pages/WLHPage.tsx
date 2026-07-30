@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { hasMinRole, type Role } from '@shared/index';
 import { HOLD_LABELS, HoldPanel, type HoldCategory } from '../components/shared/HoldPanel';
@@ -8,7 +8,6 @@ import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { LiveId } from '../components/ui/LiveId';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { useAuth } from '../context/AuthContext';
-import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { useWLH } from '../context/WLHContext';
@@ -438,76 +437,14 @@ export function WLHPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idParam]);
 
-  // ── Demo buttons ────────────────────────────────────────────────────────────
-
-  /** Fetches a random real location id from the API and resolves it, simulating a successful scan. */
-  const demoLoad = useCallback(async () => {
-    try {
-      const { locationId: id } = await apiFetch<{ locationId: string }>('/api/demo/location', token!);
-      void resolveLocation(id);
-    } catch {
-      setMessage({ type: 'error', text: 'Demo load unavailable' });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  /** Looks up a location id that doesn't exist, simulating a not-found scan. */
-  const demoBad = useCallback(() => void resolveLocation('99999999'), [resolveLocation]);
-
-  // ── Find a held / unheld location (issue #15) ───────────────────────────────
-
-  /**
-   * Picks one location at random — either currently on hold, or currently free of any
-   * hold — and loads it the same way resolveLocation loads a typed/scanned one. Tapping
-   * again re-rolls a new random pick; not filtered by anything currently in the entry
-   * fields. Rendered through the shared footer demo-slot (see demoSlot below, WLH fix
-   * item 04) rather than as its own in-content helper bar. See
-   * DevNotes/DesignPrompts/Feature-4-WLH-Find-Held-Location.md.
-   */
-  const findLocation = useCallback(async (kind: 'held' | 'unheld') => {
-    try {
-      const { locationId: id } = await apiFetch<{ locationId: string }>(`/api/locations/random-${kind}`, token!);
-      void resolveLocation(id);
-    } catch (err) {
-      const code = err instanceof Error ? err.message : '';
-      if (code === 'NOT_FOUND') {
-        setMessage({
-          type: 'warning',
-          text: kind === 'held' ? 'No locations currently on hold.' : 'No locations currently available without a hold.',
-        });
-      } else {
-        setMessage({ type: 'error', text: 'Lookup failed — please try again' });
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  /** Footer demo-button slot content: a good load, a bad location trigger, and the
-   *  Find Held/Find Available helpers (WLH fix item 04 — these previously rendered as
-   *  hand-placed JSX in the main content area instead of through this shared demo-slot
-   *  system every other screen's helper/demo buttons use). Hidden in Range mode (issue
-   *  #14) — these all act on a single resolved locationId, which Range mode has no
-   *  equivalent of; the Review/Confirm flow there is already fully manually testable. */
-  const demoSlot = useMemo(() => (
-    mode === 'range' ? null : (
-      <>
-        <button type="button" onClick={demoLoad} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#006600] hover:bg-[#007700] text-white transition-colors">
-          ✓ Load Location
-        </button>
-        <button type="button" onClick={demoBad} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#660000] hover:bg-[#770000] text-white transition-colors">
-          ✗ Bad Location
-        </button>
-        <button type="button" onClick={() => void findLocation('held')} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#003366] hover:bg-[#004488] text-white transition-colors">
-          Find Held Location
-        </button>
-        <button type="button" onClick={() => void findLocation('unheld')} className="h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium bg-[#003366] hover:bg-[#004488] text-white transition-colors">
-          Find Available Location
-        </button>
-      </>
-    )
-  ), [mode, demoLoad, demoBad, findLocation]);
-
-  useDemoSlot(demoSlot);
+  // Demo buttons (Feature 9, Phase 2) — Location ID's own Demo Scanner is now owned
+  // internally by LocationEntryFields itself (`demoScanner` prop below), the same way
+  // Pallet ID's Demo Scanner moved into PalletIdField in Phase 1. WLH's own "Find Held
+  // Location"/"Find Available Location" buttons (issue #15) are retired — the new Hold
+  // axis (Not Held / Hold Any / Hold In / Hold Out / Hold Both / Hold Perm) in the Demo
+  // Scanner's Filter popup covers the same queries through one consistent UI (direct
+  // instruction). Still hidden entirely in Range mode (issue #14) — LocationEntryFields
+  // itself isn't even rendered there (see RangeHoldPanel below), so there's nothing to gate.
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -532,7 +469,7 @@ export function WLHPage() {
             <RangeHoldPanel onLog={addLogEntry} />
           ) : (
             <>
-              <LocationEntryFields onResolved={resolveLocation} groupInvalid={locationInvalid} />
+              <LocationEntryFields onResolved={resolveLocation} groupInvalid={locationInvalid} demoScanner />
 
               {/* Always visible from navigation (v1.6.10, direct instruction) — the
                   Location indicator and HoldPanel no longer wait for a resolved location;

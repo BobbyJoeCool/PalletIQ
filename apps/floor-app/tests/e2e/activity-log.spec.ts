@@ -23,7 +23,7 @@ test.describe('App-wide activity log (issue #46)', () => {
 
   test('completing a pull immediately shows a PULL entry in the log', async ({ page }) => {
     await page.getByRole('button', { name: 'Carton Air' }).click();
-    await page.getByRole('button', { name: '✓ Scan Label' }).click();
+    await page.getByRole('button', { name: '✓ Valid Label' }).click();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '✓ Scan PID' }).click();
     await expect(page.getByText(/^Last Pull .* — /)).toBeVisible();
@@ -37,7 +37,7 @@ test.describe('App-wide activity log (issue #46)', () => {
   // in-memory session state) and is identical regardless of which screen it's opened from.
   test('the log is unaffected by navigating to a different screen', async ({ page }) => {
     await page.getByRole('button', { name: 'Carton Air' }).click();
-    await page.getByRole('button', { name: '✓ Scan Label' }).click();
+    await page.getByRole('button', { name: '✓ Valid Label' }).click();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '✓ Scan PID' }).click();
     await expect(page.getByText(/^Last Pull .* — /)).toBeVisible();

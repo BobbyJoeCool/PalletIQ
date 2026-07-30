@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DataRow } from '../components/shared/DataRow';
 import { HoldPanel } from '../components/shared/HoldPanel';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
@@ -9,10 +9,8 @@ import { LiveId } from '../components/ui/LiveId';
 import { ModalOverlay } from '../components/ui/ModalOverlay';
 import { DigitGrid, NumericReadout } from '../components/ui/NumericKeypad';
 import { useAuth } from '../context/AuthContext';
-import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { type MNPScannedPallet, useMNP } from '../context/MNPContext';
-import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { useDigitInput } from '../lib/useDigitInput';
@@ -60,27 +58,6 @@ type GateState =
   | { kind: 'hold'; holdCategory: 'HOLD_IN' | 'HOLD_BOTH' }
   | { kind: 'occupied'; occupantPalletId: number | null; occupantDpci: string | null; wasStaged: boolean }
   | { kind: 'combine'; occupantPalletId: number | null; occupantDpci: string | null };
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Colored footer demo button; `color` selects a background from a small fixed palette. */
-function DemoBtn({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
-  const colors: Record<string, string> = {
-    green: 'bg-[#006600] hover:bg-[#007700] text-white',
-    red:   'bg-[#660000] hover:bg-[#770000] text-white',
-    blue:  'bg-[#003366] hover:bg-[#004488] text-white',
-    amber: 'bg-[#554400] hover:bg-[#665500] text-white',
-  };
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`h-[38px] px-4 rounded-[8px] font-ui text-[15px] font-medium select-none transition-colors ${colors[color] ?? colors.green}`}
-    >
-      {label}
-    </button>
-  );
-}
 
 // ── Level selection modal ──────────────────────────────────────────────────────
 
@@ -238,7 +215,6 @@ type ScreenState = 'ready' | 'pallet_scanned' | 'level_modal';
 export function MNPPage() {
   const { token, user } = useAuth();
   const { setMessage, clearMessage } = useMessageBar();
-  const { deliverScan } = useNumpad();
 
   const [screenState, setScreenState] = useState<ScreenState>('ready');
   // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
@@ -291,13 +267,6 @@ export function MNPPage() {
   // Hold Permanent has no equivalent — it's a hard block for every role, nothing to
   // acknowledge past.
   const acknowledgeHoldRef = useRef(false);
-  // Set immediately before deliverScan() by the Empty/Occupied/Contracted/Consolidate demo
-  // buttons — /api/demo/location returns a 6-digit Aisle+Bin id (a physical location
-  // barcode only ever encodes that much) plus the exact level separately, so this is how
-  // handleDestinationResolved pre-fills LevelModal for a demo-triggered 6-digit resolution.
-  // Consumed once and cleared regardless of outcome, so it never leaks into a later real scan.
-  const demoLevelHintRef = useRef<number | null>(null);
-
   const role = (user?.role ?? 'WORKER') as Role;
 
   const palletFieldRef = useRef<PalletIdFieldHandle>(null);
@@ -377,20 +346,23 @@ export function MNPPage() {
 
   /**
    * onResolved handler for the destination's 3-box entry. `locationId` is a 6-digit
-   * Aisle+Bin (worker typed only those two, or scanned a 6-digit location barcode —
-   * levelOptional) or an 8-digit full location (a full barcode scan, which already
-   * encodes the level). Calls GET /api/locations/:id to validate existence before showing
-   * the level modal — this endpoint already accepts either length (see locations.ts's
-   * getLocation).
+   * Aisle+Bin (worker typed only those two, scanned a 6-digit location barcode, or used
+   * the Demo Scanner — levelOptional) or an 8-digit full location (a full barcode scan,
+   * which already encodes the level). `demoLevel` is populated only for a Demo Scanner
+   * 6-digit fill (see LocationEntryFields' onResolved doc comment) — the exact level of
+   * the row the Demo Scanner happened to pick, used to pre-fill the Level Confirmation
+   * modal the same way a worker who scanned a real 8-digit barcode gets it pre-filled.
+   * Calls GET /api/locations/:id to validate existence before showing the level modal —
+   * this endpoint already accepts either length (see locations.ts's getLocation).
    */
-  async function handleDestinationResolved(locationId: string) {
+  async function handleDestinationResolved(locationId: string, _wasScanned: boolean, demoLevel?: number) {
     if (loadingRef.current) return;
 
     setLoading(true);
     try {
       await apiFetch(`/api/locations/${encodeURIComponent(locationId)}`, token!);
       setPendingLocation(locationId);
-      setLevelHint(locationId.length === 8 ? parseInt(locationId.slice(6, 8), 10) : demoLevelHintRef.current);
+      setLevelHint(locationId.length === 8 ? parseInt(locationId.slice(6, 8), 10) : demoLevel ?? null);
       setScreenState('level_modal');
       clearMessage();
     } catch {
@@ -398,7 +370,6 @@ export function MNPPage() {
       resetLocationField();
       setMessage({ type: 'error', text: 'Location not found' });
     } finally {
-      demoLevelHintRef.current = null;
       setLoading(false);
     }
   }
@@ -673,111 +644,13 @@ export function MNPPage() {
     setPalletIdValue('');
   }
 
-  // ── Demo buttons ──────────────────────────────────────────────────────────────
-
-  /** Fetches a real unlocated pallet id and delivers it as a simulated Pallet ID scan. */
-  const demoPut = useCallback(async () => {
-    try {
-      const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet?status=unlocated', token!);
-      deliverScan(String(palletId));
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo put: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage]);
-
-  /** Fetches a real already-stored pallet id and delivers it as a simulated Pallet ID scan, simulating a move. */
-  const demoMove = useCallback(async () => {
-    try {
-      const { palletId } = await apiFetch<{ palletId: number }>('/api/demo/pallet?status=stored', token!);
-      deliverScan(String(palletId));
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo move: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage]);
-
-  /** Delivers a Pallet ID that doesn't exist, simulating a not-found scan. */
-  const demoBadPid = useCallback(() => deliverScan('999999999'), [deliverScan]);
-
-  /**
-   * Fetches a real empty location id and delivers it as a simulated destination scan.
-   * `/api/demo/location` returns a 6-digit Aisle+Bin id (a physical location barcode only
-   * ever encodes that much — see LocationEntryFields' levelOptional doc comment) plus the
-   * exact level separately; deliverScan injects the 6-digit id (now correctly resolved as
-   * a scanned Aisle+Bin override — see the LocationEntryFields fix this pairs with), and
-   * demoLevelHintRef stashes the level so handleDestinationResolved can pre-fill LevelModal.
-   */
-  const demoEmptyLoc = useCallback(async () => {
-    try {
-      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=empty', token!);
-      demoLevelHintRef.current = level;
-      deliverScan(locationId);
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo location: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage]);
-
-  /** Fetches a real already-occupied location id and delivers it as a simulated destination scan, same as demoEmptyLoc. */
-  const demoOccupiedLoc = useCallback(async () => {
-    try {
-      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=occupied', token!);
-      demoLevelHintRef.current = level;
-      deliverScan(locationId);
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo location: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage]);
-
-  /** Fetches a real Contraction-flagged location id and delivers it as a simulated destination scan — exercises the new contraction gate. */
-  const demoContractedLoc = useCallback(async () => {
-    try {
-      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>('/api/demo/location?status=contracted', token!);
-      demoLevelHintRef.current = level;
-      deliverScan(locationId);
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo location: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage]);
-
-  /**
-   * Fetches a location whose stored occupant has the same DPCI as the currently-scanned
-   * pallet, and delivers it as a simulated destination scan — exercises the combine popup.
-   * Needs the scanned pallet's own id, so it's a no-op (button hidden) until one is scanned.
-   */
-  const demoConsolidateLoc = useCallback(async () => {
-    if (!scannedPallet) return;
-    try {
-      const { locationId, level } = await apiFetch<{ locationId: string; level: number }>(
-        `/api/demo/location?status=consolidate&palletId=${scannedPallet.id}`, token!,
-      );
-      demoLevelHintRef.current = level;
-      deliverScan(locationId);
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo location: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage, scannedPallet]);
-
-  // Memoized so the JSX reference is stable across renders that don't change screen
-  // state — useDemoSlot's re-sync effect keys off this reference, and an unmemoized
-  // JSX literal would recreate it (and re-fire the effect) on every render, looping
-  // forever via the FooterDemoContext state update it triggers.
-  const demoSlot = useMemo(() => (
-    screenState === 'ready' ? (
-      <>
-        <DemoBtn label="✓ Put"  color="green" onClick={demoPut} />
-        <DemoBtn label="✓ Move" color="blue"  onClick={demoMove} />
-        <DemoBtn label="✗ PID"  color="red"   onClick={demoBadPid} />
-      </>
-    ) : screenState === 'pallet_scanned' ? (
-      <>
-        <DemoBtn label="✓ Empty"      color="green" onClick={demoEmptyLoc} />
-        <DemoBtn label="~ Occupied"   color="amber" onClick={demoOccupiedLoc} />
-        <DemoBtn label="⛔ Contraction" color="red"   onClick={demoContractedLoc} />
-        <DemoBtn label="⇄ Consolidate" color="blue"  onClick={demoConsolidateLoc} />
-      </>
-    ) : null
-  ), [screenState, demoPut, demoMove, demoBadPid, demoEmptyLoc, demoOccupiedLoc, demoContractedLoc, demoConsolidateLoc]);
-
-  useDemoSlot(demoSlot);
+  // Demo buttons (Feature 9) — Pallet ID's own demo buttons (Put/Move/Bad PID) are owned
+  // internally by PalletIdField's `demoScanner` prop (Phase 1); Location's own demo
+  // buttons (Empty/Occupied/Contraction/Consolidate) are likewise now owned internally by
+  // LocationEntryFields' `demoScanner` prop (Phase 2) — its `demoScannedPalletId` prop
+  // (below) supplies the Consolidate option's cross-scan-type dependency, hiding that
+  // option automatically until a pallet is actually scanned (this block only ever mounts
+  // once one is, so it's always available here).
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
@@ -790,6 +663,7 @@ export function MNPPage() {
           label="Scan Pallet ID"
           value={palletIdValue}
           onChange={handlePalletScan}
+          demoScanner
           boxClass="h-[72px] px-5 rounded-[12px]"
           valueClass="text-[32px] font-medium tracking-[0.04em]"
           caretClass="w-[3px] h-[38px]"
@@ -834,6 +708,8 @@ export function MNPPage() {
                     autoFocus
                     levelOptional
                     onResolved={handleDestinationResolved}
+                    demoScanner
+                    demoScannedPalletId={scannedPallet.id}
                   />
                 </div>
                 <button

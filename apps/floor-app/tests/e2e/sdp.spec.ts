@@ -13,13 +13,39 @@ interface DirectedResult {
   alreadyStored: boolean;
 }
 
-/** Types + submits the Aisle field, then taps a demo Pallet ID button, and returns the API result. */
-async function directPallet(page: Page, aisle: string, demoButtonName: string): Promise<DirectedResult> {
+/**
+ * Selects an option from one of the Pallet ID Demo Scanner popup's filter dropdowns
+ * (Storage Code/Size) — scoped by the dropdown's own visible label (`Dropdown.tsx` wraps
+ * label + toggle button + option list in one containing div) to disambiguate Storage Code's
+ * "Any ▾" from Size's own.
+ */
+async function pickDemoFilter(page: Page, label: string, optionLabel: string) {
+  const dropdown = page.locator('div.relative.inline-flex', { hasText: label });
+  await dropdown.getByRole('button').first().click();
+  await dropdown.getByRole('button', { name: optionLabel, exact: true }).click();
+}
+
+/**
+ * Types + submits the Aisle field, then opens the Pallet ID Demo Scanner's by-status popup,
+ * selects Storage Code/Size matching Aisle 304's own eligible CR/Small locations (direct
+ * instruction — the popup's own Storage Code/Size filters pick the *starting* pallet's
+ * native type; the "no eligible locations" failure this guards against is a real one, since
+ * an unfiltered "Any" pick over the whole warehouse rarely lands on Aisle 304's specific
+ * type), sets Status (Feature 9, Phase 1 — SDP no longer has its own dedicated ✓ Put/✓ Move
+ * buttons, or the by-status popup's own former quick presets; Status defaults to Put
+ * Pending, matching the `put` case with no extra step, `move` explicitly selects Stored),
+ * taps Find, and returns the API result.
+ */
+async function directPallet(page: Page, aisle: string, mode: 'put' | 'move'): Promise<DirectedResult> {
   await tapKeys(page, aisle);
   await page.getByRole('button', { name: 'OK', exact: true }).click();
+  await page.getByRole('button', { name: 'Pallet ID by Status' }).click();
+  if (mode === 'move') await pickDemoFilter(page, 'Status', 'Stored');
+  await pickDemoFilter(page, 'Storage Code', 'Conveyable Reserve');
+  await pickDemoFilter(page, 'Size', 'Small');
   const [resp] = await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/puts/directed') && r.ok()),
-    page.getByRole('button', { name: demoButtonName }).click(),
+    page.getByRole('button', { name: 'Find', exact: true }).click(),
   ]);
   return resp.json();
 }
@@ -62,24 +88,28 @@ test.describe('SDP — System Directed Put flow', () => {
   test('an unknown pallet ID shows an error', async ({ page }) => {
     await tapKeys(page, LIVE_AISLE);
     await page.getByRole('button', { name: 'OK', exact: true }).click();
-    await page.getByRole('button', { name: '⚠ Invalid Pallet' }).click();
-    await page.getByRole('button', { name: 'Pallet ID Not Found' }).click();
+    await page.getByRole('button', { name: '✗ Invalid Pallet ID' }).click();
 
     await expect(page.getByText('Pallet ID not found')).toBeVisible();
   });
 
   // Node DIR_OK {Result?} -> NO_LOCATIONS
   test('an aisle with no eligible locations shows an error', async ({ page }) => {
+    // Status left at Put Pending (the popup's own default) — Aisle 99999 has zero
+    // locations of any type, so any pallet still correctly hits NO_LOCATIONS. Depends on
+    // `reseedTestData`/`seed-pending-pallets.ts` actually having populated some Put
+    // Pending pallets — see those files' own fix for the Storage Code/Size gap.
     await tapKeys(page, '99999');
     await page.getByRole('button', { name: 'OK', exact: true }).click();
-    await page.getByRole('button', { name: '✓ Put' }).click();
+    await page.getByRole('button', { name: 'Pallet ID by Status' }).click();
+    await page.getByRole('button', { name: 'Find', exact: true }).click();
 
     await expect(page.getByText('No eligible locations available in aisle 99999')).toBeVisible();
   });
 
   // Node DIR_OK {Result?} -> OK, and node MOVE_CHECK {alreadyStored?} -> No
   test('directing an unlocated pallet locks the screen with no move message', async ({ page }) => {
-    await directPallet(page, LIVE_AISLE, '✓ Put');
+    await directPallet(page, LIVE_AISLE, 'put');
 
     await expect(page.getByText('Screen locked — active reservation')).toBeVisible();
     await expect(page.getByText(/currently stored in/)).not.toBeVisible();
@@ -88,7 +118,7 @@ test.describe('SDP — System Directed Put flow', () => {
   // Node MOVE_CHECK {alreadyStored?} -> Yes, not consolidating -> warning
   test('directing an already-stored pallet without consolidating shows a warning', async ({ page }) => {
     // Consolidating toggle defaults to off.
-    await directPallet(page, LIVE_AISLE, '✓ Move');
+    await directPallet(page, LIVE_AISLE, 'move');
 
     await expect(page.getByText(/currently stored in .* — directing as move/)).toBeVisible();
     expect(await messageBarTone(page)).toBe('warning');
@@ -97,7 +127,7 @@ test.describe('SDP — System Directed Put flow', () => {
   // Node MOVE_CHECK {alreadyStored?} -> Yes, consolidating -> info
   test('directing an already-stored pallet while consolidating shows an info message', async ({ page }) => {
     await page.getByRole('button', { name: 'Consolidating' }).click();
-    await directPallet(page, LIVE_AISLE, '✓ Move');
+    await directPallet(page, LIVE_AISLE, 'move');
 
     await expect(page.getByText(/currently stored in .* — directing as move/)).toBeVisible();
     expect(await messageBarTone(page)).toBe('info');
@@ -105,7 +135,9 @@ test.describe('SDP — System Directed Put flow', () => {
 
   // Node CONF_OK {Result?} -> LOCATION_MISMATCH
   test('confirming the wrong location shows an error and stays locked', async ({ page }) => {
-    const { directedLocation } = await directPallet(page, LIVE_AISLE, '✓ Put');
+    // `Move`, not `Put` — this test only cares about the confirm step, and `Move` is
+    // reliably backed by real seed data (see the "no eligible locations" test's own note).
+    const { directedLocation } = await directPallet(page, LIVE_AISLE, 'move');
     await page.getByRole('button', { name: '✗ Location' }).click();
 
     await expect(page.getByText(`Wrong location — directed to ${directedLocation}`)).toBeVisible();
@@ -114,16 +146,20 @@ test.describe('SDP — System Directed Put flow', () => {
 
   // Node CONF_OK {Result?} -> OK
   test('confirming the correct location completes the put and unlocks the screen', async ({ page }) => {
-    const { directedLocation } = await directPallet(page, LIVE_AISLE, '✓ Put');
+    const { directedLocation } = await directPallet(page, LIVE_AISLE, 'move');
     await page.getByRole('button', { name: '✓ Location' }).click();
 
-    await expect(page.getByText(`Put complete — ${fmtLocation(directedLocation)}`)).toBeVisible();
+    // `Move`, not `Put` (see directPallet's own note) — a Move's completion message is
+    // "Move complete — {cleared} → {directed}", not "Put complete — {directed}" — no `$`
+    // anchor after the location, since landing on an EMPTY (not pre-staged) location adds
+    // a further "— location was not staged" suffix.
+    await expect(page.getByText(new RegExp(`^Move complete — .* → ${fmtLocation(directedLocation)}`))).toBeVisible();
     await expect(page.getByText('Screen locked — active reservation')).not.toBeVisible();
   });
 
   // Node ACTION {Worker action?} -> Unassign -> node UN_OK {Result?} -> OK
   test('unassigning releases the reservation without completing a put', async ({ page }) => {
-    const { directedLocation } = await directPallet(page, LIVE_AISLE, '✓ Put');
+    const { directedLocation } = await directPallet(page, LIVE_AISLE, 'move');
     await page.getByRole('button', { name: 'Unassign' }).click();
 
     await expect(page.getByText(`Reservation cleared — ${directedLocation} released`)).toBeVisible();
@@ -133,7 +169,7 @@ test.describe('SDP — System Directed Put flow', () => {
 
   // Node ACTION {Worker action?} -> Blocked Put (confirmation-gated) -> node BLK_OK {Result?} -> OK
   test('blocking the directed location holds it and redirects to a new one', async ({ page }) => {
-    await directPallet(page, LIVE_AISLE, '✓ Put');
+    await directPallet(page, LIVE_AISLE, 'move');
     await page.getByRole('button', { name: 'Blocked Put' }).click();
 
     // Confirmation gate: Cancel must not block anything.

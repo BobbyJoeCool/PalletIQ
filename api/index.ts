@@ -2,7 +2,7 @@ import './functions/auth.js';
 import './functions/health.js';
 import './functions/pallets.js';
 import './functions/locations.js';
-import './functions/labels.js';
+import './functions/containers.js';
 import './functions/pulls.js';
 import './functions/puts.js';
 import './functions/staging.js';

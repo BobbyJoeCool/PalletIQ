@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DataRow } from '../components/shared/DataRow';
-import { DemoPicker } from '../components/shared/DemoPicker';
+import { ContainerDemoScannerBar } from '../components/shared/ContainerDemoScannerBar';
 import { Dropdown } from '../components/shared/Dropdown';
 import { HoldPanel } from '../components/shared/HoldPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
@@ -14,9 +14,10 @@ import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
-import { type PIPLabelScanResult, usePIP } from '../context/PIPContext';
+import { type PIPContainerScanResult, usePIP } from '../context/PIPContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
+import { PULL_FUNCTIONS } from '../lib/demoScanner';
 import { useDigitInput } from '../lib/useDigitInput';
 import { useNumpadField } from '../lib/useNumpadField';
 import { fmtLocation } from '../lib/fmt';
@@ -25,8 +26,8 @@ import { fmtLocation } from '../lib/fmt';
 
 interface Qty { pallets: number; cartons: number; ssps: number }
 
-// LabelScanResult's shape now lives in PIPContext.tsx (App-Wide screen-persistence,
-// v1.7.0) as `PIPLabelScanResult`, imported here rather than redeclared.
+// ContainerScanResult's shape now lives in PIPContext.tsx (App-Wide screen-persistence,
+// v1.7.0) as `PIPContainerScanResult`, imported here rather than redeclared.
 
 interface HistoryEntry {
   location: string;
@@ -35,11 +36,8 @@ interface HistoryEntry {
   timestamp: Date;
 }
 
-const PULL_FUNCTIONS: { code: string; desc: string }[] = [
-  { code: 'CA', desc: 'Carton Air' },
-  { code: 'CF', desc: 'Carton Floor' },
-  { code: 'FP', desc: 'Full Pallet' },
-];
+// PULL_FUNCTIONS now lives in lib/demoScanner.ts — ContainerDemoScannerBar's by-status
+// popup needs the same list for its Pull Function filter dropdown.
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,7 +56,7 @@ const QTY_COLS: { key: keyof Qty; label: string }[] = [
  * Combined Current/Pull/Remaining quantity table (issue #62 — replaces three separate
  * QtyRow blocks with one, to make room for the larger Location display per issue #61).
  * Columns are Pallet/Carton/SSP; rows are Current (quantity presently in the location),
- * Pull (quantity requested by the label), and — once verification has computed it —
+ * Pull (quantity requested by the container), and — once verification has computed it —
  * Remaining below a divider. Any Remaining cell at 0 is shown in red, matching the old
  * highlight behavior, to alert the worker a unit type is fully depleted.
  *
@@ -179,16 +177,16 @@ type ScreenState = 'ready' | 'verifying';
  * PID/UPC/Location are always reachable, and changing the function is just a dropdown
  * selection away rather than a full-screen mode switch.
  *
- * ready: Label field is active. Scanning a label validates it via GET /api/labels/:id and
+ * ready: Label field is active. Scanning a label validates it via GET /api/containers/:id and
  *   checks that its pullFunction matches the selected one. On match, transitions to verifying.
- * verifying: Shows label/pallet/remaining quantities. Worker scans any one of:
+ * verifying: Shows container/pallet/remaining quantities. Worker scans any one of:
  *   - Pallet ID field → POST /api/pulls/verify with palletId
  *   - UPC field → POST /api/pulls/verify with upc
  *   - Location field → POST /api/pulls/verify with location (issue #82 — split from a
  *     single combined Alternate ID field into independent UPC/Location fields)
- *   Any path marks the label PULLED, deducts quantities, and on success appends the
+ *   Any path marks the container PULLED, deducts quantities, and on success appends the
  *   pull to the session history and returns to ready. Scanning a new label while in verifying
- *   discards the unverified label and reloads with the new one.
+ *   discards the unverified container and reloads with the new one.
  *
  * Demo buttons track the active numpad field and always show one success and one failure scenario.
  * All scanner input flows through NumpadContext.deliverScan().
@@ -257,28 +255,25 @@ export function PIPPage() {
   const [pullFunction, setPullFunction] = useState<string>(PULL_FUNCTIONS[0].code);
   // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
   // PIPContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern.
-  const { labelData, setLabelData } = usePIP();
+  const { containerData, setContainerData } = usePIP();
   const [loading, setLoading] = useState(false);
   // Red-wash invalid state (App-Wide item 9, v1.7.0) — only the Label field is a candidate
   // here: it's the one field on this screen that deliberately keeps a failed value visible
-  // (see handleLabelScan's own comments) rather than clearing-and-refocusing atomically like
+  // (see handleContainerScan's own comments) rather than clearing-and-refocusing atomically like
   // PID/UPC/Location do, so it's the only one with a genuinely visible "bad value sitting in
   // the box" moment to wash. PID/UPC/Location clear their own value before the next render
   // on every failure path, so a wash flag there would never actually be visible against a
   // non-empty box — left as message-bar-only, consistent with that existing design.
-  const [labelInvalid, setLabelInvalid] = useState(false);
+  const [containerInvalid, setContainerInvalid] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   // Quick-hold panel (WLH.md: "surfaced as a quick-action on PIP, SDP, and MNP" —
-  // inline, not a full navigation) for the scanned label's resolved location.
+  // inline, not a full navigation) for the scanned container's resolved location.
   const [holdOpen, setHoldOpen] = useState(false);
   // Pending FP level-mismatch confirmation (issue #49) — set by handleLocationVerify on
   // LEVEL_MISMATCH, resolved by confirmLevelMismatch/cancelLevelMismatch.
   const [levelMismatch, setLevelMismatch] = useState<{ scannedLevel: number; actualLevel: number; locationValue: string } | null>(null);
-  // Demo-only "which invalid label" picker (shared DemoPicker component) — see
-  // pickInvalidLabel's comment.
-  const [invalidLabelPickerOpen, setInvalidLabelPickerOpen] = useState(false);
 
-  const labelField    = useNumpadField();
+  const containerField = useNumpadField();
   const pidFieldRef   = useRef<PalletIdFieldHandle>(null);
   const [pidValue, setPidValue] = useState('');
   const [pidActive, setPidActive] = useState(false);
@@ -309,11 +304,11 @@ export function PIPPage() {
   // Refs so callbacks passed into handlers always see the current value.
   const screenStateRef   = useRef(screenState);
   const loadingRef       = useRef(loading);
-  const labelDataRef     = useRef(labelData);
+  const containerDataRef = useRef(containerData);
   const pullFunctionRef  = useRef(pullFunction);
   screenStateRef.current  = screenState;
   loadingRef.current      = loading;
-  labelDataRef.current    = labelData;
+  containerDataRef.current = containerData;
   pullFunctionRef.current = pullFunction;
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -322,7 +317,7 @@ export function PIPPage() {
    * Handles a Pull Function change from the dropdown. A no-op if the same value is
    * re-selected (tapping the dropdown open and picking the current function shouldn't
    * disrupt an in-progress verification). Otherwise resets back to ready — warning about
-   * and discarding any unverified label first, matching the old full-screen selector's
+   * and discarding any unverified container first, matching the old full-screen selector's
    * "changing function abandons the current label" behavior — clears the Label field, and
    * refocuses it for the next scan under the new function.
    */
@@ -330,22 +325,22 @@ export function PIPPage() {
     if (fn === pullFunctionRef.current) return;
     if (screenStateRef.current === 'verifying') {
       setMessage({ type: 'warning', text: 'Label not verified' });
-      setLabelData(null);
+      setContainerData(null);
       setPidValue('');
       upcField.clear();
       resetLocationField(false);
     }
     setPullFunction(fn);
     setScreenState('ready');
-    labelField.clear();
-    setLabelInvalid(false);
-    setTimeout(() => focusLabelField(), 50);
+    containerField.clear();
+    setContainerInvalid(false);
+    setTimeout(() => focusContainerField(), 50);
   }
 
-  /** Registers the Label field's numpad handler, wired to handleLabelScan on confirm. */
-  const focusLabelField = useCallback(() => {
-    labelField.focus(handleLabelScan);
-  }, [labelField]);
+  /** Registers the Label field's numpad handler, wired to handleContainerScan on confirm. */
+  const focusContainerField = useCallback(() => {
+    containerField.focus(handleContainerScan);
+  }, [containerField]);
 
   /** (Re-)focuses the Pallet ID field for another attempt. */
   const focusPidField = useCallback(() => {
@@ -366,12 +361,12 @@ export function PIPPage() {
   }, []);
 
   /**
-   * Submit handler for the label field. Calls GET /api/labels/:id.
-   * If the label's pull function doesn't match the selected one, rejects it with an error.
-   * If already in verifying state (rescan), warns about the unverified label before replacing it.
-   * On success, stores the label data and transitions to verifying state.
+   * Submit handler for the Label field. Calls GET /api/containers/:id.
+   * If the container's pull function doesn't match the selected one, rejects it with an error.
+   * If already in verifying state (rescan), warns about the unverified container before replacing it.
+   * On success, stores the container data and transitions to verifying state.
    */
-  async function handleLabelScan(value: string) {
+  async function handleContainerScan(value: string) {
     const v = value.trim();
     const priorState = screenStateRef.current;
     if (!v || loadingRef.current || (priorState !== 'ready' && priorState !== 'verifying')) return;
@@ -381,35 +376,35 @@ export function PIPPage() {
     // NumpadContext's setKeyHandler resubmits as a synthetic 'Enter' whenever focus moves
     // away from this field automatically (e.g. the verifying-entry effect auto-focusing
     // PID) — without this check, that non-user-initiated resubmission of the SAME
-    // already-loaded label re-enters this "already verifying" branch below, clearing
+    // already-loaded container re-enters this "already verifying" branch below, clearing
     // PID/UPC/Location and scheduling *another* delayed auto-focus-PID call, cascading into
-    // an unpredictable focus race. A genuine rescan always delivers a *different* label id.
-    if (priorState === 'verifying' && labelDataRef.current?.label.id === v) return;
+    // an unpredictable focus race. A genuine rescan always delivers a *different* container id.
+    if (priorState === 'verifying' && containerDataRef.current?.container.id === v) return;
     if (priorState === 'verifying') {
       // No message-bar update here — scanning the next label while the previous one was still
       // unverified is a normal part of the fast scan-then-verify-in-batch workflow, not an error
       // condition. Overwriting whatever's already showing (e.g. the previous pull's success
       // message) with a "Label not verified" warning on every plain rescan is what issue #45
-      // actually reported; the fields still get cleared to make way for the new label's data.
+      // actually reported; the fields still get cleared to make way for the new container's data.
       setPidValue('');
       upcField.clear();
       resetLocationField(false);
     }
     setLoading(true);
     try {
-      const data = await apiFetch<PIPLabelScanResult>(`/api/labels/${encodeURIComponent(v)}`, token!);
-      if (data.label.pullFunction !== pullFunctionRef.current) {
+      const data = await apiFetch<PIPContainerScanResult>(`/api/containers/${encodeURIComponent(v)}`, token!);
+      if (data.container.pullFunction !== pullFunctionRef.current) {
         playAlert('error');
         // Value stays visible (not cleared) so the worker can see what they scanned;
         // re-focusing (not clearing) still arms a fresh start for the next input, so a
         // manual retry replaces rather than appends onto the stale value.
-        focusLabelField();
-        setLabelInvalid(true);
-        setMessage({ type: 'error', text: `Wrong function — label requires ${data.label.pullFunction}` });
+        focusContainerField();
+        setContainerInvalid(true);
+        setMessage({ type: 'error', text: `Wrong function — label requires ${data.container.pullFunction}` });
         return;
       }
-      setLabelData(data);
-      setLabelInvalid(false);
+      setContainerData(data);
+      setContainerInvalid(false);
       clearMessage();
       if (priorState !== 'verifying') {
         setScreenState('verifying');
@@ -422,10 +417,10 @@ export function PIPPage() {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
       // Value stays visible (not cleared) so the worker can see what they scanned; see
-      // the Wrong Function branch above for why focusLabelField() (not .clear()) is what
+      // the Wrong Function branch above for why focusContainerField() (not .clear()) is what
       // arms a fresh start for the next input.
-      focusLabelField();
-      setLabelInvalid(true);
+      focusContainerField();
+      setContainerInvalid(true);
       if (code === 'NOT_FOUND') {
         setMessage({ type: 'error', text: 'Label not found' });
       } else {
@@ -445,7 +440,7 @@ export function PIPPage() {
     const v = value.trim();
     setPidValue(v);
     if (!v || loadingRef.current) return;
-    const ld = labelDataRef.current;
+    const ld = containerDataRef.current;
     if (!ld) return;
     // Read synchronously, before the await below — isScanningRef.current is still true
     // here for a scan's trailing synthetic Enter (see NumpadContext's deliverScan), but
@@ -456,9 +451,9 @@ export function PIPPage() {
       const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
         '/api/pulls/verify',
         token!,
-        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, palletId: v, wasScanned }) },
+        { method: 'POST', body: JSON.stringify({ containerId: ld.container.id, pullFunction: pullFunctionRef.current, palletId: v, wasScanned }) },
       );
-      onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
+      onPullSuccess(result.location, ld.container.quantity, result.updatedQuantity);
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
@@ -484,7 +479,7 @@ export function PIPPage() {
   async function handleUpcVerify(value: string) {
     const v = value.trim();
     if (!v || loadingRef.current) return;
-    const ld = labelDataRef.current;
+    const ld = containerDataRef.current;
     if (!ld) return;
     // See handlePidVerify's comment — must be read before the await below.
     const wasScanned = isScanningRef.current;
@@ -493,9 +488,9 @@ export function PIPPage() {
       const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
         '/api/pulls/verify',
         token!,
-        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, upc: v, wasScanned }) },
+        { method: 'POST', body: JSON.stringify({ containerId: ld.container.id, pullFunction: pullFunctionRef.current, upc: v, wasScanned }) },
       );
-      onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
+      onPullSuccess(result.location, ld.container.quantity, result.updatedQuantity);
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
@@ -529,16 +524,16 @@ export function PIPPage() {
   async function handleLocationVerify(value: string, wasScanned: boolean) {
     const v = value.trim();
     if (!v || loadingRef.current) return;
-    const ld = labelDataRef.current;
+    const ld = containerDataRef.current;
     if (!ld) return;
     setLoading(true);
     try {
       const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
         '/api/pulls/verify',
         token!,
-        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, location: v, wasScanned }) },
+        { method: 'POST', body: JSON.stringify({ containerId: ld.container.id, pullFunction: pullFunctionRef.current, location: v, wasScanned }) },
       );
-      onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
+      onPullSuccess(result.location, ld.container.quantity, result.updatedQuantity);
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       if (code === 'LEVEL_MISMATCH') {
@@ -572,7 +567,7 @@ export function PIPPage() {
    */
   async function confirmLevelMismatch(correctedLevel: number) {
     const pending = levelMismatch;
-    const ld = labelDataRef.current;
+    const ld = containerDataRef.current;
     setLevelMismatch(null);
     if (!pending || !ld) return;
     setLoading(true);
@@ -581,9 +576,9 @@ export function PIPPage() {
       const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
         '/api/pulls/verify',
         token!,
-        { method: 'POST', body: JSON.stringify({ labelId: ld.label.id, pullFunction: pullFunctionRef.current, location: correctedLocation, confirmLevelMismatch: true, wasScanned: true }) },
+        { method: 'POST', body: JSON.stringify({ containerId: ld.container.id, pullFunction: pullFunctionRef.current, location: correctedLocation, confirmLevelMismatch: true, wasScanned: true }) },
       );
-      onPullSuccess(result.location, ld.label.quantity, result.updatedQuantity);
+      onPullSuccess(result.location, ld.container.quantity, result.updatedQuantity);
     } catch {
       playAlert('error');
       resetLocationField(true);
@@ -607,14 +602,14 @@ export function PIPPage() {
    * and returns to ready state for the next label scan.
    *
    * Re-focuses the Label field synchronously here rather than relying solely on the 'ready'
-   * effect's 50ms-delayed focusLabelField() call below — that delay leaves a window where the
+   * effect's 50ms-delayed focusContainerField() call below — that delay leaves a window where the
    * PID/Alt field (just cleared, but never explicitly released as NumpadContext's active
    * handler) is still what a scan gets delivered to. A fast barcode-scanner scan of the next
    * label can land inside that window, hitting the stale PID/Alt handler instead of
-   * handleLabelScan — which is what was producing issue #45's spurious "Label not verified"
+   * handleContainerScan — which is what was producing issue #45's spurious "Label not verified"
    * warning even after a pull had already verified successfully: the scan silently mis-routed
    * to the (now-empty) PID field, no-op'd there, and only the *following* real scan attempt hit
-   * handleLabelScan while still carrying leftover verifying-adjacent state. Registering the
+   * handleContainerScan while still carrying leftover verifying-adjacent state. Registering the
    * Label handler immediately closes that window; the 'ready' effect's own call afterward is a
    * harmless redundant no-op re-registration.
    */
@@ -622,23 +617,23 @@ export function PIPPage() {
     playAlert('info');
     setHistory(h => [{ location, pulledQty, updatedQty, timestamp: new Date() }, ...h]);
     setMessage({ type: 'success', text: `Last Pull ${fmtLocation(location)} — ${fmtQty(updatedQty)}` });
-    setLabelData(null);
+    setContainerData(null);
     setScreenState('ready');
-    labelField.clear();
-    setLabelInvalid(false);
+    containerField.clear();
+    setContainerInvalid(false);
     setPidValue('');
     upcField.clear();
     resetLocationField(false);
-    focusLabelField();
+    focusContainerField();
   }
 
   // ── Focus management by screen state ─────────────────────────────────────
 
   useEffect(() => {
     if (screenState !== 'ready') return;
-    // Only fires on state entry — omitting focusLabelField from deps is intentional.
+    // Only fires on state entry — omitting focusContainerField from deps is intentional.
     // Adding it causes the effect to re-run on every render within 'ready'.
-    const id = setTimeout(() => focusLabelField(), 50);
+    const id = setTimeout(() => focusContainerField(), 50);
     return () => clearTimeout(id);
   }, [screenState]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -655,56 +650,26 @@ export function PIPPage() {
 
   // ── Demo buttons ──────────────────────────────────────────────────────────
 
-  /** Fetches a real label id (matching the selected pull function) and delivers it as a simulated scan. */
-  const demoScanLabel = useCallback(async () => {
-    try {
-      const { labelId } = await apiFetch<{ labelId: string }>(`/api/demo/label?fn=${pullFunction}`, token!);
-      deliverScan(labelId);
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo label: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage, pullFunction]);
+  // Container ID's Valid/by-status/Invalid buttons are owned internally by
+  // `ContainerDemoScannerBar` (Feature 9, CID phase) — see the demoSlot useMemo below.
+  // Retired: the old bespoke demoScanContainer/demoBadContainer/pickInvalidContainer
+  // callbacks and the dedicated "⚠ Invalid Label" picker (Wrong Function/Pulled/Canceled/
+  // Purged) — those four options are now Status picks in the shared by-status popup, per
+  // the Core Concept section's "Invalid is strictly not-found" rule.
 
-  /** Delivers a label id that doesn't exist, simulating a not-found scan. */
-  const demoBadLabel = useCallback(() => {
-    deliverScan('INVALID-LABEL-000');
-  }, [deliverScan]);
-
-  /**
-   * Dispatches the shared DemoPicker's choice — consolidates what used to be four
-   * separate demo callbacks (Wrong Function / Pulled / Canceled / Purged) behind one
-   * "Invalid Label" footer button plus this popup, to keep the footer's single row from
-   * getting crowded. Wrong Function fetches a real label for a different pull function
-   * (demonstrates handleLabelScan's FN_CHECK path); the other three fetch a label already
-   * in that terminal status (demonstrates the "Invalid status: {status}" path, which a
-   * worker can't otherwise reach by scanning normally).
-   */
-  const pickInvalidLabel = useCallback(async (kind: 'wrongFn' | 'pulled' | 'canceled' | 'purged') => {
-    setInvalidLabelPickerOpen(false);
-    try {
-      const query = kind === 'wrongFn'
-        ? `fn=${PULL_FUNCTIONS.find(f => f.code !== pullFunction)?.code ?? ''}`
-        : `status=${{ pulled: 'PULLED', canceled: 'CANCELED', purged: 'PURGED' }[kind]}`;
-      const { labelId } = await apiFetch<{ labelId: string }>(`/api/demo/label?${query}`, token!);
-      deliverScan(labelId);
-    } catch (err) {
-      setMessage({ type: 'error', text: `Demo label: ${err instanceof Error ? err.message : 'unavailable'}` });
-    }
-  }, [token, deliverScan, setMessage, pullFunction]);
-
-  /** Delivers the current label's actual pallet id, simulating a correct verification scan. */
+  /** Delivers the current container's actual pallet id, simulating a correct verification scan. */
   const demoScanPid = useCallback(() => {
-    const ld = labelDataRef.current;
+    const ld = containerDataRef.current;
     if (ld) deliverScan(String(ld.pallet.id));
   }, [deliverScan]);
 
-  /** Delivers a pallet id that won't match the current label, simulating a mismatch. */
+  /** Delivers a pallet id that won't match the current container, simulating a mismatch. */
   const demoBadPid = useCallback(() => {
     deliverScan('INVALID-PID-000');
   }, [deliverScan]);
 
   /**
-   * Fetches the current label's item UPC (by its DPCI) and delivers it, simulating a
+   * Fetches the current container's item UPC (by its DPCI) and delivers it, simulating a
    * correct UPC verification scan. Unlike every other demo handler, this one has to await
    * a network call before it can deliver — during that gap, the delayed auto-focus-PID
    * effect (still pending from entering `verifying`) could in principle win a race and
@@ -715,10 +680,10 @@ export function PIPPage() {
    * common path where nothing raced at all.
    */
   const demoScanUpc = useCallback(async () => {
-    const ld = labelDataRef.current;
+    const ld = containerDataRef.current;
     if (!ld) return;
     try {
-      const item = await apiFetch<{ upc: string }>(`/api/items/dpci/${ld.label.dpci}`, token!);
+      const item = await apiFetch<{ upc: string }>(`/api/items/dpci/${ld.container.dpci}`, token!);
       focusUpcField();
       deliverScan(item.upc);
     } catch {
@@ -726,18 +691,18 @@ export function PIPPage() {
     }
   }, [token, deliverScan, setMessage, focusUpcField]);
 
-  /** Delivers a UPC that won't match the current label, simulating a mismatch. */
+  /** Delivers a UPC that won't match the current container, simulating a mismatch. */
   const demoBadUpc = useCallback(() => {
     deliverScan('000000000000');
   }, [deliverScan]);
 
-  /** Delivers the current label's resolved location barcode, simulating a correct location verification scan. */
+  /** Delivers the current container's resolved location barcode, simulating a correct location verification scan. */
   const demoScanLocation = useCallback(() => {
-    const ld = labelDataRef.current;
+    const ld = containerDataRef.current;
     if (ld?.location.id) deliverScan(ld.location.id); // raw 8-digit barcode, no dashes
   }, [deliverScan]);
 
-  /** Delivers a location that won't match the current label, simulating a mismatch. */
+  /** Delivers a location that won't match the current container, simulating a mismatch. */
   const demoBadLocation = useCallback(() => {
     deliverScan('00000000'); // 8 digits — must be exactly 8 to hit LocationEntryFields' full-barcode-scan path
   }, [deliverScan]);
@@ -747,12 +712,8 @@ export function PIPPage() {
   // unmemoized JSX literal would recreate it (and re-fire the effect) on every render,
   // looping forever via the FooterDemoContext state update it triggers.
   const demoSlot = useMemo(() => (
-    labelField.isActive ? (
-      <>
-        <DemoBtn label="✓ Scan Label" color="green" onClick={demoScanLabel} />
-        <DemoBtn label="✗ Scan Label" color="red"   onClick={demoBadLabel} />
-        <DemoBtn label="⚠ Invalid Label" color="amber" onClick={() => setInvalidLabelPickerOpen(true)} />
-      </>
+    containerField.isActive ? (
+      <ContainerDemoScannerBar onFill={deliverScan} fn={pullFunction} />
     ) : pidActive ? (
       <>
         <DemoBtn label="✓ Scan PID" color="green" onClick={demoScanPid} />
@@ -770,8 +731,8 @@ export function PIPPage() {
       </>
     ) : null
   ), [
-    labelField.isActive, pidActive, upcField.isActive, locationActive,
-    demoScanLabel, demoBadLabel,
+    containerField.isActive, pidActive, upcField.isActive, locationActive,
+    deliverScan, pullFunction,
     demoScanPid, demoBadPid, demoScanUpc, demoBadUpc, demoScanLocation, demoBadLocation,
   ]);
 
@@ -779,11 +740,11 @@ export function PIPPage() {
 
   // ── Computed values for State 2 ───────────────────────────────────────────
 
-  const remaining: Qty | null = labelData
+  const remaining: Qty | null = containerData
     ? {
-        pallets: Math.max(0, labelData.pallet.quantity.pallets - labelData.label.quantity.pallets),
-        cartons: Math.max(0, labelData.pallet.quantity.cartons - labelData.label.quantity.cartons),
-        ssps:    Math.max(0, labelData.pallet.quantity.ssps    - labelData.label.quantity.ssps),
+        pallets: Math.max(0, containerData.pallet.quantity.pallets - containerData.container.quantity.pallets),
+        cartons: Math.max(0, containerData.pallet.quantity.cartons - containerData.container.quantity.cartons),
+        ssps:    Math.max(0, containerData.pallet.quantity.ssps    - containerData.container.quantity.ssps),
       }
     : null;
 
@@ -793,13 +754,13 @@ export function PIPPage() {
 
   // Hand-entered Location locks Aisle across every pull function — re-typing it doesn't
   // add verification value, the worker already knows their aisle by other means — pulled
-  // from the label already loaded rather than typed. Carton Floor additionally locks
+  // from the container already loaded rather than typed. Carton Floor additionally locks
   // Level too, since only its Bin actually needs verifying (product decision); CA/FP
   // still require Bin and Level to be genuinely typed and checked. All boxes stay visible
   // for layout consistency; a full location is always reconstructed underneath regardless
   // of which boxes are locked.
-  const locationLockedAisle = labelData?.location.id ? labelData.location.id.slice(0, 3) : undefined;
-  const locationLockedLevel = pullFunction === 'CF' && labelData?.location.id ? labelData.location.id.slice(6, 8) : undefined;
+  const locationLockedAisle = containerData?.location.id ? containerData.location.id.slice(0, 3) : undefined;
+  const locationLockedLevel = pullFunction === 'CF' && containerData?.location.id ? containerData.location.id.slice(6, 8) : undefined;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -817,7 +778,7 @@ export function PIPPage() {
             options={PULL_FUNCTIONS.map(fn => ({ value: fn.code, label: `${fn.code} — ${fn.desc}` }))}
             onChange={handlePullFunctionChange}
           />
-          {labelData?.location.id && (
+          {containerData?.location.id && (
             <button
               type="button"
               onClick={() => setHoldOpen(true)}
@@ -831,30 +792,30 @@ export function PIPPage() {
         {/* Label input */}
         <FieldDisplay
           label="Scan Label"
-          value={labelField.value}
-          onFocus={focusLabelField}
-          active={labelField.isActive}
-          invalid={labelInvalid}
+          value={containerField.value}
+          onFocus={focusContainerField}
+          active={containerField.isActive}
+          invalid={containerInvalid}
         />
 
         {/* State 2 — scan data + verification */}
-        {screenState === 'verifying' && labelData && (
+        {screenState === 'verifying' && containerData && (
           <>
                 <div className="flex flex-col mt-1">
                   <DataRow label="Location" dense labelWidth={160}>
-                    {labelData.location.id
+                    {containerData.location.id
                       ? (
                         <span className="inline-flex px-3 py-1 rounded-[10px] bg-[#CC0000]/10 border-2 border-[#CC0000]/40">
-                          <LiveId type="location" id={labelData.location.id} className="!text-[46px] !font-bold !text-[#FF1A1A]" />
+                          <LiveId type="location" id={containerData.location.id} className="!text-[46px] !font-bold !text-[#FF1A1A]" />
                         </span>
                       )
                       : <span className="text-[#9A9A9A]">—</span>}
                   </DataRow>
-                  <DataRow label="Item" dense labelWidth={160}>{labelData.label.descShort}</DataRow>
-                  <DataRow label="DPCI" dense labelWidth={160}><LiveId type="dpci" id={labelData.label.dpci} /></DataRow>
+                  <DataRow label="Item" dense labelWidth={160}>{containerData.container.descShort}</DataRow>
+                  <DataRow label="DPCI" dense labelWidth={160}><LiveId type="dpci" id={containerData.container.dpci} /></DataRow>
                   <QtyTable
-                    current={labelData.pallet.quantity}
-                    pull={labelData.label.quantity}
+                    current={containerData.pallet.quantity}
+                    pull={containerData.container.quantity}
                     remaining={remaining}
                     remainingZero={remainingZero}
                   />
@@ -930,9 +891,9 @@ export function PIPPage() {
         )}
       />
 
-      {holdOpen && labelData?.location.id && (
+      {holdOpen && containerData?.location.id && (
         <ModalOverlay backdropClassName="p-8" padding="p-6" cardClassName="max-h-full overflow-y-auto" shadow={false}>
-          <HoldPanel locationId={labelData.location.id} onDone={() => setHoldOpen(false)} showClose />
+          <HoldPanel locationId={containerData.location.id} onDone={() => setHoldOpen(false)} showClose />
         </ModalOverlay>
       )}
 
@@ -942,20 +903,6 @@ export function PIPPage() {
           actualLevel={levelMismatch.actualLevel}
           onConfirm={confirmLevelMismatch}
           onCancel={cancelLevelMismatch}
-        />
-      )}
-
-      {invalidLabelPickerOpen && (
-        <DemoPicker
-          title="Simulate which invalid label?"
-          options={[
-            { key: 'wrongFn', label: 'Wrong Function' },
-            { key: 'pulled', label: 'Pulled Label' },
-            { key: 'canceled', label: 'Canceled Label' },
-            { key: 'purged', label: 'Purged Label' },
-          ]}
-          onPick={pickInvalidLabel}
-          onCancel={() => setInvalidLabelPickerOpen(false)}
         />
       )}
     </div>

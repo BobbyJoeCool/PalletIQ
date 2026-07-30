@@ -8,28 +8,28 @@ flowchart TD
     S1 --> SEL[Worker taps pull function\nhandleSelectFunction]
     SEL --> S2
 
-    S2[State: ready\nlabelField auto-focuses\nvia useEffect on screenState]
+    S2[State: ready\ncontainerField auto-focuses\nvia useEffect on screenState]
 
-    S2 --> SCAN_L{Scanner fires\nor numpad submit\nhandleLabelScan}
+    S2 --> SCAN_L{Scanner fires\nor numpad submit\nhandleContainerScan}
 
-    SCAN_L --> API_L[GET /api/labels/:id\napi/functions/labels.ts — getLabel\nvalidate status\nresolve Label→Pallet→Location]
+    SCAN_L --> API_L[GET /api/containers/:id\napi/functions/containers.ts — getContainer\nvalidate status\nresolve Container→Pallet→Location]
 
     API_L --> L_FOUND{Found?}
-    L_FOUND -->|NOT_FOUND| ERR_L1[Error: Label not found\nlabelField cleared\nremain in ready]
-    L_FOUND -->|BAD STATUS\ne.g. PULLED/CANCELLED| ERR_L2[Error: Invalid status\nlabelField cleared\nremain in ready]
+    L_FOUND -->|NOT_FOUND| ERR_L1[Error: Label not found\ncontainerField cleared\nremain in ready]
+    L_FOUND -->|BAD STATUS\ne.g. PULLED/CANCELLED| ERR_L2[Error: Invalid status\ncontainerField cleared\nremain in ready]
     L_FOUND -->|OK| FN_CHECK{pullFunction\nmatch?}
 
-    FN_CHECK -->|Mismatch| ERR_L3[Error: Wrong function\nlabelField cleared\nremain in ready]
+    FN_CHECK -->|Mismatch| ERR_L3[Error: Wrong function\ncontainerField cleared\nremain in ready]
     FN_CHECK -->|Match| S3
 
     ERR_L1 --> S2
     ERR_L2 --> S2
     ERR_L3 --> S2
 
-    S3[State: verifying\nstores labelData\npidField auto-focuses\nvia useEffect on screenState]
+    S3[State: verifying\nstores containerData\npidField auto-focuses\nvia useEffect on screenState]
 
     S3 --> RESCAN{New label\nscanned while verifying?}
-    RESCAN -->|Yes — handleLabelScan\nissue #45: no status-bar\nupdate on a plain rescan| RELOAD[Clear PID + UPC + Location fields\nreload label data\nsilently]
+    RESCAN -->|Yes — handleContainerScan\nissue #45: no status-bar\nupdate on a plain rescan| RELOAD[Clear PID + UPC + Location fields\nreload container data\nsilently]
     RELOAD --> S3
 
     S3 --> VER_PATH{Worker scans one of:}
@@ -69,11 +69,11 @@ flowchart TD
     ERR_UPC --> S3
     ERR_LOC --> S3
 
-    SUCCESS[onPullSuccess\nlabel marked PULLED\nquantities deducted\nwriteLog PULL]
+    SUCCESS[onPullSuccess\ncontainer marked PULLED\nquantities deducted\nwriteLog PULL]
 
     SUCCESS --> HIST[Append history entry\nlocation + updatedQty + timestamp]
     HIST --> MSG[MessageBar: success\nPull location + remaining qty]
-    MSG --> RESET[Clear all fields\nsetLabelData null\nsetScreenState ready]
+    MSG --> RESET[Clear all fields\nsetContainerData null\nsetScreenState ready]
     RESET --> S2
 
     style START fill:#1a1a1a,stroke:#555,color:#fff

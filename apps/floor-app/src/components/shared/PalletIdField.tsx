@@ -1,6 +1,8 @@
-import { forwardRef, useEffect, useImperativeHandle } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { useNumpadField } from '../../lib/useNumpadField';
+import { useDemoSlot } from '../../context/FooterDemoContext';
 import { NumpadFieldBox } from './NumpadFieldBox';
+import { DemoScannerBar } from './DemoScannerBar';
 
 interface PalletIdFieldProps {
   value: string;
@@ -35,6 +37,20 @@ interface PalletIdFieldProps {
    *  (Feature 10): a reactive callback for a caller to hook, not something the field owns
    *  or gates behavior on itself. */
   onActiveChange?: (active: boolean) => void;
+  /** Opt-in (Feature 9, Phase 1): the field internally registers the shared Pallet ID Demo
+   *  Scanner (`DemoScannerBar`) into the footer's demo slot whenever it's focused, filling
+   *  results via `onChange` — same as a real scan. Off by default so a screen that already
+   *  owns its own compound-submit demo buttons (PIP — its "valid" demo must return the
+   *  specific pallet tied to the currently-loaded label, which the generic scanner has no
+   *  way to know, see `Feature-9-AppWide-Demo-Scanner.md`'s Implementation-detail
+   *  resolutions) isn't forced into an undefined last-write-wins race between this field's
+   *  own registration and its own screen-level one. */
+  demoScanner?: boolean;
+  /** SDP's own aisle-aware "Valid Pallet ID" (direct instruction) — only meaningful when
+   *  `demoScanner` is true; passed straight through to `DemoScannerBar`'s own `aisle` prop.
+   *  Omitted by every other consumer (PII has no `PalletIdField` render at all; MNP has no
+   *  aisle context to give). */
+  demoAisle?: string;
 }
 
 /** Imperative handle so a caller can programmatically (re-)focus the field — e.g. after a
@@ -43,7 +59,10 @@ export interface PalletIdFieldHandle {
   focus: () => void;
 }
 
-const SIZE_PRESETS = {
+/** Exported so a self-validating hook consumer (`usePalletIdField`, e.g. PII) that renders
+ *  its own `NumpadFieldBox` directly — rather than this component — can match the same
+ *  box dimensions without hand-copying the literal classes. */
+export const PALLET_ID_SIZE_PRESETS = {
   compact: { boxClass: 'h-[52px] px-5 rounded-[12px]', valueClass: 'text-[20px] font-medium', caretClass: 'w-[2px] h-[24px]', width: 'w-[180px]' },
   default: { boxClass: 'h-[64px] px-5 rounded-[12px]', valueClass: 'text-[26px] font-medium', caretClass: 'w-[2px] h-[28px]', width: 'w-[260px]' },
 } as const;
@@ -58,7 +77,7 @@ const SIZE_PRESETS = {
  *  and passes its own `invalid`/error handling; this component doesn't own an internal
  *  async lookup the way `useCodePickerField` owns a list-membership check. */
 export const PalletIdField = forwardRef<PalletIdFieldHandle, PalletIdFieldProps>(function PalletIdField({
-  value, onChange, size = 'default', boxClass, valueClass, caretClass, width, label = 'Pallet ID', disabled = false, invalid = false, onActiveChange,
+  value, onChange, size = 'default', boxClass, valueClass, caretClass, width, label = 'Pallet ID', disabled = false, invalid = false, onActiveChange, demoScanner = false, demoAisle,
 }, ref) {
   const field = useNumpadField('numpad');
   useEffect(() => { field.set(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -70,7 +89,19 @@ export const PalletIdField = forwardRef<PalletIdFieldHandle, PalletIdFieldProps>
 
   useImperativeHandle(ref, () => ({ focus: focusField }));
 
-  const preset = SIZE_PRESETS[size];
+  // `onChange` read via ref rather than a direct dependency — SDP/MNP don't (and shouldn't
+  // need to) wrap their own onChange in useCallback just to keep this memo stable; see
+  // Feature-9-AppWide-Demo-Scanner.md's Implementation-detail resolutions.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const fillFromDemo = useCallback((v: string) => onChangeRef.current(v), []);
+  const demoSlot = useMemo(
+    () => (demoScanner && field.isActive ? <DemoScannerBar onFill={fillFromDemo} aisle={demoAisle} /> : null),
+    [demoScanner, field.isActive, fillFromDemo, demoAisle],
+  );
+  useDemoSlot(demoSlot);
+
+  const preset = PALLET_ID_SIZE_PRESETS[size];
 
   return (
     <NumpadFieldBox

@@ -44,8 +44,8 @@ export async function loginManually(page: Page, zNumber: string, pin: string) {
 
 /**
  * Simulates a real hardware barcode scan by dispatching raw keyboard events rather than
- * on-screen button taps. Needed for values the on-screen Numpad can't type (e.g. label IDs,
- * which include lowercase letters — see api/prisma/seed.ts's genLid) — AppShell buffers rapid
+ * on-screen button taps. Needed for values the on-screen Numpad can't type (e.g. container IDs,
+ * which include lowercase letters — see api/prisma/seed.ts's genCid) — AppShell buffers rapid
  * keydown events and replays them into the active field exactly like a demo-button deliverScan.
  * Only reaches fields inside the authenticated app shell (see AppShell.tsx); does nothing on
  * the unauthenticated Login screen, which has no scanner listener mounted.

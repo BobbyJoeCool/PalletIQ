@@ -1,6 +1,6 @@
 /**
- * Top-up seed: adds ~40 PRINTED labels spread across stored pallets.
- * Safe to run multiple times — generates unique LIDs each run.
+ * Top-up seed: adds ~40 PRINTED containers spread across stored pallets.
+ * Safe to run multiple times — generates unique CIDs each run.
  * Does not touch any other data.
  *
  * Pull function assignment rules:
@@ -9,7 +9,7 @@
  *   CF  — level 1, non-XS, pull does NOT empty
  *   FP  — non-XS, non-BK, pull takes every carton (empties the location)
  *
- * Usage: cd api && npx tsx prisma/seed-labels.ts
+ * Usage: cd api && npx tsx prisma/seed-containers.ts
  */
 import 'dotenv/config'
 import { PrismaClient } from '../generated/prisma/index.js'
@@ -25,8 +25,8 @@ function julianDate(d: Date): number {
   return d.getFullYear() * 1000 + Math.floor(diff / 86_400_000)
 }
 
-/** Builds a Label ID string: store(4) + DPCI(9) + pid(8) + random(8) + batchDate. */
-function genLid(storeId: number, dept: number, cls: number, item: number, pid: number, batchDate: number): string {
+/** Builds a Container ID string: store(4) + DPCI(9) + pid(8) + random(8) + batchDate. */
+function genCid(storeId: number, dept: number, cls: number, item: number, pid: number, batchDate: number): string {
   const rnd = Math.random().toString(36).substring(2, 10).padEnd(8, '0')
   return (
     String(storeId).padStart(4, '0') +
@@ -53,7 +53,7 @@ function assignPullFunction(level: number, size: string, qty: number, totalCarto
   return level === 1 ? 'CF' : 'CA'
 }
 
-/** Entry point: creates two PRINTED labels (one non-emptying, one emptying) for up to 20 stored pallets. */
+/** Entry point: creates two PRINTED containers (one non-emptying, one emptying) for up to 20 stored pallets. */
 async function main() {
   const today = new Date()
   const batchDate = julianDate(today)
@@ -84,12 +84,12 @@ async function main() {
     }))
   )
 
-  const labels = pallets.flatMap((p, i) => {
+  const containers = pallets.flatMap((p, i) => {
     const locSize = locationData[i]?.size ?? 'MD'
     const level = p.locationLevel ?? 1
     const maxQty = p.currentCartons
 
-    // Two labels per pallet: one that doesn't empty (CA/CF), one that does (FP) when possible.
+    // Two containers per pallet: one that doesn't empty (CA/CF), one that does (FP) when possible.
     const qty1 = maxQty === 1 ? 1 : randomInt(1, maxQty - 1)  // never empties
     const qty2 = maxQty                                         // empties
 
@@ -98,14 +98,14 @@ async function main() {
 
     return [
       {
-        lid: genLid(stores[i % stores.length].id, p.dept, p.class, p.item, p.pid, batchDate),
+        cid: genCid(stores[i % stores.length].id, p.dept, p.class, p.item, p.pid, batchDate),
         pid: p.pid, dept: p.dept, class: p.class, item: p.item,
         quantity: qty1, sspQuantity: 0, batchDate, purgeDate,
         destinationStore: stores[i % stores.length].id,
         status: 'PRINTED', pullFunction: fn1,
       },
       {
-        lid: genLid(stores[(i + 1) % stores.length].id, p.dept, p.class, p.item, p.pid, batchDate),
+        cid: genCid(stores[(i + 1) % stores.length].id, p.dept, p.class, p.item, p.pid, batchDate),
         pid: p.pid, dept: p.dept, class: p.class, item: p.item,
         quantity: qty2, sspQuantity: 0, batchDate, purgeDate,
         destinationStore: stores[(i + 1) % stores.length].id,
@@ -114,17 +114,17 @@ async function main() {
     ]
   })
 
-  await prisma.label.createMany({ data: labels })
+  await prisma.container.createMany({ data: containers })
 
-  // v1.6.9: creating a label against a pallet moves it to CA_PULL_PEND (CA/CF) or
+  // v1.6.9: creating a container against a pallet moves it to CA_PULL_PEND (CA/CF) or
   // FP_PULL_PEND (FP) — see demo-reseed.ts's identical rule for the full rationale. This
-  // script always creates one non-emptying and one emptying label per pallet, so every
+  // script always creates one non-emptying and one emptying container per pallet, so every
   // touched pallet ends up FP_PULL_PEND (FP wins the tie) unless its location is XS
   // (always CA regardless of emptying).
   const pullPendingByPid = new Map<number, 'CA_PULL_PEND' | 'FP_PULL_PEND'>()
-  for (const l of labels) {
-    const target = l.pullFunction === 'FP' ? 'FP_PULL_PEND' : 'CA_PULL_PEND'
-    if (pullPendingByPid.get(l.pid) !== 'FP_PULL_PEND') pullPendingByPid.set(l.pid, target)
+  for (const c of containers) {
+    const target = c.pullFunction === 'FP' ? 'FP_PULL_PEND' : 'CA_PULL_PEND'
+    if (pullPendingByPid.get(c.pid) !== 'FP_PULL_PEND') pullPendingByPid.set(c.pid, target)
   }
   const caPids: number[] = []
   const fpPids: number[] = []
@@ -134,11 +134,11 @@ async function main() {
   if (caPids.length > 0) await prisma.pallet.updateMany({ where: { pid: { in: caPids } }, data: { status: 'CA_PULL_PEND' } })
   if (fpPids.length > 0) await prisma.pallet.updateMany({ where: { pid: { in: fpPids } }, data: { status: 'FP_PULL_PEND' } })
 
-  const byFn = labels.reduce<Record<string, number>>((acc, l) => {
-    acc[l.pullFunction] = (acc[l.pullFunction] ?? 0) + 1
+  const byFn = containers.reduce<Record<string, number>>((acc, c) => {
+    acc[c.pullFunction] = (acc[c.pullFunction] ?? 0) + 1
     return acc
   }, {})
-  console.log(`Created ${labels.length} PRINTED labels across ${pallets.length} pallets.`)
+  console.log(`Created ${containers.length} PRINTED containers across ${pallets.length} pallets.`)
   console.log('  By function:', byFn)
   console.log(`  Pallets set CA_PULL_PEND: ${caPids.length}, FP_PULL_PEND: ${fpPids.length}`)
 }

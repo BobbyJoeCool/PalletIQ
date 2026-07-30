@@ -88,7 +88,7 @@ async function getItemByUpc(req: HttpRequest): Promise<unknown> {
  * row shares the same item).
  *
  * @param item - The resolved Item row (dept/class/item/descShort)
- * @returns `{ descShort, locations: [...] }`
+ * @returns `{ dpci, descShort, locations: [...] }`
  */
 async function buildItemLocations(item: { dept: number; class: number; item: number; descShort: string }) {
   const pallets = await prisma.pallet.findMany({
@@ -102,6 +102,10 @@ async function buildItemLocations(item: { dept: number; class: number; item: num
   });
 
   return {
+    // Added for ISI's UPC→DPCI auto-fill (the DPCI/UPC Demo Scanner work) — a UPC-resolved
+    // lookup previously had no way to backfill the sibling DPCI boxes, unlike IID/PAR's own
+    // item lookups which already carried this via `serializeItem`.
+    dpci: formatDpci(item.dept, item.class, item.item),
     descShort: item.descShort,
     locations: pallets.map((p) => ({
       locationId:
@@ -161,21 +165,35 @@ async function getItemLocationsByUpc(req: HttpRequest): Promise<unknown> {
 }
 
 /**
- * Demo helper for IID/ISI's "Scan DPCI"/"Scan UPC" footer buttons — returns a random
+ * Demo helper for IID/ISI/PAR's DPCI/UPC Demo Scanner (Feature 9) — returns a random
  * item's DPCI and UPC (v1.6.8 added `upc` so the same sample can back either demo button,
- * whichever entry method currently has focus).
+ * whichever entry method currently has focus), optionally narrowed by Storage Code,
+ * Requires-Expiration-Date, and/or Handling Code (Item.conveyable) — the by-filter popup's
+ * three independent filters, each defaulting to "Any"/omitted, combining via AND.
  *
+ * @param req - HTTP request with optional query params `storageCode`, `requiresExpirationDate`
+ *   (`true`/`false`), `conveyable` (`true`/`false`)
  * @returns `{ dpci: string, upc: string }`
- * @throws 404 NOT_FOUND if the Item table is empty
+ * @throws 404 NOT_FOUND if no Item matches (the table is empty, or the filter has no matches)
  */
 async function sampleItem(req: HttpRequest): Promise<unknown> {
   await requireAuth(req);
 
-  const count = await prisma.item.count();
+  const params = new URL(req.url).searchParams;
+  const storageCode = params.get('storageCode') ?? undefined;
+  const requiresExpirationDateParam = params.get('requiresExpirationDate');
+  const conveyableParam = params.get('conveyable');
+  const where = {
+    ...(storageCode ? { storageCode } : {}),
+    ...(requiresExpirationDateParam != null ? { requiresExpirationDate: requiresExpirationDateParam === 'true' } : {}),
+    ...(conveyableParam != null ? { conveyable: conveyableParam === 'true' } : {}),
+  };
+
+  const count = await prisma.item.count({ where });
   if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
   const skip = Math.floor(Math.random() * count);
-  const item = await prisma.item.findFirst({ skip, select: { dept: true, class: true, item: true, upc: true } });
+  const item = await prisma.item.findFirst({ where, skip, select: { dept: true, class: true, item: true, upc: true } });
 
   return {
     dpci: formatDpci(item!.dept, item!.class, item!.item),

@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { PrismaClient } from '../generated/prisma/index.js'
 import { PrismaMariaDb } from '@prisma/adapter-mariadb'
 import bcrypt from 'bcryptjs'
-import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genLid } from './demoUtils.js'
+import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genCid } from './demoUtils.js'
 
 const adapter = new PrismaMariaDb(process.env.DATABASE_URL!)
 const prisma = new PrismaClient({ adapter })
@@ -120,20 +120,23 @@ function patternSize(digit: number, level: number, bin: number): string {
 }
 
 /**
- * Aisles 730 (RF/RS) and 200 (BS) share this "folded" shape: Zone 1 (bins 1-96) is XS at
- * 13 levels; Zones 2-4 (bins 97-192, 32 each) are the "regular" Level 1 Medium / 2-3
- * Large / 4 Small / 5 Half Small pattern. Zone 1 has 3x a normal zone's bin count since
- * an XS location is 1/3 the width of a standard pallet slot — same physical footprint,
- * just split into thirds. 730 replaces where "330" would otherwise have fallen next in
- * the plain 3xx sequence (330 itself doesn't exist); 200 is BS's own aisle, both real
- * and displayed (unlike 730/330, BS isn't Restricted freight, so it doesn't borrow that
- * relabeling convention).
+ * Aisles 730 (RF/RS) and 200 (BS) share this "folded" shape: Zones 2-4 (bins 1-96, 32
+ * each) are the "regular" Level 1 Medium / 2-3 Large / 4 Small / 5 Half Small pattern;
+ * Zone 1 (bins 97-192) is XS at 13 levels — corrected 2026-07-28, direct instruction
+ * ("bins 1-32 should be zone 4, zone 1 should start at 97 and go to 192"), matching
+ * `getZone128`'s own bin-ascending/zone-descending direction (low bins = Zone 4, high
+ * bins = Zone 1) instead of the original (backwards) Zone-1-first ordering. Zone 1 has 3x
+ * a normal zone's bin count since an XS location is 1/3 the width of a standard pallet
+ * slot — same physical footprint, just split into thirds. 730 replaces where "330" would
+ * otherwise have fallen next in the plain 3xx sequence (330 itself doesn't exist); 200 is
+ * BS's own aisle, both real and displayed (unlike 730/330, BS isn't Restricted freight,
+ * so it doesn't borrow that relabeling convention).
  */
 function foldedZoneOf(bin: number): number {
-  if (bin <= 96) return 1
-  if (bin <= 128) return 2
-  if (bin <= 160) return 3
-  return 4
+  if (bin <= 32) return 4
+  if (bin <= 64) return 3
+  if (bin <= 96) return 2
+  return 1
 }
 function foldedMaxLevel(bin: number): number {
   return foldedZoneOf(bin) === 1 ? 13 : 5
@@ -637,9 +640,10 @@ function buildLocationsAndPallets() {
   }
 
   // Aisle 730 — RF (odd bins) / RS (even bins), folded shape (Zone 1 = 96 XS bins at 13
-  // levels, Zones 2-4 = 32 "regular" bins each at 5 levels). Replaces where "330" would
-  // have fallen next in the plain 3xx sequence — 330 itself doesn't exist. No
-  // contraction rule applies (existing BS/RF/RS exemption, preserved as-is).
+  // levels [bins 97-192], Zones 2-4 = 32 "regular" bins each at 5 levels [bins 1-96]).
+  // Replaces where "330" would have fallen next in the plain 3xx sequence — 330 itself
+  // doesn't exist. No contraction rule applies (existing BS/RF/RS exemption, preserved
+  // as-is).
   const bins1to192 = Array.from({ length: 192 }, (_, i) => i + 1)
   addAisle(730, bins1to192,
     foldedMaxLevel,
@@ -682,6 +686,80 @@ function buildLocationsAndPallets() {
   const staged = applyStaging(locations)
 
   return { locations, pallets, staged }
+}
+
+type PendingPalletRow = {
+  pid: number; dept: number; class: number; item: number
+  receivedPallets: number; currentPallets: number
+  receivedCartons: number; currentCartons: number
+  receivedSSPs: number; currentSSPs: number
+  cartonsPerPallet: number
+  vcp: number; ssp: number; status: string
+  locationAisle: null; locationBin: null; locationLevel: null
+  // A pallet always has a Storage Code/Size, even before its first put — see
+  // `reinstatePallet`'s (api/functions/pallets.ts) and `reseedTestData`'s
+  // (api/functions/demo-reseed.ts) own matching fixes. `zone` has no equivalent (a
+  // PUT_PENDING pallet was never stored anywhere, so there's no zone to inherit yet —
+  // zone is location-derived, not item-derived, unlike Storage Code).
+  storageCode: string; size: string
+  receivedByZ: string; receivedAt: Date
+  poNumber: string; apptNumber: string
+}
+
+/** At least this many PUT_PENDING pallets get generated for every distinct (Storage Code,
+ *  Size) combination actually present in the Location table — direct instruction, so every
+ *  combo the Pallet ID Demo Scanner's Storage Code/Size filters can select always has real
+ *  matching Put Pending data to find, not just whichever combos happened to get one from
+ *  general random chance. */
+const PENDING_PALLETS_PER_COMBO = 12
+
+/**
+ * Generates `PENDING_PALLETS_PER_COMBO` fresh PUT_PENDING pallets for every distinct
+ * (Storage Code, Size) combo present in the given locations — mirrors
+ * `reseedTestData`'s (api/functions/demo-reseed.ts) own combo-based generation exactly,
+ * so `npx prisma db seed` alone (not just the pre-login "Reseed Test Data" dev-tools
+ * button) guarantees a real, findable Put Pending pallet for every combo from the start.
+ *
+ * @param locations - every already-generated Location row, to derive the distinct
+ *   (storageCode, size) combos from
+ * @returns fresh `PendingPalletRow` entries — callers insert these separately from the
+ *   main `pallets` array (different shape: no location, no putBy/putAt)
+ */
+function buildPendingPallets(locations: LocationRow[]): PendingPalletRow[] {
+  const combos = new Set(locations.map((l) => `${l.storageCode}|${l.size}`))
+  const now = new Date()
+  const pending: PendingPalletRow[] = []
+
+  for (const combo of combos) {
+    const [storageCode, size] = combo.split('|')
+    const itemPool = itemsByStorageCode[storageCode]
+    if (!itemPool?.length) continue
+
+    for (let i = 0; i < PENDING_PALLETS_PER_COMBO; i++) {
+      const itm = randomFrom(itemPool)
+      const vcp = randomFrom(VCP_OPTIONS)
+      const ssp = Math.random() < 0.5 ? vcp : vcp / 2
+      const receivedCartons = randomInt(6, 20)
+      const receivedSSPs = receivedCartons * ssp
+
+      pending.push({
+        pid: genPid(),
+        dept: itm.dept, class: itm.class, item: itm.item,
+        receivedPallets: 0, currentPallets: 0,
+        receivedCartons, currentCartons: receivedCartons,
+        receivedSSPs, currentSSPs: receivedSSPs,
+        cartonsPerPallet: cartonsPerPalletFor(receivedCartons, receivedSSPs),
+        vcp, ssp,
+        status: 'PUT_PENDING',
+        locationAisle: null, locationBin: null, locationLevel: null,
+        storageCode, size,
+        receivedByZ: 'z002p21', receivedAt: now,
+        poNumber: 'DEMO1234', apptNumber: 'DEMO1234',
+      })
+    }
+  }
+
+  return pending
 }
 
 /**
@@ -867,7 +945,7 @@ async function main() {
   console.log('Clearing existing data...')
   await prisma.activityLog.deleteMany()
   await prisma.functionAssignment.deleteMany()
-  await prisma.label.deleteMany()
+  await prisma.container.deleteMany()
   await prisma.reservation.deleteMany()
   await prisma.pallet.deleteMany()
   await prisma.location.deleteMany()
@@ -945,25 +1023,33 @@ async function main() {
     (chunk) => prisma.pallet.createMany({ data: chunk })
   )
 
-  // 5. Labels — handful across first few stored pallets, varying statuses
-  console.log('Seeding labels...')
+  // 4d. Put Pending pallets (direct instruction) — at least PENDING_PALLETS_PER_COMBO for
+  // every distinct (Storage Code, Size) combo, so the Pallet ID Demo Scanner's by-status
+  // popup always has real matching data, not just whatever combos happened to get one.
+  const pendingPallets = buildPendingPallets(locations)
+  await insertInChunks('put pending pallets', pendingPallets, 500,
+    (chunk) => prisma.pallet.createMany({ data: chunk })
+  )
+
+  // 5. Containers — handful across first few stored pallets, varying statuses
+  console.log('Seeding containers...')
   const today = new Date()
   const batchToday = julianDate(today)
   const purgeDate = new Date(today.getTime() + 7 * 86_400_000)
   const pastPurge = new Date(today.getTime() - 1 * 86_400_000) // expired yesterday
 
-  const labelPallets = pallets.slice(0, 8)
-  const labelStatuses = ['AVAILABLE', 'AVAILABLE', 'AVAILABLE', 'PRINTED', 'PULLED', 'PULLED', 'CANCELED', 'PURGED']
+  const containerPallets = pallets.slice(0, 8)
+  const containerStatuses = ['AVAILABLE', 'AVAILABLE', 'AVAILABLE', 'PRINTED', 'PULLED', 'PULLED', 'CANCELED', 'PURGED']
   const store = STORES[0]
 
-  const labelData = labelPallets.map((p, i) => {
-    const isPurged = labelStatuses[i] === 'PURGED'
+  const containerData = containerPallets.map((p, i) => {
+    const isPurged = containerStatuses[i] === 'PURGED'
     const qty = randomInt(1, Math.max(1, p.currentCartons - 1))
     // Determine pull function from location attributes seeded above.
     // The pallet's location level and size aren't directly on the pallet row here,
-    // so default to CA (most common); seed-labels.ts applies the full rule set.
+    // so default to CA (most common); seed-containers.ts applies the full rule set.
     return {
-      lid: genLid(store.id, p.dept, p.class, p.item, p.pid, batchToday),
+      cid: genCid(store.id, p.dept, p.class, p.item, p.pid, batchToday),
       pid: p.pid,
       dept: p.dept,
       class: p.class,
@@ -973,17 +1059,17 @@ async function main() {
       batchDate: batchToday,
       purgeDate: isPurged ? pastPurge : purgeDate,
       destinationStore: store.id,
-      status: labelStatuses[i],
+      status: containerStatuses[i],
       pullFunction: 'CA',
     }
   })
 
-  await prisma.label.createMany({ data: labelData })
+  await prisma.container.createMany({ data: containerData })
 
   console.log('Seed complete.')
   console.log(`  Locations: ${locations.length}`)
   console.log(`  Pallets:   ${pallets.length}`)
-  console.log(`  Labels:    ${labelData.length}`)
+  console.log(`  Containers: ${containerData.length}`)
 }
 
 main()

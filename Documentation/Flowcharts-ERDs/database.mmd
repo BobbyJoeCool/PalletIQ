@@ -40,7 +40,7 @@ erDiagram
     %% HoldCategory:   HOLD_IN, HOLD_OUT, HOLD_BOTH, HOLD_PERM (Location.holdCategory, independent of status)   → VarChar(10)
     %% LocationSize:   XS, HS, S, M, L                                                                         → VarChar(2)
     %% PalletStatus:   PUT_PENDING, STORED, CA_PULL_PEND, FP_PULL_PEND, PULLED, CANCELED, CONSOLIDATED         → VarChar(15)
-    %% LabelStatus:    AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                  → VarChar(15)
+    %% ContainerStatus: AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                 → VarChar(15)
     %% PullFunction:   CA (Carton Air), CF (Carton Floor), FP (Full Pallet), BK (Bulk/level-0, not in demo)   → VarChar(2)
     %% Role:           ADMIN, MANAGER, LEAD, IM, WORKER                                                        → VarChar(10)
     %% ActionType:     EDIT_PAL, PULL, RESERVE, PUT, UNASSIGN, BLOCK_PUT, RES_TMOUT, MNP_SCAN, STAGE, RESTAGE,
@@ -48,11 +48,11 @@ erDiagram
     %% ============================================================
     %% BUSINESS RULES
     %% SSP must be a factor of VCP (enforced in app logic, not schema)
-    %% LID format: {storeCode(1-4)}{DPCI(9)}{pid(8)}{random(8)}{batchDate(7)} = VarChar(36)
+    %% CID format: {storeCode(1-4)}{DPCI(9)}{pid(8)}{random(8)}{batchDate(7)} = VarChar(36)
     %% DPCI(9) is zero-padded: dept(3) + class(2) + item(4)
     %% pid: app-generated 8-digit Int with collision check
     %% zNumber format: z###x## (z + 3 digits + 1 letter + 2 digits) = VarChar(7)
-    %% PurgeDate defaults to 7 days after batchDate, set at label creation in app logic
+    %% PurgeDate defaults to 7 days after batchDate, set at container creation in app logic
     %% Status change to PURGED triggered in app logic on purge date
     %% ActionType enum must be defined and expanded as features are built
     %% Location.holdTypeCode (reason-code FK) is unpopulated — WLH.md states the reason
@@ -146,8 +146,8 @@ erDiagram
         date expirationDate "nullable, db.Date, v1.6.7 — editable via PII Edit Mode (IM+); 1-month floor / 3-month confirm gate enforced in app logic"
     }
 
-    Label {
-        string lid PK "VarChar(36), app-generated composite"
+    Container {
+        string cid PK "VarChar(36), app-generated composite"
         int pid FK "→ Pallet"
         int dept FK "composite FK → Item"
         int class FK "composite FK → Item"
@@ -157,7 +157,7 @@ erDiagram
         int batchDate "Julian date e.g. 2026175"
         date purgeDate "db.Date, default 7 days after batchDate"
         int destinationStore FK "→ Store"
-        string status "VarChar(15), LabelStatus values"
+        string status "VarChar(15), ContainerStatus values"
         string pullFunction "VarChar(2), PullFunction values, default CA"
     }
 
@@ -251,9 +251,9 @@ erDiagram
     Pallet }o--o| User : "putByZ (nullable)"
     Pallet }o--o| User : "lastPulledByZ (nullable)"
 
-    Label }o--|| Pallet : "pid"
-    Label }o--|| Item : "dept/class/item"
-    Label }o--|| Store : "destinationStore"
+    Container }o--|| Pallet : "pid"
+    Container }o--|| Item : "dept/class/item"
+    Container }o--|| Store : "destinationStore"
 
     User }o--|| Department : "departmentId"
 

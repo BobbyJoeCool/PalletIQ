@@ -25,7 +25,7 @@
 
 ### Demo footer buttons
 
-Three buttons, left to right: **"✓ Scan Location"** (a genuinely random location, any status — `status=any`, matching what a real barcode scan could land on), **"Find by Status"** (opens a `DemoPicker` popup listing all 8 possible location states — Empty, Stored, Staged, Reserved, Pull Pending, Held, Contraction, Multiple Pallet IDs — picking one loads a random location in that state), and **"✗ Bad Location"** (a location id that doesn't exist). All three call `hidePanel()` before loading, so an open numpad panel from a prior manual-entry attempt doesn't linger after a demo button resolves a location.
+**(Feature 9, Phase 2)** `LocationEntryFields`' own built-in Demo Scanner now owns this, replacing LII's former hand-rolled trio and its flat 8-option `DemoPicker`. Three buttons, left to right: **"✓ Valid Location"** (a genuinely random location, any status — no filter at all, matching what a real barcode scan could land on), **"Location by Filter"** (opens a popup with four *independent* axes — Status, Hold, Contraction, Multi-Occupant — plus Storage Code/Size/Zone/Aisle/Level filters; a genuine capability upgrade over the old flat single-select, which couldn't express combinations like "Stored AND Hold Both"), and **"✗ Invalid Location"** (a location id that doesn't exist).
 
 "Multiple Pallet IDs" finds a location with more than one occupant pallet (issue #87 —
 MNP's v1.6.3 dual-occupancy "Proceed Anyway" override can produce these live; ~20 are also
@@ -71,7 +71,7 @@ paging described above.
 │  [ Go to Pallet ID ]  (disabled if empty)   [ Hold ]                          │  content: 792px
 │                                                                                 │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ [123 Keypad] [ABC Keyboard]  ✓ Scan Location  Find by Status  ✗ Bad Location  BD 26198 7/17 3:41 PM │ 54px Footer
+│ [123 Keypad] [ABC Keyboard]  ✓ Valid Location  Location by Filter  ✗ Invalid Location  BD 26198 7/17 3:41 PM │ 54px Footer
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -156,6 +156,7 @@ flowchart TD
 
 | Date | Change |
 | --- | --- |
+| 2026-07-29 (Feature 9, Phase 2) | Own hand-rolled demo trio (`✓ Scan Location`/`Find by Status` `DemoPicker`/`✗ Bad Location`) retired — `LocationEntryFields`' built-in Demo Scanner now owns this. The old flat 8-option status picker becomes four independent axes (Status/Hold/Contraction/Multi-Occupant) plus Storage Code/Size/Zone/Aisle/Level filters — a genuine capability upgrade, not just a relocation, since the old picker couldn't express combinations. |
 | 2026-07-19 (v1.6.9) | "Find by Status" fixed a real bug (Empty/Staged picks showing the wrong status — the demo endpoint's exact `level` was being discarded, causing an ambiguous 6-digit lookup); added an 8th picker option, "Multiple Pallet IDs" (issue #87), backed by a new `Pallet.groupBy`-based branch in `sampleLocation`; and ~20 multi-occupant locations (10 with 2 pallets, 10 with 4, each with a distinct DPCI) are now seeded explicitly by `seed.ts`'s new `addMultiOccupancyPallets`, so this data survives a full database rebuild, not just a one-off backfill. Also (app-wide, not LII-specific): `StatusBadge` now renders underscores in a status string as spaces (`CA_PULL_PEND` → "CA PULL PEND"). |
 | 2026-07-19 (v1.6.9) | Contraction display revised after live testing: moved from a separate callout bubble below Status to a "CONTRACTED" `StatusBadge` rendered inline next to the Status badge, same row, same styling (item 04 revision 2 — see that fix file's revision history). |
 | 2026-07-18 (v1.6.9) | LII fix-list round: state now persists across navigation via `LIIContext` (item 01); footer's "Find by Status" button opens a `DemoPicker` covering all 7 location states (item 02, expanded from the original Held/Reserved/Staged/Contraction scope); pallet summary gains the item's `descShort` (item 03); Contraction now renders next to Status, and `contraction` was added to `GET /api/locations/:id`'s response (item 04, also closing a prior API gap); demo footer buttons now call `hidePanel()` before loading (item 05); and, per issue #87, the pallet panel is now always visible with a "PALLET x/y" header (or "0/0" when empty) and Next/Prev paging through every occupant pallet — `GET /api/locations/:id` returns the full `pallets` array instead of a single nullable `pallet` field. |

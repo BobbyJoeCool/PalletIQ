@@ -18,6 +18,19 @@ model StorageCode {
   pallets   Pallet[]
 }
 
+// Feature 9 (Demo Scanner) Phase 1, Step 0 — real-data-backed replacement for the
+// previously-hardcoded SIZES/SIZE_NAMES frontend constant (apps/floor-app/src/lib/sizes.ts).
+// Mirrors StorageCode's own shape exactly. No `items Item[]` back-relation — unlike
+// StorageCode, Item has no `size` column at all (checked directly against this file, not
+// assumed from the design doc's own proposed shape, which incorrectly included one).
+model Size {
+  id   String @id @db.VarChar(2)
+  desc String @db.VarChar(60)
+
+  locations Location[]
+  pallets   Pallet[]
+}
+
 model Department {
   id   String @id @db.VarChar(3)
   name String @db.VarChar(60)
@@ -43,7 +56,7 @@ model Store {
   id   Int    @id
   name String @db.VarChar(40)
 
-  labels Label[]
+  containers Container[]
 }
 
 // Grouping of aisles into a physical pick/put workstation (e.g. "CR01"). A workstation
@@ -94,7 +107,7 @@ model Item {
   storageRef  StorageCode @relation(fields: [storageCode], references: [id])
 
   pallets      Pallet[]
-  labels       Label[]
+  containers   Container[]
   activityLogs ActivityLog[]
 
   @@id([dept, class, item], name: "DPCI")
@@ -127,6 +140,7 @@ model Location {
 
   holdType   HoldType?   @relation(fields: [holdTypeCode], references: [code])
   storageRef StorageCode @relation(fields: [storageCode], references: [id])
+  sizeRef    Size        @relation(fields: [size], references: [id])
 
   pallets      Pallet[]
   reservations Reservation[]
@@ -215,17 +229,18 @@ model Pallet {
   itemRef      Item         @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
   location     Location?    @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
   storageRef   StorageCode? @relation(fields: [storageCode], references: [id])
+  sizeRef      Size?        @relation(fields: [size], references: [id])
   receivedBy   User         @relation("PalletReceivedBy", fields: [receivedByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
   putBy        User?        @relation("PalletPutBy", fields: [putByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
   lastPulledBy User?        @relation("PalletLastPulledBy", fields: [lastPulledByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
 
-  labels       Label[]
+  containers   Container[]
   reservations Reservation[]
   activityLogs ActivityLog[]
 }
 
-model Label {
-  lid              String   @id @db.VarChar(36)
+model Container {
+  cid              String   @id @db.VarChar(36)
   pid              Int
   dept             Int
   class            Int

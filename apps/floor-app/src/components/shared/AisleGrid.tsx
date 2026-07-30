@@ -52,30 +52,54 @@ function cellKey(zone: number, side: GridSide): string {
 }
 
 /**
- * Visual map of one aisle's physical layout: 8 fixed columns (Zone 1-4 × Odd/Even side)
- * by one row per physical level, Level 1 at the bottom mirroring the real aisle. Each cell
- * shows its {StorageCode}-{Size} designation, the Storage Code colored from a curated
- * per-code palette (`storageCodeColors.ts`) for at-a-glance distinctiveness; contracted
- * zone-side/level groups are highlighted red instead. Read-only for every role — no cell
- * interaction (per ELZ.md). Shared between ELZ (built) and STG (deferred — design session
- * required).
+ * Visual map of one aisle's physical layout: 8 fixed columns (Zone 1-4 × Odd/Even side),
+ * each an independently-sized list of that zone/side's occupied levels (issue #126,
+ * revised 2026-07-28 — direct instruction: rather than also splitting Odd/Even into their
+ * own left/right halves, each of the existing 8 zone×side columns instead becomes its own
+ * dynamically-sized list of level-badged entries, with no cross-column level alignment).
+ * Each entry shows a small Level badge followed by its {StorageCode}-{Size} designation,
+ * the Storage Code colored from a curated per-code palette (`storageCodeColors.ts`) for
+ * at-a-glance distinctiveness; a contracted entry highlights red instead. Read-only for
+ * every role — no cell interaction (per ELZ.md). Shared between ELZ and STG.
  *
- * The grid always fills its parent's height rather than scrolling (v1.6.5) — each level's
- * row gets a share of that fixed height weighted by `SIZE_WEIGHTS[size]` (a level's Size is
- * constant across every zone/side within it, see `seed.ts`'s `getSize`), so a Large-only
- * aisle's rows are taller than a Half-Small one's, and an aisle with many levels still fits
- * without narrowing thresholds or scrolling.
+ * Entries within a column are sorted highest level first (top) down to Level 1 (bottom),
+ * preserving this component's original "mirrors the real aisle" intent even though columns
+ * are no longer a fixed per-level grid — an empty column (no occupied levels on that
+ * zone/side) shows a single "—" placeholder instead of nothing.
+ *
+ * Every column fills the full grid height regardless of how many entries it holds (revised
+ * 2026-07-28, direct instruction) — each entry's own box height is weighted by
+ * `SIZE_WEIGHTS[size]` (L=1, M=.667, S=.5, HS=.25, XS=.125, same formula this component
+ * used pre-#126 for whole rows) and grows to fill its share of that column's own available
+ * height, the same `flex-grow`-weighted-by-size technique as before — just applied per
+ * entry within an independently-sized column now, instead of per row shared across every
+ * column. A column with few entries gets visibly larger boxes than a densely-occupied
+ * neighbor, rather than leaving empty space at the bottom.
  */
 export function AisleGrid({ levels, zoneBinRanges, dense = false }: AisleGridProps) {
-  // Level 1 at bottom, highest level at top.
-  const rows = [...levels].sort((a, b) => b.level - a.level);
   const binRangeByZone = new Map((zoneBinRanges ?? []).map((r) => [r.zone, r]));
 
+  // Reflow the level-keyed input into one entry list per zone/side column, each entry
+  // carrying its own level number now that level is no longer implied by row position.
+  interface ColumnEntry { level: number; storageCode: string; size: string; contraction: boolean }
+  const columns = new Map<string, ColumnEntry[]>();
+  for (const zone of ZONES) {
+    for (const side of SIDES) columns.set(cellKey(zone, side), []);
+  }
+  for (const row of levels) {
+    for (const cell of row.cells) {
+      columns.get(cellKey(cell.zone, cell.side))?.push({
+        level: row.level, storageCode: cell.storageCode, size: cell.size, contraction: cell.contraction,
+      });
+    }
+  }
+  // Highest level first (top of column) down to Level 1 (bottom) — see doc comment above.
+  for (const entries of columns.values()) entries.sort((a, b) => b.level - a.level);
+
   return (
-    <div className="h-full flex flex-col border border-[#2A2A2A] rounded-[12px] overflow-hidden select-none">
+    <div className="h-full flex flex-col border border-[#2A2A2A] rounded-[12px] overflow-y-auto select-none">
       {/* Header row 1 — zone label + bin range, spanning its Odd+Even column pair */}
       <div className="flex bg-[#161616] border-b border-[#2A2A2A] shrink-0">
-        <div className="w-[56px] shrink-0" />
         {ZONES.map((zone) => {
           const range = binRangeByZone.get(zone);
           return (
@@ -98,7 +122,6 @@ export function AisleGrid({ levels, zoneBinRanges, dense = false }: AisleGridPro
 
       {/* Header row 2 — Odd / Even sub-headers */}
       <div className="flex bg-[#111111] border-b border-[#2A2A2A] shrink-0">
-        <div className="w-[56px] shrink-0" />
         {ZONES.map((zone) => (
           <div key={zone} className={`flex-1 flex ${ZONE_DIVIDER} first:border-l-0`}>
             {SIDES.map((side) => (
@@ -115,58 +138,49 @@ export function AisleGrid({ levels, zoneBinRanges, dense = false }: AisleGridPro
         ))}
       </div>
 
-      {/* Level rows — each weighted by its Size's relative height (SIZE_WEIGHTS), filling
-          all remaining space instead of scrolling. */}
-      <div className="flex-1 flex flex-col min-h-0">
-        {rows.map((row) => {
-          const byPos = new Map(row.cells.map((c) => [cellKey(c.zone, c.side), c]));
-          // A level's Size is constant across every zone/side within it (see getSize) —
-          // the first cell present is as representative as any other.
-          const weight = SIZE_WEIGHTS[row.cells[0]?.size ?? 'L'] ?? 1;
-          return (
-            <div
-              key={row.level}
-              style={{ flexGrow: weight, flexBasis: 0 }}
-              className={`min-h-0 flex border-b-2 ${CELL_DIVIDER_COLOR} last:border-b-0`}
-            >
-              <div className={`w-[56px] shrink-0 flex items-center justify-center bg-[#0D0D0D] border-r-2 ${CELL_DIVIDER_COLOR}`}>
-                <span className="font-data text-[14px] font-semibold text-[#9A9A9A]">
-                  {row.level}
-                </span>
-              </div>
-              {ZONES.map((zone) => (
-                <div key={zone} className={`flex-1 flex ${ZONE_DIVIDER} first:border-l-0`}>
-                  {SIDES.map((side) => {
-                    const cell = byPos.get(cellKey(zone, side));
-                    return (
+      {/* Columns — each its own dynamically-sized list of level-badged entries, no
+          cross-column level alignment (see doc comment above). */}
+      <div className="flex flex-1">
+        {ZONES.map((zone) => (
+          <div key={zone} className={`flex-1 flex ${ZONE_DIVIDER} first:border-l-0`}>
+            {SIDES.map((side) => {
+              const entries = columns.get(cellKey(zone, side)) ?? [];
+              return (
+                <div key={cellKey(zone, side)} className={`flex-1 flex flex-col border-l-2 ${CELL_DIVIDER_COLOR} first:border-l-0`}>
+                  {entries.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center py-3">
+                      <span className="text-[#333] text-[13px]">—</span>
+                    </div>
+                  ) : (
+                    entries.map((entry) => (
                       <div
-                        key={cellKey(zone, side)}
-                        className={`flex-1 flex items-center justify-center border-l-2 ${CELL_DIVIDER_COLOR} first:border-l-0 ${
-                          cell?.contraction ? 'bg-[#4A0000]' : 'bg-[#0A0A0A]'
+                        key={entry.level}
+                        style={{ flexGrow: SIZE_WEIGHTS[entry.size] ?? 1, flexBasis: 0 }}
+                        className={`min-h-0 flex items-center justify-center gap-1.5 border-b ${CELL_DIVIDER_COLOR} last:border-b-0 ${
+                          entry.contraction ? 'bg-[#4A0000]' : 'bg-[#0A0A0A]'
                         }`}
                       >
-                        {cell ? (
-                          <span
-                            className="font-data text-[13px] font-medium"
-                            style={{
-                              color: cell.contraction
-                                ? '#FF6666'
-                                : (STORAGE_CODE_COLORS[cell.storageCode] ?? STORAGE_CODE_COLOR_FALLBACK),
-                            }}
-                          >
-                            {cell.storageCode}-{cell.size}
-                          </span>
-                        ) : (
-                          <span className="text-[#333] text-[13px]">—</span>
-                        )}
+                        <span className="shrink-0 flex items-center justify-center min-w-[27px] h-[24px] px-1.5 rounded-[6px] bg-[#0D0D0D] border border-[#3A3A3A] font-data text-[15px] font-semibold text-[#9A9A9A]">
+                          {entry.level}
+                        </span>
+                        <span
+                          className="font-data text-[13px] font-medium"
+                          style={{
+                            color: entry.contraction
+                              ? '#FF6666'
+                              : (STORAGE_CODE_COLORS[entry.storageCode] ?? STORAGE_CODE_COLOR_FALLBACK),
+                          }}
+                        >
+                          {entry.storageCode}-{entry.size}
+                        </span>
                       </div>
-                    );
-                  })}
+                    ))
+                  )}
                 </div>
-              ))}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );

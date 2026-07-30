@@ -485,11 +485,11 @@ One pallet per STORED location. Each pallet is randomly assigned an item from th
 
 ---
 
-## Label (8 rows)
+## Container (8 rows)
 
-Eight sample labels across the first 8 stored pallets, all destined for store 2498 (Cedar Falls).
+Eight sample containers across the first 8 stored pallets, all destined for store 2498 (Cedar Falls).
 
-**LID format:** `{storeId:4}{dept:3}{class:2}{item:4}{pid:8}{random:8}{batchDate:7}` = 36 characters
+**CID format:** `{storeId:4}{dept:3}{class:2}{item:4}{pid:8}{random:8}{batchDate:7}` = 36 characters
 
 | Status | Count | Notes |
 |--------|-------|-------|
@@ -499,4 +499,4 @@ Eight sample labels across the first 8 stored pallets, all destined for store 24
 | CANCELED | 1 | Voided before fulfillment |
 | PURGED | 1 | purgeDate set to yesterday |
 
-All labels use today's Julian date as `batchDate` (YYYYDDD format, e.g. `2026176`). Purge window is 7 days forward, except the PURGED row which is set to yesterday.
+All containers use today's Julian date as `batchDate` (YYYYDDD format, e.g. `2026176`). Purge window is 7 days forward, except the PURGED row which is set to yesterday.

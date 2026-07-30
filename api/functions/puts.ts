@@ -116,14 +116,16 @@ async function placePallet(
  * to RESERVED and creating a Reservation row.
  *
  * **Effective Size/Storage Code/Zone resolution** (the SDP put hierarchy): an IM+ override
- * always wins when supplied. Otherwise, Size and Storage Code fall back to the pallet's
- * own inherited values (`Pallet.storageCode`/`.size` — set by placePallet from wherever
- * the pallet is currently STORED; null, meaning no filter, if it's PUT_PENDING and has
- * never been stored). Zone falls back the same way (`Pallet.zone`), defaulting to 1 if
- * the pallet has none — and even then is only ever a *starting preference* for
- * `findNextLocation`, which retries from Zone 1 if nothing eligible exists at or above it.
- * Size/Storage Code, by contrast, are hard exact-match filters once resolved (no fallback
- * search without them) — passed straight through to `findNextLocation`.
+ * always wins when supplied. Otherwise, Size and Storage Code fall back to the pallet's own
+ * inherited values (`Pallet.storageCode`/`.size` — set by placePallet from wherever the
+ * pallet is currently STORED, or by receiving/reinstating if never yet stored — a pallet is
+ * expected to always carry a real Storage Code/Size by the time it reaches here). Zone
+ * falls back the same way (`Pallet.zone`), defaulting to 1 if the pallet has none — and
+ * even then is only ever a *starting preference* for `findNextLocation`, which retries from
+ * Zone 1 if nothing eligible exists at or above it. Size/Storage Code, by contrast, are
+ * always hard exact-match filters (never omitted) — see `resolveEffectiveCriteria`'s own
+ * doc comment for why a pallet that somehow still has no Size gets rejected outright
+ * (`MISSING_SIZE`) rather than searched for unconstrained.
  *
  * Any authenticated worker may supply `size` to constrain the location search — Size is
  * the one override every role can use. `storageCode` and `zone` remain IM+ only; passing
@@ -139,7 +141,9 @@ async function placePallet(
  *   `{ aisle: number; palletId: number; size?: string; storageCode?: string; zone?: number; consolidating?: boolean; wasScanned?: boolean }`
  * @returns `{ reservationId, directedLocation, pallet: { id, dpci, descShort, quantity, currentLocation }, alreadyStored }`
  * @throws 400 INVALID_INPUT for missing aisle or palletId; 403 FORBIDDEN if storageCode/zone supplied by non-IM;
- *   404 PALLET_NOT_FOUND; 409 NO_CARTONS if pallet has no stored cartons; 409 NO_LOCATIONS if no eligible locations
+ *   404 PALLET_NOT_FOUND; 409 NO_CARTONS if pallet has no stored cartons; 409 MISSING_SIZE if
+ *   the pallet has no Size and none was given (recoverable via a Size override);
+ *   409 NO_LOCATIONS if no eligible locations
  */
 async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
   const auth = await requireAuth(req);
@@ -435,6 +439,9 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
  * @returns `{ blockedLocation: string; newReservationId: number; newDirectedLocation: string }`
  * @throws 400 INVALID_INPUT for non-numeric reservationId;
  *   404 NOT_FOUND if reservation does not exist;
+ *   409 MISSING_SIZE if the pallet has no Size and none was given (see
+ *   `resolveEffectiveCriteria`'s own doc comment — reachable here too, since this re-derives
+ *   the same effective criteria the original directedPut search used);
  *   409 NO_LOCATIONS if no further eligible locations are available in the target aisle
  */
 async function blockPut(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {

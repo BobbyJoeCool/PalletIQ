@@ -12,7 +12,7 @@
    - 3a. **DPCI entry:** types Dept (3 digits, auto-advances), then Class (2 digits, auto-advances), then Item (4 digits, auto-resolves the lookup). The three display boxes are also populated directly (bypassing the typed chain) when the whole DPCI arrives at once — via `?dpci=`, a demo button, or a UPC-lookup fallback — so they never show stale `—` placeholders despite a loaded item.
    - 3b. **UPC entry:** types/scans into the UPC field (keyboard-driven), confirms, resolves the lookup independently of the DPCI boxes.
 4. On confirm, the corresponding endpoint is called: `GET /api/items/dpci/:dpci` or `GET /api/items/upc/:upc`.
-   - 4a. **Found:** item data renders below the entry fields. Whichever field *wasn't* used to look the item up is cleared (a DPCI lookup clears UPC; a UPC lookup clears the three DPCI boxes).
+   - 4a. **Found:** item data renders below the entry fields. A DPCI lookup clears the UPC field; a UPC lookup instead backfills the three DPCI boxes with the resolved item's own DPCI (2026-07-30 — previously cleared them; this asymmetric UPC-resolves-DPCI/DPCI-clears-UPC rule is now the shared convention across IID/ISI/PAR).
    - 4b. **Not found:** see Mis-scan handling below.
 5. Both entry paths remain live after a successful load — typing a new value into either resolves a new item without navigating away.
 6. A "View Storage Locations" button (v1.6.8, `DevNotes/Fixes/IID/01`) sits below the read-only field list once an item is loaded — navigates to `/storage-inquiry?dpci=` for the loaded item's DPCI, which ISI resolves automatically on arrival (see ISI.md's deep-link support, also added in v1.6.8).
@@ -20,7 +20,7 @@
 
 ### Mis-scan / error handling
 
-- `GET /api/items/dpci/:dpci` or `/upc/:upc` 404: `playAlert('error')`, message bar `"Item not found"`, item data cleared. The field(s) that were used **stay visible with the bad value** (v1.6.8 — previously cleared; changed per direct feedback so the worker can see what didn't resolve) and pick up the app-wide red-wash treatment (v1.7.0 — see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`): DPCI washes as one group (`dpciInvalid` — a single composite existence lookup with no independent per-box check, same as PAR/ISI), UPC washes on its own (`upcInvalid`). Each lookup clears the *other* mode's invalid flag, since each lookup also clears the other mode's field(s).
+- `GET /api/items/dpci/:dpci` or `/upc/:upc` 404: `playAlert('error')`, message bar `"Item not found"`, item data cleared. The field(s) that were used **stay visible with the bad value** (v1.6.8 — previously cleared; changed per direct feedback so the worker can see what didn't resolve) and pick up the app-wide red-wash treatment (v1.7.0 — see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`): DPCI washes as one group (`dpciInvalid` — a single composite existence lookup with no independent per-box check, same as PAR/ISI), UPC washes on its own (`upcInvalid`). Each lookup clears the *other* mode's invalid flag on its own next attempt — a DPCI attempt also clears the UPC field outright, but a UPC attempt (2026-07-30) no longer clears DPCI's fields, only its invalid flag, since a successful UPC resolve now backfills DPCI instead.
 - A DPCI whose digit count doesn't total 9 across the three boxes never reaches the API at all — each box only auto-advances/resolves once it hits its own fixed length (3/2/4), so an incomplete entry simply sits waiting for more input rather than erroring.
 
 ### Status / messaging behavior
@@ -57,7 +57,7 @@
 │  [View Storage Locations]  [Reinstate Pallet]  ← Reinstate is IM+ only (v1.6.8) │
 │                                                                                 │  content: 792px
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ [123 Keypad] [ABC Keyboard]    ✓ Scan DPCI   ✗ Bad DPCI      BD 26198 7/17 3:41 PM │ 54px Footer
+│ [123 Keypad] [ABC Keyboard]  ✓ Valid DPCI  DPCI by Filter  ✗ Invalid DPCI  BD 26198 7/17 3:41 PM │ 54px Footer
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -67,7 +67,7 @@
 - UPC field: numpad-driven (`useNumpadField('numpad')`, no fixed length — switched from the full Keyboard panel in v1.1.5/issue #56 since UPCs are always numeric; this section's older wording still said "keyboard-driven" until this correction), requires an explicit confirm (Enter/OK), or an atomic hardware-scanner `deliverScan()`.
 - The Dept→Class→Item auto-advance chain uses refs (`deptValueRef`/`classValueRef`), not direct reads of the field hook's `.value`, to avoid a stale-closure hazard: the chain's handlers are registered once at mount and would otherwise always see the values frozen at that render.
 - All buttons/fields meet the 72px+ min touch target convention used app-wide (each entry box is 64px tall, matching PII's Pallet ID box sizing).
-- Footer demo buttons target whichever entry method currently has focus (v1.6.8): by default (DPCI boxes focused, or nothing focused yet) they read "✓ Scan DPCI"/"✗ Bad DPCI"; the instant the UPC field is focused they relabel to "✓ Scan UPC"/"✗ Bad UPC" and route through `loadByUpc` instead. "Scan" fetches a real random DPCI+UPC pair from `/api/items/sample` and looks up whichever one matches the focused field; "Bad" looks up a guaranteed-nonexistent value (`999-99-9999` for DPCI, `999999999999` for UPC).
+- Footer demo buttons (2026-07-30, Feature 9's DPCI/UPC phase) are [`ItemDemoScannerBar`](../Components/ItemDemoScannerBar.md) — the standard **Valid** / **by Filter** / **Invalid** 3-button pattern, targeting whichever entry method currently has focus (by default, DPCI boxes focused or nothing focused yet, they read "DPCI"; the instant the UPC field is focused they relabel to "UPC" and route `loadByUpc` instead — same targeting `demoScan`/`demoBad` used before this component replaced them). **Valid** fetches a real random item from `/api/items/sample`; **{DPCI/UPC} by Filter** opens a popup filtering by Storage Code, Requires Expiration, and Handling Code; **Invalid** fills a guaranteed-nonexistent value (`999-99-9999` for DPCI, `999999999999` for UPC) with no network call.
 
 ## Data
 
@@ -100,7 +100,7 @@ flowchart TD
     F1 --> C
     F2 --> C
     E1 -- yes --> G[Loaded: clear UPC field, show item data]
-    E2 -- yes --> H[Loaded: clear DPCI boxes, show item data]
+    E2 -- yes --> H[Loaded: backfill DPCI boxes, show item data]
     G --> I{Worker enters new value}
     H --> I
     I -- DPCI --> D1
@@ -109,11 +109,13 @@ flowchart TD
 
 ## Behind the Scenes
 
-**Two independent lookup paths converge on the same display.** `loadByDpci` and `loadByUpc` are separate callbacks hitting separate endpoints (`/api/items/dpci/:dpci` vs `/api/items/upc/:upc`), each clearing the *other* entry method's field(s) on invocation (not just on success) — so switching entry methods always leaves exactly one method's fields populated, never both or neither.
+**Two lookup paths, asymmetric on invocation (revised 2026-07-30).** `loadByDpci`/`loadByUpc` (now `dpciFields`/`upcFields`, the shared `useDpciFields`/`useUpcField` hooks) hit separate endpoints (`/api/items/dpci/:dpci` vs `/api/items/upc/:upc`). A DPCI attempt still clears the UPC field on invocation (not just on success), matching the original design — but a UPC attempt no longer clears the DPCI boxes on invocation; instead, a *successful* UPC resolve backfills them with the resolved item's own DPCI (`dpciFields.setFromDpci(data.dpci)`, called from `upcFields`'s own `onResolved`). This is the established convention shared with ISI/PAR — see `useUpcField.ts`'s own doc comment.
 
-**Whole-DPCI callers still populate all three boxes.** `loadByDpci` explicitly splits a dash-joined DPCI string and calls `.set()` on all three field hooks before the fetch resolves — this exists because callers that supply a whole DPCI at once (the demo button, the `?dpci=` URL param) would otherwise leave the three display boxes showing their `—` placeholder even though the item successfully loaded; only the manual typed-entry chain naturally fills them one box at a time as the worker types.
+**Whole-DPCI callers still populate all three boxes.** `loadByDpci`/`dpciFields.loadDpci` explicitly splits a dash-joined DPCI string and calls `.set()` on all three field hooks before the fetch resolves — this exists because callers that supply a whole DPCI at once (the demo button, the `?dpci=` URL param, or now a resolved UPC) would otherwise leave the three display boxes showing their `—` placeholder even though the item successfully loaded; only the manual typed-entry chain naturally fills them one box at a time as the worker types.
 
-**Bad value stays visible on error, demo buttons target whichever field has focus (v1.6.8):** Both changed per direct feedback. Since `loadByDpci`/`loadByUpc` already populate their fields with the attempted value *before* the fetch resolves (see above), the only change needed was removing the `.clear()` calls from each `catch` block — a 404 now simply leaves what was already displayed instead of wiping it back to `—`. `demoScan`/`demoBad` both read `upcField.isActive` at call time to decide whether to fetch/attempt a DPCI or a UPC, and the footer's `demoSlot` label reads the same flag, so focusing the UPC field relabels the buttons and retargets them together rather than as two independently-maintained pieces of state. Required extending `GET /api/items/sample` to also return `upc` alongside `dpci` (previously DPCI-only).
+**Bad value stays visible on error (v1.6.8, per direct feedback).** Since `loadByDpci`/`loadByUpc` already populate their fields with the attempted value *before* the fetch resolves (see above), the only change needed was removing the `.clear()` calls from each `catch` block — a 404 now simply leaves what was already displayed instead of wiping it back to `—`.
+
+**Demo buttons target whichever field has focus (2026-07-30, Feature 9's DPCI/UPC phase).** `ItemDemoScannerBar` reads `upcFields.field.isActive` to decide its own `idType`/`onFill` target, and the footer's `demoSlot` switches which instance renders on the same flag — matching the pre-Feature-9 `demoScan`/`demoBad` targeting exactly, just through the shared component instead of screen-local callbacks. `GET /api/items/sample` (extended v1.6.8 to return `upc` alongside `dpci`) gained `storageCode`/`requiresExpirationDate`/`conveyable` optional filters this phase for the by-filter popup.
 
 **The Item model has no VCP/SSP fields**, despite the original `DevNotes/Screen-Specs/IID.md` spec's read-only field table listing them — a documented mismatch in the current code (`IIDPage.tsx`'s own top-of-file comment calls this out directly): VCP/SSP are set per-pallet at receiving time in this data model, not fixed at the item level. This screen displays the Item model's real fields instead (retail price, cost, unit weight, packing zone code, storage code, conveyable) — see the source comment referencing "phase-9 log" for the original investigation.
 
@@ -136,6 +138,7 @@ flowchart TD
 
 | Date | Change |
 |---|---|
+| 2026-07-30 | Feature 9 DPCI/UPC phase: footer demo buttons replaced with [`ItemDemoScannerBar`](../Components/ItemDemoScannerBar.md) — the standard Valid/by Filter/Invalid 3-button pattern (Storage Code, Requires Expiration, Handling Code filters), retiring the old unfiltered "✓ Scan"/"✗ Bad" pair. Real behavior change alongside it: resolving a UPC now backfills the DPCI boxes with the item's own DPCI instead of clearing them (asymmetric with DPCI entry, which still clears UPC) — the same convention PAR already had; IID/ISI now match it. `GET /api/items/sample` gained `storageCode`/`requiresExpirationDate`/`conveyable` optional filters. |
 | 2026-07-27 (Feature 10 / #159) | Internal-only, plus one real bug fix: DPCI entry replaced with the shared `useDpciFields` hook. Fixed a latent bug along the way — the old `deptValueRef`/`classValueRef` pattern went stale whenever a demo button or `?dpci=` URL param populated the boxes outside the interactive chain (already found and fixed once in PAR, v1.6.11), which this screen still carried. No documented behavior changes beyond that fix. |
 | 2026-07-28 (Feature 10 / #160) | Internal-only: UPC entry replaced with the shared `useUpcField` hook, and the UPC box's markup (previously hand-rolled, unlike DPCI's boxes) now renders through the shared `NumpadFieldBox` primitive directly. No change to documented behavior, sizing, or wording. |
 | 2026-07-18 (v1.6.8) | Added `Unit Weight` (nullable, lbs) to the read-only field list — new `Item.unitWeight` schema column. Added the "View Storage Locations" button (closes `DevNotes/Fixes/IID/01`), navigating to ISI pre-populated via `?dpci=`; ISI's own side of this (actually consuming the param) was built in the same version — see ISI.md. Two further live-feedback fixes: a bad DPCI/UPC now stays visible in the entry field(s) on a not-found error instead of being cleared, and the "Scan"/"Bad" footer demo buttons relabel to target UPC whenever the UPC field has focus (required extending `GET /api/items/sample` to also return `upc`). Also corrected this doc's stale "UPC field is keyboard-driven" line (it's been numpad-driven since v1.1.5/issue #56 — the wording just never caught up). Added a second hot button, "Reinstate Pallet," IM+ only, navigating to PAR pre-populated via `?dpci=` — PAR gained matching `?dpci=` pre-population support in the same round (see PAR.md). |

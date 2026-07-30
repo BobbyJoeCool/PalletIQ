@@ -22,7 +22,7 @@ classDiagram
         STORED
         PULL_PENDING
         %% PULL_PENDING here is currently unused/reserved — v1.6.9's Pull Pending rule
-        %% (Label creation against a pallet) is Pallet.status-only by direct product
+        %% (Container creation against a pallet) is Pallet.status-only by direct product
         %% decision; see PalletStatus's CA_PULL_PEND/FP_PULL_PEND below.
         RESERVED
         STAGED
@@ -66,9 +66,9 @@ classDiagram
         CONSOLIDATED
         %% v1.6.9: CA_PULL_PEND/FP_PULL_PEND replace the never-implemented generic
         %% PULL_PENDING here — CA_PULL_PEND covers both CA and CF pull functions
-        %% (carton-granularity), FP_PULL_PEND covers FP. Set when a Label is created
+        %% (carton-granularity), FP_PULL_PEND covers FP. Set when a Container is created
         %% against a pallet (today: only the seed/reseed generators — see
-        %% demo-reseed.ts/seed-labels.ts), cleared back to STORED once every one of a
+        %% demo-reseed.ts/seed-containers.ts), cleared back to STORED once every one of a
         %% pallet's outstanding labels has been pulled (verifyPull in pulls.ts).
         %% LocationStatus's own PULL_PENDING below is unrelated/unused by this rule.
         %% Open — expand as app is built

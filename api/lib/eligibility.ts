@@ -1,12 +1,12 @@
 import prisma from './prisma.js';
 
 /**
- * Terminal Label statuses — a label in one of these is resolved and no longer "open"
- * against its pallet. Used as a `notIn` filter to find open labels; canonical definition,
- * every such check across the API should filter against this instead of restating the
- * literal list.
+ * Terminal Container statuses — a container in one of these is resolved and no longer
+ * "open" against its pallet. Used as a `notIn` filter to find open containers; canonical
+ * definition, every such check across the API should filter against this instead of
+ * restating the literal list.
  */
-export const TERMINAL_LABEL_STATUSES = ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'];
+export const TERMINAL_CONTAINER_STATUSES = ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'];
 
 export interface EligibilityResult {
   eligible: true;
@@ -40,12 +40,12 @@ export interface EligibilityResult {
  * Runs the shared pallet eligibility checks used by both SDP and MNP:
  *   1. Pallet exists
  *   2. Not CANCELED (a voided/canceled receiving record — shouldn't be put away at all)
- *   3. Has no open (non-terminal) Label against it — same "still open" definition
+ *   3. Has no open (non-terminal) Container against it — same "still open" definition
  *      editPallet's DPCI-change guard already uses (`status notIn PULLED/DIVERTED/
- *      CANCELED/PURGED`, same `BLOCKED_BY_PENDING_PULL` code): once a label exists for a
+ *      CANCELED/PURGED`, same `BLOCKED_BY_PENDING_PULL` code): once a container exists for a
  *      pallet, it's already committed to an outbound pull and shouldn't be redirected to
- *      a new storage location until that pull actually happens (the label reaches PULLED)
- *      or is otherwise resolved (DIVERTED/CANCELED/PURGED) — the label doesn't need to
+ *      a new storage location until that pull actually happens (the container reaches PULLED)
+ *      or is otherwise resolved (DIVERTED/CANCELED/PURGED) — the container doesn't need to
  *      have reached PRINTED yet, AVAILABLE already counts as open.
  *   4. Has stored cartons (currentCartons > 0)
  *   5. Already stored? (informational — does not block)
@@ -67,10 +67,10 @@ export async function checkPalletEligibility(palletId: number): Promise<Eligibil
     throw Object.assign(new Error('CANCELED'), { status: 409 });
   }
 
-  const openLabelCount = await prisma.label.count({
-    where: { pid: palletId, status: { notIn: TERMINAL_LABEL_STATUSES } },
+  const openContainerCount = await prisma.container.count({
+    where: { pid: palletId, status: { notIn: TERMINAL_CONTAINER_STATUSES } },
   });
-  if (openLabelCount > 0) {
+  if (openContainerCount > 0) {
     throw Object.assign(new Error('BLOCKED_BY_PENDING_PULL'), { status: 409 });
   }
 

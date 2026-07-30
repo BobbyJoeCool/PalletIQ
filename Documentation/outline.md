@@ -138,15 +138,15 @@ Each label is assigned a pull function at generation time based on the physical 
 | FP | Full Pallet | Non-XS, non-BK locations where the pull takes **every** carton (empties the location) |
 | BK | Bulk | Locations designated as bulk storage — identified by **Level 00** in the location composite key |
 
-XS-size locations are always CA regardless of level. Pull function selection on the pull screen acts as a filter: only labels matching the selected function can be scanned in that session.
+XS-size locations are always CA regardless of level. Pull function selection on the pull screen acts as a filter: only containers matching the selected function can be scanned in that session.
 
 **Bulk (BK) implementation note:** Bulk locations are flagged by level = 00 in the `Location` composite PK. The system can identify them as bulk automatically without a separate field. BK pull logic (multi-pallet moves, different label format) is out of scope for this demo and deferred to a future phase. The data model and level-00 convention are in place; no additional code is required.
 
-### Pull Labels
+### Pull Containers
 
-- One label exists per carton being pulled. Any of the labels for a multi-carton pull can be scanned to initiate that pull's transaction — for this system, all labels for a pull behave identically and the system does not currently track which physical carton diverts to which destination store. **This is a deliberate scope decision; the data model should not preclude adding individual carton/label-level divert tracking in a future iteration.**
-- A label carries: pull function (CA/CF/FP), number of cartons, location, DPCI, batch date (date requested), purge date (7 days after batch date), and destination store.
-- **Label statuses:** Printed (valid, ready to pull), Pulled (completed), Canceled (manually canceled), Purged (past the 7-day purge date and automatically invalidated).
+- One container exists per carton being pulled. Any of the containers for a multi-carton pull can be scanned to initiate that pull's transaction — for this system, all containers for a pull behave identically and the system does not currently track which physical carton diverts to which destination store. **This is a deliberate scope decision; the data model should not preclude adding individual carton/container-level divert tracking in a future iteration.**
+- A container carries: pull function (CA/CF/FP), number of cartons, location, DPCI, batch date (date requested), purge date (7 days after batch date), and destination store.
+- **Container statuses:** Printed (valid, ready to pull), Pulled (completed), Canceled (manually canceled), Purged (past the 7-day purge date and automatically invalidated).
 
 ### Pull Screen Behavior
 
@@ -161,11 +161,11 @@ XS-size locations are always CA regardless of level. Pull function selection on 
 - Quantity in location (Pallets / Cartons / SSPs)
 - Quantity remaining after pull (Pallets / Cartons / SSPs)
 
-If the scanned label's status is not Pending, the system plays an audio alert and the message bar shows `Invalid status: {status}`. The screen does not advance to State 2 in this case.
+If the scanned container's status is not Pending, the system plays an audio alert and the message bar shows `Invalid status: {status}`. The screen does not advance to State 2 in this case.
 
 **State 3 — Verification.** Three independent fields handle pull confirmation (the old single "Alternate ID" field was split into its own UPC and Location fields in issue #82):
 
-- **Pallet ID field** (auto-focused after a label scan) — accepts only the pallet ID associated with the label's location. A mismatch triggers an audio alert and message bar text `Incorrect Pallet ID`.
+- **Pallet ID field** (auto-focused after a label scan) — accepts only the pallet ID associated with the container's location. A mismatch triggers an audio alert and message bar text `Incorrect Pallet ID`.
 - **UPC field** — accepts the item's UPC. A mismatch triggers an audio alert and message bar text `Invalid UPC`.
 - **Location field** — accepts a scanned location barcode or a manually typed location. A mismatch triggers an audio alert and message bar text `Invalid Location`. On a Full Pallet (FP) pull, see the Location Barcode Handling exception above for what happens when aisle+bin match but level doesn't.
 
@@ -175,7 +175,7 @@ On successful verification:
 
 - Quantity to pull and quantity remaining are removed from the screen.
 - Quantity in location updates to reflect the post-pull amount (Pallets / Cartons / SSPs).
-- The label status changes from Pending to Pulled.
+- The container status changes from Pending to Pulled.
 - The message bar updates to: `Last Pull {location} — {updated quantity in location}`. This persists on screen through the next label scan so the worker can verify their previous pull while already moving to the next one.
 
 ---
@@ -362,4 +362,4 @@ This is separate from each screen's own existing session-local log/history panel
 - Multi-warehouse support
 - Warehouse/aisle/location setup (seeded directly into the database instead)
 - User account creation and role assignment (seeded directly into the database instead)
-- Individual carton/label-level divert tracking within a multi-carton pull
+- Individual carton/container-level divert tracking within a multi-carton pull

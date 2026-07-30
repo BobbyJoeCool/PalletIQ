@@ -11,9 +11,11 @@ export interface UpcFieldOptions<T> {
   /** Fires on a failed resolve, in addition to the hook's own `upcInvalid` flip — for a
    *  screen-specific side effect (message-bar text, clearing other state). */
   onNotFound?: (upc: string) => void;
-  /** Fires immediately before every resolve attempt — e.g. clearing a sibling DPCI chain
-   *  and its own invalid flag (PAR/IID/ISI's existing "entering a UPC clears DPCI" rule),
-   *  or closing the numpad panel (IID's `hidePanel`). Mirrors `useDpciFields`'s
+  /** Fires immediately before every resolve attempt — its own invalid flag always resets
+   *  on the next resolve regardless; this is for a screen-specific side effect alongside
+   *  that, e.g. closing the numpad panel (IID's `hidePanel`). Does **not** clear a sibling
+   *  DPCI chain — see the class doc's own note on the established UPC/DPCI asymmetry, and
+   *  don't add that here; it goes through `onResolved` instead. Mirrors `useDpciFields`'s
    *  `onBeforeResolve`. */
   onBeforeResolve?: () => void;
 }
@@ -28,12 +30,23 @@ export interface UpcFieldOptions<T> {
  * URL params) and a `clear`.
  *
  * PIP's own "UPC field" is deliberately NOT a consumer of this hook — its UPC entry is a
- * compound `POST /api/pulls/verify` submit tied to a specific pull label (labelId +
+ * compound `POST /api/pulls/verify` submit tied to a specific pull container (containerId +
  * pullFunction + upc together), not a standalone existence check, the same "compound
  * submit" shape issue #158 already found for Pallet ID in PIP/MNP. PIP keeps its own
  * `handleUpcVerify` and bare `useNumpadField` instance untouched; its box already renders
  * through the shared `NumpadFieldBox` primitive via its own local `FieldDisplay` wrapper,
  * so there was no rendering gap to close there either.
+ *
+ * **Established convention for any screen pairing this hook with `useDpciFields` (IID,
+ * ISI, PAR today; any future screen doing the same should follow it too, direct
+ * instruction, 2026-07-30):** the two fields are asymmetric, not symmetric. Resolving a
+ * UPC backfills the sibling DPCI boxes (`dpciFields.setFromDpci(data.dpci)`, called from
+ * this hook's own `onResolved`) since DPCI is the anchor identifier everywhere else in the
+ * app; resolving a DPCI does the opposite — it clears the sibling UPC field outright
+ * (`upcFields.clear()`, from `useDpciFields`'s own `onBeforeResolve`) rather than filling
+ * it, since nothing populates a UPC back from a DPCI. Don't clear DPCI from this hook's own
+ * `onBeforeResolve` — that was IID/ISI's original (now-retired) behavior, superseded by
+ * this rule everywhere it's used.
  *
  * Only a single field, unlike `useDpciFields`'s three-box chain, so there's no
  * stale-closure/ref hazard to guard against here — `resolve` always reads the value

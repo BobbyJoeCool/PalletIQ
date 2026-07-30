@@ -17,18 +17,18 @@ test.describe('LII — Location ID Info', () => {
   });
 
   test('scanning a valid location loads the read-only detail view', async ({ page }) => {
-    await page.getByRole('button', { name: '✓ Scan Location' }).click();
+    await page.getByRole('button', { name: '✓ Valid Location' }).click();
     await expect(page.getByText('Storage Code', { exact: true })).toBeVisible();
     await expect(page.getByText('Hold', { exact: true })).toBeVisible();
   });
 
   test('an unknown location shows a not-found error', async ({ page }) => {
-    await page.getByRole('button', { name: '✗ Bad Location' }).click();
+    await page.getByRole('button', { name: '✗ Invalid Location' }).click();
     await expect(page.getByText('Location not found')).toBeVisible();
   });
 
   test('the Hold button is always visible once a location loads', async ({ page }) => {
-    await page.getByRole('button', { name: '✓ Scan Location' }).click();
+    await page.getByRole('button', { name: '✓ Valid Location' }).click();
     await expect(page.getByRole('button', { name: 'Hold', exact: true })).toBeVisible();
   });
 });

@@ -41,8 +41,8 @@ test.describe('PAR — Pallet Reinstate', () => {
     await expect(page.getByText('DPCI not found')).toBeVisible();
   });
 
-  test('"✗ Bad Location" triggers a location-not-empty error on submit', async ({ page }) => {
-    await page.getByRole('button', { name: '✗ Bad Location' }).click();
+  test('"✗ Invalid Location" triggers a location-not-empty error on submit', async ({ page }) => {
+    await page.getByRole('button', { name: '✗ Invalid Location' }).click();
     await page.getByRole('button', { name: 'Create Pallet' }).click();
     await expect(page.getByText(/is not empty — must be EMPTY to reinstate here/)).toBeVisible();
   });

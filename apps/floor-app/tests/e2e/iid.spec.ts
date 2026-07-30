@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { hardwareScan } from './helpers';
 
 /**
  * Covers IID's independent DPCI/UPC lookup fields and the not-found path.
@@ -13,31 +12,33 @@ test.describe('IID — Item ID Lookup', () => {
   });
 
   test('scanning a valid DPCI loads the read-only item detail', async ({ page }) => {
-    await page.getByRole('button', { name: '✓ Scan DPCI' }).click();
+    await page.getByRole('button', { name: '✓ Valid DPCI' }).click();
     await expect(page.getByText('Name', { exact: true })).toBeVisible();
     await expect(page.getByText('Short Description', { exact: true })).toBeVisible();
   });
 
   test('an unknown DPCI shows a not-found error and leaves the bad DPCI visible', async ({ page }) => {
-    await page.getByRole('button', { name: '✗ Bad DPCI' }).click();
+    await page.getByRole('button', { name: '✗ Invalid DPCI' }).click();
     await expect(page.getByText('Item not found')).toBeVisible();
     // v1.6.8 — the bad DPCI stays in the boxes (not cleared) so the worker can see what
     // didn't resolve, rather than the boxes reverting to "—".
     await expect(page.getByRole('button', { name: 'Dept' })).toHaveText('999');
   });
 
-  test('entering a UPC clears the DPCI fields', async ({ page }) => {
-    await page.getByRole('button', { name: '✓ Scan DPCI' }).click();
-    await expect(page.getByText('Name', { exact: true })).toBeVisible();
-
+  // DPCI/UPC Demo Scanner phase (2026-07-30): a valid UPC now backfills the DPCI boxes
+  // instead of clearing them (the established asymmetric convention — see useUpcField.ts's
+  // own doc comment) — this replaces the old "entering a UPC clears the DPCI fields" test,
+  // which asserted the now-retired behavior.
+  test('a valid UPC scan backfills the DPCI fields', async ({ page }) => {
     // DPCI is three separate fields (issue #16) — Dept/Class/Item.
     const deptField = page.getByRole('button', { name: 'Dept' });
-    await expect(deptField).not.toHaveText('—');
+    await expect(deptField).toHaveText('—');
 
     const upcField = page.locator('div.w-\\[260px\\]', { hasText: 'UPC' }).getByRole('button');
     await upcField.click();
-    await hardwareScan(page, '999999999999');
+    await page.getByRole('button', { name: '✓ Valid UPC' }).click();
 
-    await expect(deptField).toHaveText('—');
+    await expect(page.getByText('Name', { exact: true })).toBeVisible();
+    await expect(deptField).not.toHaveText('—');
   });
 });

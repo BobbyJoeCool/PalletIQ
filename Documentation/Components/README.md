@@ -64,3 +64,8 @@ Sibling components/hooks (e.g. a chrome wrapper's underlying behavior hook).
 - [`StatusBadge`](StatusBadge.md) — display
 - [`ZoneCodeBadge`](ZoneCodeBadge.md) — display
 - [`LiveId`](LiveId.md) — display + navigation
+- [`usePalletIdField`](usePalletIdField.md) — self-validating Pallet ID entry (PII)
+- [`DemoScannerBar`](DemoScannerBar.md) — Feature 9 Phase 1's generalized Pallet ID demo/test scanner
+- [`LocationDemoScannerBar`](LocationDemoScannerBar.md) — Feature 9 Phase 2's generalized Location ID demo/test scanner (WLH/LII/MNP/PAR)
+- [`ContainerDemoScannerBar`](ContainerDemoScannerBar.md) — Feature 9's CID phase generalized Container ID (Label) demo/test scanner (PIP)
+- [`ItemDemoScannerBar`](ItemDemoScannerBar.md) — Feature 9's DPCI/UPC phase generalized Item demo/test scanner (IID/ISI/PAR)

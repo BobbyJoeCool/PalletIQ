@@ -88,7 +88,7 @@ function LoginContent() {
   };
 
   /**
-   * Dev-tools control: wipes every PUT_PENDING pallet and not-yet-pulled label
+   * Dev-tools control: wipes every PUT_PENDING pallet and not-yet-pulled container
    * (AVAILABLE/PRINTED) and regenerates a fresh, randomized set of both, and unstages/
    * restages a randomized subset of every aisle with backdated "staged since" timestamps
    * — see api/functions/demo-reseed.ts for exactly what's touched. Destructive against
@@ -101,7 +101,7 @@ function LoginContent() {
     try {
       const result = await reseedTestData();
       setReseedSummary(
-        `${result.putPalletsCreated} put pallets, ${result.labelsCreated} labels, ` +
+        `${result.putPalletsCreated} put pallets, ${result.containersCreated} containers, ` +
         `${result.locationsStaged} locations staged across ${result.aislesStaged} aisles`
       );
       setReseedStatus('done');

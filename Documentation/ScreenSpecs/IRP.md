@@ -155,7 +155,7 @@ one nullable `ActivityLog.functionCode` column and populates it at the 5 relevan
 
 **Bulk and Breakpack are UI-visible but functionally inert.** `PIP` (the only pull
 screen) offers only CA/CF/FP as selectable pull functions — `BK` exists as a
-`StorageCode`/`Label.pullFunction` value in seed data but nothing scans/verifies a `BK`
+`StorageCode`/`Container.pullFunction` value in seed data but nothing scans/verifies a `BK`
 label today, and `BKP` doesn't exist as a real pull-function code anywhere outside the
 still-unapplied schema proposal. Building a real Bulk/Breakpack pull flow was
 deliberately scoped out of this version; IRP shows both rows per spec (so the 9-function

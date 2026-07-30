@@ -26,7 +26,7 @@ those props are omitted.
 
 | Name | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `onResolved` | `(locationId: string, wasScanned: boolean) => void` | yes | | Fires once a full Aisle+Bin(+Level) value resolves, by scan or by completing every non-locked manual field |
+| `onResolved` | `(locationId: string, wasScanned: boolean, demoLevel?: number) => void` | yes | | Fires once a full Aisle+Bin(+Level) value resolves, by scan, by completing every non-locked manual field, or by the built-in Demo Scanner. `demoLevel` (Feature 9, Phase 2) is populated only for a `levelOptional` demo fill (MNP) — the exact level the Demo Scanner picked, which its 6-digit value can't itself carry |
 | `autoFocus` | `boolean` | no | `true` | Auto-focuses the first non-locked field on mount |
 | `value` | `string` | no | | External prefill/clear — `''` clears all three boxes, an 8-digit string fills them directly. Also clears internal Aisle/Bin invalid state (see Data flow) |
 | `highlight` | `boolean` | no | `false` | Legacy border-only whole-group highlight, unused by any current caller |
@@ -40,6 +40,9 @@ those props are omitted.
 | `aisleInvalid` / `binInvalid` | `boolean` | no | `false` | External override — ignored for whichever box has its own internal check active |
 | `levelInvalid` | `boolean` | no | `false` | Always externally supplied — the full Level resolution stays screen-owned (see Data flow) |
 | `groupInvalid` | `boolean` | no | `false` | Whole-group wash for a caller whose failure can't be attributed to one box (WLH's whole-location lookup) |
+| `demoScanner` | `boolean` | no | `false` | **Feature 9, Phase 2.** Opts into the built-in Location ID Demo Scanner — registered via the shared footer demo-slot only while one of the three boxes has focus, mirroring `PalletIdField`'s own `demoScanner` prop. WLH/LII/MNP/PAR opt in; PIP/SDP don't — their own Location ✓/✗ buttons stay screen-owned |
+| `demoItemStorageCode` | `string` | no | | PAR's own "Wrong Storage Type" Demo Scanner option — the already-resolved item's own Storage Code, passed through to `LocationDemoScannerBar` |
+| `demoScannedPalletId` | `number` | no | | MNP's own "Consolidate" Demo Scanner option — the already-scanned pallet's own id, passed through to `LocationDemoScannerBar` |
 
 ## Output
 
@@ -64,16 +67,27 @@ Deliberately split ownership, not all-or-nothing:
   shape onto all of that would either lose real behavior or turn this component into a
   kitchen-sink API. Each caller keeps its own final resolve logic and passes `levelInvalid`
   in externally, unchanged by issue #162.
+- **Demo Scanner fills** (Feature 9, Phase 2) — `LocationDemoScannerBar` always resolves a
+  6-digit Aisle+Bin id plus the exact `level` of the row it picked (the demo endpoint never
+  returns a full 8-digit id itself), except the Invalid sentinel, already a complete
+  8-digit override with no level to splice in. `levelOptional` determines the assembly,
+  mirroring what a real scan of that length would do: deliver the 6-digit id as-is (plus
+  `demoLevel`, for MNP's Level Confirmation pre-fill) when the field accepts that;
+  otherwise splice `level` in to form a full 8-digit value before calling `onResolved`.
 
 ## Consumers
 
 - `PARPage.tsx` — full internal Aisle/Bin ownership (`checkAisle`/`checkAisleBin`, issue
-  #162); own `levelInvalid` via `checkLocation`
-- `LIIPage.tsx` — plain rendering, single external `onResolved`, no per-box props
-- `MNPPage.tsx` — `levelOptional`, no invalid-wash props (message-bar + remount instead)
-- `PIPPage.tsx` — `lockedAisle`/`lockedLevel`, `onActiveChange`, no invalid-wash props
-- `SDPPage.tsx` — `size="large"`, `onActiveChange`, no invalid-wash props
-- `WLHPage.tsx` — `groupInvalid` (the prop's own original motivating example)
+  #162); own `levelInvalid` via `checkLocation`; `demoScanner` + `demoItemStorageCode`
+- `LIIPage.tsx` — plain rendering, single external `onResolved`, no per-box props;
+  `demoScanner`
+- `MNPPage.tsx` — `levelOptional`, no invalid-wash props (message-bar + remount instead);
+  `demoScanner` + `demoScannedPalletId`
+- `PIPPage.tsx` — `lockedAisle`/`lockedLevel`, `onActiveChange`, no invalid-wash props; own
+  Location ✓/✗ buttons stay screen-owned, no `demoScanner`
+- `SDPPage.tsx` — `size="large"`, `onActiveChange`, no invalid-wash props; own Location ✓/✗
+  buttons stay screen-owned, no `demoScanner`
+- `WLHPage.tsx` — `groupInvalid` (the prop's own original motivating example); `demoScanner`
 - `STGPage.tsx` — does not use this component at all (Aisle-only, no Bin/Level concept —
   see `useAisleField`'s own doc)
 
@@ -84,3 +98,5 @@ Deliberately split ownership, not all-or-nothing:
   mirror that hook's `fetch` contract
 - [`useDpciFields`](useDpciFields.md) / [`useUpcField`](useUpcField.md) — the precedent for
   an override/prefill clearing stale internal invalid state
+- [`LocationDemoScannerBar`](LocationDemoScannerBar.md) — the component this field owns the
+  registration of (Feature 9, Phase 2)

@@ -11,7 +11,7 @@
 
 ### 2a. Single Location mode (default)
 
-3. **(v1.6.10)** The full Single Location layout renders immediately on navigating to the screen, before any location is scanned — not gated behind a resolved location (direct instruction). Three-field Aisle/Bin/Level entry (`LocationEntryFields`, auto-focused on mount), the `Location` indicator, and `HoldPanel` (Current Hold, Hold Type grid, Reason Code, Confirm Hold) are all visible from the start: `Location` shows "—" and `HoldPanel`'s Current Hold shows "—" with every action control disabled until a real location loads. **Find Held Location** and **Find Available Location** (no role gate — available to every role) render in the footer's shared demo-slot alongside `✓ Load Location`/`✗ Bad Location`, not as an in-content helper bar (WLH fix item 04).
+3. **(v1.6.10)** The full Single Location layout renders immediately on navigating to the screen, before any location is scanned — not gated behind a resolved location (direct instruction). Three-field Aisle/Bin/Level entry (`LocationEntryFields`, auto-focused on mount), the `Location` indicator, and `HoldPanel` (Current Hold, Hold Type grid, Reason Code, Confirm Hold) are all visible from the start: `Location` shows "—" and `HoldPanel`'s Current Hold shows "—" with every action control disabled until a real location loads. **(Feature 9, Phase 2)** `LocationEntryFields`' own built-in Demo Scanner (`✓ Valid Location` / `Location by Filter` / `✗ Invalid Location`) renders in the footer's shared demo-slot whenever a box has focus, replacing the screen's own former `✓ Load Location`/`✗ Bad Location`/`Find Held Location`/`Find Available Location` buttons — the retired Find Held/Available buttons are now the Filter popup's Hold axis (`Hold Any`/`Not Held`), available to every role same as before.
 4. Worker resolves a location one of three ways:
    - Types Aisle → Bin → Level in sequence (auto-advances at 3/3/2 digits; typing fewer digits and hitting OK zero-pads, e.g. "5" → "005"). **(v1.6.10)** A failed lookup no longer clears or remounts these boxes — whatever was typed stays visible so the worker can see and correct it (matches PII's v1.6.7 fix for its own Pallet ID field), instead of the old behavior of wiping all three boxes back to blank on a "Location not found" error.
    - Scans a full 8-digit barcode into any of the three boxes — resolves immediately regardless of what's already typed elsewhere.
@@ -110,8 +110,8 @@ Message Bar entries are transient (auto-managed by `MessageBarContext`, not stic
 │ │  [Review Hold / Review Release]                   │ │                   │ │
 │ └─────────────────────────────────────────────────┘ └──────────────────┘ │
 ├──────────────────────────────────────────────────────────────────────────┤
-│ Footer  (54px) — Single Location only: ✓ Load / ✗ Bad / Find Held /      │
-│                  Find Available (all via shared demo-slot) / nav          │
+│ Footer  (54px) — Single Location only: ✓ Valid / Location by Filter /    │
+│                  ✗ Invalid (built into LocationEntryFields) / nav          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -126,7 +126,7 @@ Message Bar entries are transient (auto-managed by `MessageBarContext`, not stic
 
 **Reads:**
 - `Location` (aisle, bin, level, status, holdCategory) — via `GET /api/locations/:id`, to resolve a scanned/typed/found location and to render `HoldPanel`'s Current Hold display.
-- `Location.holdCategory` (aggregate) — via `GET /api/locations/random-held` / `random-unheld`, to power the Find Held/Available helper buttons (footer demo-slot, **v1.6.10**).
+- `Location.holdCategory` (aggregate) — via `GET /api/demo/location?hold=...` (Feature 9, Phase 2's Hold axis), superseding the retired `GET /api/locations/random-held`/`random-unheld` (**v1.6.10**) the Find Held/Available helper buttons used before.
 - `Location` count by aisle/bin/level range/side — via `GET /api/locations/range-count`, to preview a Range action before commit. `startLevel`/`endLevel` query params are optional (**v1.6.10**, WLH fix item 03) — omitted entirely means every level, not a specific default range.
 
 **Writes:**
@@ -190,7 +190,7 @@ flowchart TD
 
 **Mode-switch numpad cleanup.** `WLHPage.setMode` calls `hideModeSwitchPanel()` (the shared `NumpadContext`'s `hidePanel`) before flipping the mode state, because `LocationEntryFields`' Aisle field auto-focuses on mount and would otherwise leave the numpad open and "bound" to a field that no longer exists on screen once the panel unmounts without its own cleanup.
 
-**Demo buttons are Single-Location-only.** The footer's demo slot (`✓ Load Location` / `✗ Bad Location` / `Find Held Location` / `Find Available Location`, all four now via the shared demo-slot system per **v1.6.10**) is hidden entirely in Range mode — all four act on a single resolved `locationId`, which Range mode has no equivalent of; Range's Review/Confirm flow is already fully manually testable without a shortcut.
+**Demo buttons are Single-Location-only.** `LocationEntryFields`' built-in Demo Scanner (Feature 9, Phase 2 — `✓ Valid Location` / `Location by Filter` / `✗ Invalid Location`) only ever renders while one of Single Location's three boxes has focus; Range mode doesn't render `LocationEntryFields` at all (see `RangeNumBox`'s own doc comment), so there's nothing to gate there — Range's Review/Confirm flow is already fully manually testable without a shortcut.
 
 **Hold Log is lifted state, not owned by either panel (v1.6.10).** `logEntries`/`addLogEntry` live in `WLHPage` itself, not in `RangeHoldPanel` or `HoldPanel`, since both need to write into the same list and it must survive switching between Single Location and Range. `RangeHoldPanel` takes `onLog` as a prop; the shared `HoldPanel` takes a new optional `onAction` prop it calls after a successful place/remove — WLH's Single Location branch is the only caller that passes it, so PIP/MNP's inline quick-hold panels (which also render `HoldPanel`) are unaffected and don't log anywhere. Entries are plain in-memory state (`useState`, keyed by an incrementing ref counter) — not fetched from or written to the server, and reset on navigating away from WLH.
 
@@ -210,6 +210,7 @@ flowchart TD
 
 | Date | Change |
 |---|---|
+| 2026-07-29 (Feature 9, Phase 2) | Single Location's own `✓ Load Location`/`✗ Bad Location`/`Find Held Location`/`Find Available Location` demo buttons retired — `LocationEntryFields`' built-in Demo Scanner (`✓ Valid Location` / `Location by Filter` / `✗ Invalid Location`) now owns this, per screen it's rolled out to. Find Held/Available's dedicated endpoints (`GET /api/locations/random-held`/`random-unheld`) deleted; the Filter popup's Hold axis (`Hold Any`/`Not Held`) reproduces the same queries. |
 | 2026-07-28 (Feature 10 / #161) | Range mode's Aisle field now checks real existence (`GET /api/locations/aisle-exists`, via the new shared `useAisleField` hook) — previously accepted "any number" with no existence check at all. Documented behavior addition: a nonexistent aisle now washes the box red **and** disables "Review Hold" (previously gated only on the Bin/Level range's own completeness) until corrected. |
 | 2026-07-27 (Feature 10) | Internal-only: Range mode's Start/End Bin + Start/End Level fields now live in a shared `useLocationRangeFields` hook instead of being inline in this screen — extracted even with no second consumer yet, per Feature 10's "single-use fields aren't exempt" principle. No change to documented behavior. |
 | 2026-07-27 (v1.8.0, #123) | Range Release is now hold-level priority-aware instead of blindly clearing every hold in the range. Release now requires picking a **Release Level** (2×2 grid, same shape as Place's Hold Type picker, all 4 categories) — releasing Perm clears everything at/below it; releasing Both also clears pure In/Out locations in the range; releasing In/Out against a Both location downgrades it to the opposite direction instead of releasing it outright. Downgrades require the same role threshold as fully removing the bucket being downgraded from. `releaseRangeHold`'s response/breakdown gained `downgraded`/`untouched` outcomes alongside `released`/`blocked`. |

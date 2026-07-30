@@ -23,29 +23,50 @@ export const NOT_HELD_FILTER: { OR: ({ holdCategory: null } | { holdCategory: st
 };
 
 export interface EffectiveCriteria {
-  size?: string;
-  storageCode?: string;
+  // Both always resolve to a real value or resolveEffectiveCriteria throws — see its own
+  // doc comment. Non-optional here (unlike the old shape) so a caller can't accidentally
+  // reintroduce an unfiltered search by treating either as omittable.
+  size: string;
+  storageCode: string;
   zone: number;
 }
 
 /**
  * Resolves the effective Size/Storage Code/Zone to search with for a Directed Put — the
- * SDP put hierarchy: an explicit override always wins; otherwise Size falls back to the
- * pallet's own inherited value (undefined — no filter — if it has none, i.e.
- * PUT_PENDING; Item has no equivalent classification to fall further back to). Storage
- * Code has a third tier: the pallet's own inherited value, then the Item's own intrinsic
- * Storage Code (always set) — so a pallet that's never been stored still gets a real
- * Storage Code filter on its first put, rather than none at all. Zone falls back like
- * Size but always resolves to a concrete number, defaulting to 1. Shared by directedPut
- * (the initial search) and blockPut (a Blocked Put's re-search, which must reapply the
- * exact same effective criteria).
+ * SDP put hierarchy: an explicit override always wins; otherwise Size and Storage Code
+ * each fall back to the pallet's own inherited value. Storage Code has a third tier below
+ * that: the Item's own intrinsic Storage Code (always set) — so a pallet that's never been
+ * stored still gets a real Storage Code filter on its first put. Zone falls back like
+ * Size/Storage Code but always resolves to a concrete number, defaulting to 1 — Zone is
+ * only ever a *starting preference* for `findNextLocation` (which retries from Zone 1 if
+ * nothing eligible exists at or above it), not a hard filter, so it has no failure mode
+ * the way Size/Storage Code do. Shared by directedPut (the initial search) and blockPut (a
+ * Blocked Put's re-search, which must reapply the exact same effective criteria).
+ *
+ * **Size and Storage Code are always hard, exact-match filters — direct instruction: "Both
+ * of those should ONLY accept the value that the location has, unless specifically
+ * overridden."** A pallet is expected to always carry a real Size/Storage Code by the time
+ * it reaches here (mandatory at creation — see `reinstatePallet`'s own doc comment, and
+ * every demo/seed pallet-creation path) — a pallet resolving to no Size (no override, and
+ * `pallet.size` itself null) is therefore treated as an invalid, unrecoverable-without-an-
+ * override state and rejected outright (`MISSING_SIZE`), rather than silently searching
+ * with no Size constraint at all (the previous behavior — a location's own Size stopped
+ * meaning anything the moment a null-Size pallet showed up, since it could then land
+ * anywhere). Storage Code can't hit the equivalent case — the Item-level fallback always
+ * supplies a real value — so it has no matching failure mode.
+ *
+ * @throws 409 MISSING_SIZE if Size resolves to nothing (no override, and the pallet itself
+ *   has none) — recoverable by supplying a Size override (any authenticated role can)
  */
 export function resolveEffectiveCriteria(
   overrides: { size?: string | null; storageCode?: string | null; zone?: number | null },
   pallet: { size: string | null; storageCode: string | null; zone: number | null; itemStorageCode: string },
 ): EffectiveCriteria {
+  const size = overrides.size ?? pallet.size ?? undefined;
+  if (!size) throw Object.assign(new Error('MISSING_SIZE'), { status: 409 });
+
   return {
-    size:        overrides.size        ?? pallet.size        ?? undefined,
+    size,
     storageCode: overrides.storageCode ?? pallet.storageCode ?? pallet.itemStorageCode,
     zone:        overrides.zone        ?? pallet.zone         ?? 1,
   };
@@ -64,10 +85,11 @@ export interface FoundLocation {
 }
 
 /**
- * Finds the next available location in an aisle, starting at the given zone,
- * optionally filtered by size and/or storageCode (both exact-match — the caller resolves
- * these ahead of time from an IM+ override or the pallet's own inherited Storage
- * Code/Size, see directedPut). Deterministic within a zone: highest bin first, then
+ * Finds the next available location in an aisle, starting at the given zone, always
+ * exact-match filtered by size and storageCode — never unconstrained (the caller resolves
+ * these ahead of time from an IM+/Size override, the pallet's own inherited Storage
+ * Code/Size, or the Item's own intrinsic Storage Code; see `resolveEffectiveCriteria`'s own
+ * doc comment for why this can no longer come back empty). Deterministic within a zone: highest bin first, then
  * lowest level first within that bin, before stepping down to the next-lower bin — same
  * direction Staging fills from (both work from the back of the aisle forward now).
  * Scanning the same aisle/constraints repeatedly with nothing else changing always
@@ -100,7 +122,7 @@ export interface FoundLocation {
 export async function findNextLocation(
   aisle: number,
   startZone: number,
-  opts: { size?: string; storageCode?: string; excludeStaged?: boolean },
+  opts: { size: string; storageCode: string; excludeStaged?: boolean },
 ): Promise<FoundLocation | null> {
   async function search(status: 'EMPTY' | 'STAGED', fromZone: number) {
     return prisma.location.findFirst({
@@ -109,8 +131,8 @@ export async function findNextLocation(
         status,
         ...NOT_HELD_FILTER,
         contraction: false,
-        ...(opts.size        && { size:        opts.size }),
-        ...(opts.storageCode && { storageCode: opts.storageCode }),
+        size:        opts.size,
+        storageCode: opts.storageCode,
         zone: { gte: fromZone },
       },
       // Deterministic fill order, back-to-front: highest bin first, then lowest level

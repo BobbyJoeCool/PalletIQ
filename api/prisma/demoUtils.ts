@@ -59,8 +59,8 @@ export function makePidGenerator(usedPids: Set<number> = new Set()): () => numbe
   };
 }
 
-/** Builds a Label ID string: store(4) + DPCI(9) + pid(8) + random(8) + batchDate. */
-export function genLid(storeId: number, dept: number, cls: number, item: number, pid: number, batchDate: number): string {
+/** Builds a Container ID string: store(4) + DPCI(9) + pid(8) + random(8) + batchDate. */
+export function genCid(storeId: number, dept: number, cls: number, item: number, pid: number, batchDate: number): string {
   const rnd = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
   return (
     String(storeId).padStart(4, '0') +
