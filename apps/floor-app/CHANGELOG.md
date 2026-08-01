@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.5 — 2026-08-01](#185--2026-08-01)
 - [1.8.4 — 2026-07-31](#184--2026-07-31)
 - [1.8.0 — 2026-07-26](#180--2026-07-26)
 - [1.7.0 — 2026-07-21](#170--2026-07-21)
@@ -176,6 +177,50 @@ See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the spe
 screen(s) each one touches.
 
 ---
+
+## [1.8.5] — 2026-08-01
+
+PIP's fix-and-polish pass — GitHub #188/#187/#186/#185/#183, plus two same-day follow-up
+fixes found immediately after. Full session-by-session detail:
+`DevNotes/Logs/V1.8/version-1_8_0.md` §1.2.51–§1.2.52.
+
+### 1.8.5 — Added
+
+- **Hold picker (#186):** the Hold button now offers a choice between the currently-scanned
+  container's location and the previous pull's, each shown with its own label ("Current
+  Location"/"Previous Location") and actual value — a worker often only realizes a location
+  needs holding after they've already scanned the next label.
+- **`LocationEntryFields`' locked-field mismatch messaging (#183's follow-up):** a scanned
+  value whose Aisle or Level segment disagrees with a locked box's known-correct value is now
+  caught client-side (never reaching the server) with a message naming the exact field and
+  value, e.g. `"Scanned Location incorrect Aisle (316)"`. Built into the shared component, so
+  every consumer with a locked field benefits, not just PIP.
+
+### 1.8.5 — Changed
+
+- **CID's own valid/neutral/invalid status (#188):** Pallet ID/UPC/Location are now disabled
+  until the Label field successfully verifies; a fresh scan right after a successful pull
+  (neutral → valid) no longer clears that pull's own "Last Pull ..." confirmation — only an
+  actual scan failure does.
+- **Bottom section always visible (#187):** the Location/Item/DPCI/quantity display and
+  Pallet ID/UPC/Location fields now always render (blank `—` placeholders before a label is
+  scanned) instead of being hidden until one resolves.
+- **Invalid entries wash and keep their value instead of clearing (#185):** Pallet ID, UPC,
+  and Location all now wash red and stay visible on a failed verify, so the worker can see
+  exactly what they scanned instead of re-scanning blind.
+- **Pull Function grown 1.25x, Location display recolored blue and shrunk (#186):** a
+  deliberate wash between the two rows — Location's own height reduction cancels Pull
+  Function's growth, so the section's total height is unchanged.
+
+### 1.8.5 — Fixed
+
+- **Pallet ID box didn't clear after a pull verified via Pallet ID:** a reentrant synthetic
+  Blur (fired when focus moves to the Label field on success) was re-running the same submit
+  handler a second time and silently restoring the just-verified value before React applied
+  the real clear. The box showed disabled-but-still-populated instead of empty.
+- **Location scan was overwriting the greyed-out (locked) Aisle/Level boxes:** reverted —
+  a locked box's mismatch now only appears in the message bar; the box itself keeps showing
+  its own known-correct value throughout, never swapped to the scanned wrong one.
 
 ## [1.8.4] — 2026-07-31
 

@@ -133,6 +133,29 @@ interface LocationEntryFieldsProps {
   /** MNP's own "Consolidate" Demo Scanner option — the already-scanned pallet's own id,
    *  passed through to `LocationDemoScannerBar`. Omit for every other caller. */
   demoScannedPalletId?: number;
+  /** Disables all three boxes (PIP #188 — gates Location, along with Pallet ID/UPC, on
+   *  its own CID field being in a "valid" status). A locked box is already inert on its
+   *  own; this only affects the two (or three) boxes that would otherwise be tappable.
+   *  Auto-focus is skipped while true. */
+  disabled?: boolean;
+  /**
+   * Fires instead of `onResolved` when a scanned/demo-filled full value's Aisle or Level
+   * segment doesn't match `lockedAisle`/`lockedLevel` (PIP #183's follow-up) — a locked
+   * field is always a known-correct value (the pallet's own real location), so a mismatch
+   * there is definitively wrong regardless of what the server would say; this short-
+   * circuits before ever calling `onResolved` or hitting the API. Delivers a ready-to-
+   * display message (e.g. `"Scanned Location incorrect Aisle (316)"`) so every caller gets
+   * identical phrasing for free — the message bar is the only place this surfaces; the
+   * locked box itself keeps showing its own known-correct value throughout, unchanged
+   * (direct instruction, 2026-08-01 — an earlier version of this fix instead swapped the
+   * box's own display to the scanned wrong value, which was found confusing on a greyed-out/
+   * disabled-looking box and removed). Only Aisle is checked before Level (matches every
+   * other box's own "attribute to the first/smallest checkable unit" convention) — a value
+   * wrong in both would only ever report Aisle. Omit for a caller with no locked fields at
+   * all (LII/WLH), or one content with the server's own generic mismatch response for
+   * locked fields (none currently).
+   */
+  onLockedMismatch?: (message: string) => void;
 }
 
 /**
@@ -147,13 +170,17 @@ interface LocationEntryFieldsProps {
  *
  * `lockedAisle`/`lockedLevel` let a caller fix either box to a known value instead of
  * requiring the worker to type it — the box still displays (disabled), and the locked
- * value is spliced into the resolved location alongside whatever was actually typed.
+ * value is spliced into the resolved location alongside whatever was actually typed. A
+ * full-value scan/demo-fill always splits and displays across all three boxes, including
+ * a locked one — unless it disagrees with that locked box's own known value, in which
+ * case `onLockedMismatch` fires instead of `onResolved` (issue #183).
  */
 export function LocationEntryFields({
   onResolved, autoFocus = true, value, highlight = false, onActiveChange, lockedAisle, lockedLevel, size = 'default',
   levelOptional = false, checkAisle, checkAisleBin, onAisleValidityChange, onBinValidityChange,
   aisleInvalid: externalAisleInvalid = false, binInvalid: externalBinInvalid = false, levelInvalid = false,
   groupInvalid = false, demoScanner = false, demoItemStorageCode, demoScannedPalletId,
+  disabled = false, onLockedMismatch,
 }: LocationEntryFieldsProps) {
   const { hidePanel } = useNumpad();
   // maxLength auto-advances once the fixed-length manual entry is complete (3/3/2 digits);
@@ -244,21 +271,51 @@ export function LocationEntryFields({
     setInternalBinInvalid(false);
   }
 
+  /**
+   * Handles a full-value override (an 8-digit barcode scan/demo-fill in any box, or a
+   * 6-digit one when `levelOptional` — see each handler's own doc comment below). Splits
+   * the value across the editable boxes' own internal display state so they visually show
+   * what was actually scanned (issue #183). A locked box never changes what it displays —
+   * it's a known-correct value already, so there's nothing to show — but if its segment of
+   * the scanned value disagrees with it, `onLockedMismatch` fires with a ready-to-display
+   * message and `onResolved` is never called at all (direct instruction, 2026-08-01 —
+   * surfacing the mismatch via the message bar only, not by swapping the locked box's own
+   * displayed value, which an earlier version of this fix did).
+   */
+  function resolveFullValue(v: string) {
+    hidePanel();
+    clearInternalInvalid();
+    const scannedAisle = v.slice(0, 3);
+    const scannedBin = v.slice(3, 6);
+    const scannedLevel = v.length === 8 ? v.slice(6, 8) : undefined;
+
+    // Still applied even for a box that turns out locked-mismatched below — harmless (a
+    // locked box never reads its own field's value for display, see the render below) and
+    // keeps Bin (never locked on any current screen) reflecting the scan either way.
+    aisleField.set(scannedAisle);
+    binField.set(scannedBin);
+    aisleValueRef.current = scannedAisle;
+    binValueRef.current = scannedBin;
+    if (scannedLevel != null) levelField.set(scannedLevel);
+
+    if (lockedAisle != null && scannedAisle !== lockedAisle) {
+      onLockedMismatch?.(`Scanned Location incorrect Aisle (${scannedAisle})`);
+      return;
+    }
+    if (lockedLevel != null && scannedLevel != null && scannedLevel !== lockedLevel) {
+      onLockedMismatch?.(`Scanned Location incorrect Level (${scannedLevel})`);
+      return;
+    }
+    onResolved(v, true);
+  }
+
   /** Aisle field submit: an 8-digit value is a full-barcode override; a 6-digit value is a
    *  full Aisle+Bin override when levelOptional (see the prop's doc comment); a 3-digit
    *  value advances to Bin. */
   function handleAisleConfirm(value: string) {
     const v = value.trim();
-    if (v.length === 8) {
-      hidePanel();
-      clearInternalInvalid();
-      onResolved(v, true);
-      return;
-    }
-    if (levelOptional && v.length === 6) {
-      hidePanel();
-      clearInternalInvalid();
-      onResolved(v, true);
+    if (v.length === 8 || (levelOptional && v.length === 6)) {
+      resolveFullValue(v);
       return;
     }
     if (v.length !== 3) return;
@@ -277,16 +334,8 @@ export function LocationEntryFields({
    *  resolves immediately if Level is locked or levelOptional. */
   function handleBinConfirm(value: string) {
     const v = value.trim();
-    if (v.length === 8) {
-      hidePanel();
-      clearInternalInvalid();
-      onResolved(v, true);
-      return;
-    }
-    if (levelOptional && v.length === 6) {
-      hidePanel();
-      clearInternalInvalid();
-      onResolved(v, true);
+    if (v.length === 8 || (levelOptional && v.length === 6)) {
+      resolveFullValue(v);
       return;
     }
     if (v.length !== 3) return;
@@ -318,16 +367,8 @@ export function LocationEntryFields({
    *  and resolves. */
   function handleLevelConfirm(value: string) {
     const v = value.trim();
-    if (v.length === 8) {
-      hidePanel();
-      clearInternalInvalid();
-      onResolved(v, true);
-      return;
-    }
-    if (levelOptional && v.length === 6) {
-      hidePanel();
-      clearInternalInvalid();
-      onResolved(v, true);
+    if (v.length === 8 || (levelOptional && v.length === 6)) {
+      resolveFullValue(v);
       return;
     }
     if (v.length !== 2) return;
@@ -336,11 +377,11 @@ export function LocationEntryFields({
   }
 
   useEffect(() => {
-    if (!autoFocus) return;
+    if (!autoFocus || disabled) return;
     const id = setTimeout(() => (lockedAisle != null ? focusBinField() : focusAisleField()), 50);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoFocus, lockedAisle]);
+  }, [autoFocus, lockedAisle, disabled]);
 
   // External prefill/clear (issue #69) — only acts when the caller actually passes
   // `value` (LII/WLH never do, so this is a no-op for them). `''` clears all three
@@ -386,11 +427,13 @@ export function LocationEntryFields({
       <div className={`flex flex-col gap-1 ${aisleWidth}`}>
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Aisle</span>
         {lockedAisle != null ? (
-          <div className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0A0A0A] border-2 border-[#222] opacity-50`}>
-            <span className={`font-data ${textSize} font-medium text-[#9A9A9A]`}>{lockedAisle}</span>
+          <div className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 bg-[#0A0A0A] border-[#222] opacity-50`}>
+            <span className={`font-data ${textSize} font-medium text-[#9A9A9A]`}>
+              {lockedAisle}
+            </span>
           </div>
         ) : (
-          <button type="button" onClick={focusAisleField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors ${boxClasses(aisleField.isActive, aisleInvalid)}`}>
+          <button type="button" onClick={focusAisleField} disabled={disabled} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${boxClasses(aisleField.isActive, aisleInvalid)}`}>
             <span className={`font-data ${textSize} font-medium text-white`}>{aisleField.value || <span className="text-[#444]">—</span>}</span>
             {aisleField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
           </button>
@@ -398,7 +441,7 @@ export function LocationEntryFields({
       </div>
       <div className={`flex flex-col gap-1 ${binWidth}`}>
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Bin</span>
-        <button type="button" onClick={focusBinField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors ${boxClasses(binField.isActive, binInvalid)}`}>
+        <button type="button" onClick={focusBinField} disabled={disabled} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${boxClasses(binField.isActive, binInvalid)}`}>
           <span className={`font-data ${textSize} font-medium text-white`}>{binField.value || <span className="text-[#444]">—</span>}</span>
           {binField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
         </button>
@@ -406,11 +449,13 @@ export function LocationEntryFields({
       <div className={`flex flex-col gap-1 ${levelWidth}`}>
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Level</span>
         {lockedLevel != null ? (
-          <div className={`flex items-center ${boxHeight} px-4 rounded-[10px] bg-[#0A0A0A] border-2 border-[#222] opacity-50`}>
-            <span className={`font-data ${textSize} font-medium text-[#9A9A9A]`}>{lockedLevel}</span>
+          <div className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 bg-[#0A0A0A] border-[#222] opacity-50`}>
+            <span className={`font-data ${textSize} font-medium text-[#9A9A9A]`}>
+              {lockedLevel}
+            </span>
           </div>
         ) : (
-          <button type="button" onClick={focusLevelField} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors ${boxClasses(levelField.isActive, levelInvalid)}`}>
+          <button type="button" onClick={focusLevelField} disabled={disabled} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${boxClasses(levelField.isActive, levelInvalid)}`}>
             <span className={`font-data ${textSize} font-medium text-white`}>{levelField.value || <span className="text-[#444]">—</span>}</span>
             {levelField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
           </button>

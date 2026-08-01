@@ -1,4 +1,4 @@
-import { INVALID_WASH } from '../../lib/invalidWash';
+import { INVALID_WASH, VALID_WASH } from '../../lib/invalidWash';
 
 export interface NumpadFieldBoxProps {
   /** Current field value; renders an em-dash placeholder when empty. */
@@ -18,6 +18,11 @@ export interface NumpadFieldBoxProps {
    *  the plain active-only border — invalid wins over active, same precedence as every
    *  other washed field in the app. */
   invalid?: boolean;
+  /** Applies the app-wide blue "confirmed valid" wash (PIP #188's CID 3-state status) —
+   *  takes precedence over the plain active border but loses to `invalid` (a field can't
+   *  be both at once, and a genuine error always wins). The blue background persists
+   *  through an active focus; the caret bar still renders on top of it as usual. */
+  valid?: boolean;
   /** Wrapping width class, e.g. `w-[160px]`. Applied to the label+box wrapper when a
    *  label is present (the box itself stretches to fill it), or directly to the box when
    *  there's no label. Omit to size from the parent flex layout instead. */
@@ -54,6 +59,7 @@ export function NumpadFieldBox({
   active = false,
   disabled = false,
   invalid = false,
+  valid = false,
   width,
   boxClass,
   valueClass,
@@ -69,7 +75,7 @@ export function NumpadFieldBox({
       onClick={onFocus}
       disabled={disabled}
       className={`flex items-center ${centered ? 'justify-center' : ''} ${boxClass} border-2 disabled:opacity-40 transition-colors ${!hasWrapper && width ? width : ''} ${
-        invalid ? INVALID_WASH : active && !disabled ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
+        invalid ? INVALID_WASH : valid ? VALID_WASH : active && !disabled ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
       }`}
     >
       <span className={`font-data text-white ${valueClass}`}>

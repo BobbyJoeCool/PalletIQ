@@ -64,8 +64,12 @@ const QTY_COLS: { key: keyof Qty; label: string }[] = [
  * what a worker is counting out by hand on most pulls, so it's the number most worth
  * making easy to read at a glance; a depleted-Carton cell still falls back to the same
  * red-on-zero warning as every other column.
+ *
+ * `current`/`pull` accept `null` (issue #187 — this table now always renders, even before
+ * a label is scanned) and render a blank placeholder per cell rather than a misleading
+ * literal `0`, which would read as "zero units" instead of "nothing loaded yet."
  */
-function QtyTable({ current, pull, remaining, remainingZero }: { current: Qty; pull: Qty; remaining: Qty | null; remainingZero?: boolean }) {
+function QtyTable({ current, pull, remaining, remainingZero }: { current: Qty | null; pull: Qty | null; remaining: Qty | null; remainingZero?: boolean }) {
   return (
     <div className="py-1.5 border-b border-[#1A1A1A]">
       <div className="grid grid-cols-[160px_repeat(3,1fr)] items-center gap-x-2 gap-y-1">
@@ -80,7 +84,7 @@ function QtyTable({ current, pull, remaining, remainingZero }: { current: Qty; p
             key={key}
             className={`font-data font-semibold text-center ${key === 'cartons' ? 'text-[27px] text-[#5B9BD5]' : 'text-[20px] text-white'}`}
           >
-            {current[key]}
+            {current ? current[key] : <span className="text-[#444]">—</span>}
           </span>
         ))}
 
@@ -90,30 +94,26 @@ function QtyTable({ current, pull, remaining, remainingZero }: { current: Qty; p
             key={key}
             className={`font-data font-semibold text-center ${key === 'cartons' ? 'text-[27px] text-[#5B9BD5]' : 'text-[20px] text-white'}`}
           >
-            {pull[key]}
+            {pull ? pull[key] : <span className="text-[#444]">—</span>}
           </span>
         ))}
 
-        {remaining && (
-          <>
-            <div className="col-span-4 border-t border-[#333] my-0.5" />
-            <span className="font-ui text-[15px] font-semibold text-[#9A9A9A] uppercase tracking-wider">Remaining</span>
-            {QTY_COLS.map(({ key }) => {
-              const depleted = remainingZero && remaining[key] === 0;
-              const emphasized = key === 'cartons';
-              return (
-                <span
-                  key={key}
-                  className={`font-data font-bold text-center ${emphasized ? 'text-[29px]' : 'text-[22px]'} ${
-                    depleted ? 'text-[#CC0000]' : emphasized ? 'text-[#5B9BD5]' : 'text-white'
-                  }`}
-                >
-                  {remaining[key]}
-                </span>
-              );
-            })}
-          </>
-        )}
+        <div className="col-span-4 border-t border-[#333] my-0.5" />
+        <span className="font-ui text-[15px] font-semibold text-[#9A9A9A] uppercase tracking-wider">Remaining</span>
+        {QTY_COLS.map(({ key }) => {
+          const depleted = remaining != null && remainingZero && remaining[key] === 0;
+          const emphasized = key === 'cartons';
+          return (
+            <span
+              key={key}
+              className={`font-data font-bold text-center ${emphasized ? 'text-[29px]' : 'text-[22px]'} ${
+                depleted ? 'text-[#CC0000]' : emphasized ? 'text-[#5B9BD5]' : 'text-white'
+              }`}
+            >
+              {remaining ? remaining[key] : <span className="text-[#444]">—</span>}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
@@ -133,6 +133,8 @@ function QtyTable({ current, pull, remaining, remainingZero }: { current: Qty; p
  * @param invalid - Applies the app-wide red-wash treatment (see `src/lib/invalidWash.ts`)
  *   instead of the plain active-only border — invalid wins over active, same precedence as
  *   every other field in the app.
+ * @param valid - Applies the app-wide blue "confirmed valid" wash (issue #188's CID
+ *   3-state status) — the Label field's own use case, currently.
  */
 function FieldDisplay({
   label,
@@ -142,6 +144,7 @@ function FieldDisplay({
   disabled = false,
   compact = false,
   invalid = false,
+  valid = false,
 }: {
   label: string;
   value: string;
@@ -150,6 +153,7 @@ function FieldDisplay({
   disabled?: boolean;
   compact?: boolean;
   invalid?: boolean;
+  valid?: boolean;
 }) {
   return (
     <NumpadFieldBox
@@ -159,6 +163,7 @@ function FieldDisplay({
       active={active}
       disabled={disabled}
       invalid={invalid}
+      valid={valid}
       boxClass={compact ? 'h-[60px] px-4 rounded-[12px]' : 'h-[72px] px-5 rounded-[12px]'}
       valueClass={compact ? 'text-[26px] font-medium tracking-[0.04em]' : 'text-[32px] font-medium tracking-[0.04em]'}
       caretClass={compact ? 'w-[3px] h-[30px]' : 'w-[3px] h-[38px]'}
@@ -169,6 +174,18 @@ function FieldDisplay({
 // ── PIP Screen ───────────────────────────────────────────────────────────────
 
 type ScreenState = 'ready' | 'verifying';
+
+/**
+ * CID's own 3-state status (issue #188) — distinct from any individual field's plain
+ * invalid wash: 'neutral' is "no information" (fresh load, or just reset after a
+ * successful pull verification); 'valid' is a currently-loaded, verified label; 'invalid'
+ * is a scan/entry that failed. Pallet ID/UPC/Location are only enterable while 'valid'
+ * (see `disabled={cidStatus !== 'valid'}` at each field below) — there's nothing to verify
+ * against otherwise. Neutral→valid deliberately does *not* clear the message bar (so a
+ * fresh label scan right after a successful pull doesn't stomp that pull's own "Last Pull
+ * ... count" confirmation); invalid→valid does, since there's a stale error to replace.
+ */
+type CidStatus = 'valid' | 'neutral' | 'invalid';
 
 /**
  * Pallet ID Pull (PIP) screen.
@@ -246,6 +263,51 @@ function LevelCorrectionDialog({
   );
 }
 
+/**
+ * Small anchored popup (issue #186) offering a choice between the currently-scanned
+ * container's location and the previous pull's — a worker's normal flow is to scan
+ * Pallet ID to verify and immediately scan the next label while the scanner's still in
+ * hand, so they often only realize a location needs holding after they've already moved
+ * on to the next one. Only ever rendered by its caller when both locations exist
+ * (`openHold` skips straight to `HoldPanel` when there's just one, since there's nothing
+ * to pick between). Tap-outside-closes, matching every other lightweight anchored popup
+ * in the app (e.g. `WorkstationExcludeFilter`).
+ */
+function HoldLocationPicker({
+  currentLocation, previousLocation, onPick, onClose,
+}: { currentLocation: string; previousLocation: string; onPick: (locationId: string) => void; onClose: () => void }) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onPointerDown(e: PointerEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) onClose();
+    }
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [onClose]);
+
+  return (
+    <div ref={wrapperRef} className="absolute z-50 top-full right-0 mt-1 w-max min-w-[220px] rounded-[10px] bg-[#0D0D0D] border border-[#3A3A3A] shadow-2xl overflow-hidden">
+      <button
+        type="button"
+        onClick={() => onPick(currentLocation)}
+        className="w-full flex flex-col items-start gap-0.5 px-4 py-2.5 text-left hover:bg-[#1A1A1A] transition-colors border-b border-[#1A1A1A]"
+      >
+        <span className="font-ui text-[12px] font-medium text-[#9A9A9A] uppercase tracking-wider">Current Location</span>
+        <LiveId type="location" id={currentLocation} className="!text-[18px] !font-semibold" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onPick(previousLocation)}
+        className="w-full flex flex-col items-start gap-0.5 px-4 py-2.5 text-left hover:bg-[#1A1A1A] transition-colors"
+      >
+        <span className="font-ui text-[12px] font-medium text-[#9A9A9A] uppercase tracking-wider">Previous Location</span>
+        <LiveId type="location" id={previousLocation} className="!text-[18px] !font-semibold" />
+      </button>
+    </div>
+  );
+}
+
 export function PIPPage() {
   const { token } = useAuth();
   const { setMessage, clearMessage } = useMessageBar();
@@ -257,18 +319,18 @@ export function PIPPage() {
   // PIPContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern.
   const { containerData, setContainerData } = usePIP();
   const [loading, setLoading] = useState(false);
-  // Red-wash invalid state (App-Wide item 9, v1.7.0) — only the Label field is a candidate
-  // here: it's the one field on this screen that deliberately keeps a failed value visible
-  // (see handleContainerScan's own comments) rather than clearing-and-refocusing atomically like
-  // PID/UPC/Location do, so it's the only one with a genuinely visible "bad value sitting in
-  // the box" moment to wash. PID/UPC/Location clear their own value before the next render
-  // on every failure path, so a wash flag there would never actually be visible against a
-  // non-empty box — left as message-bar-only, consistent with that existing design.
-  const [containerInvalid, setContainerInvalid] = useState(false);
+  // CID's 3-state status (issue #188 — see the CidStatus type doc above). Also gates
+  // Pallet ID/UPC/Location: each is `disabled` unless this is 'valid' (nothing to verify
+  // against otherwise, and issue #187 now renders them even before a label is scanned).
+  const [cidStatus, setCidStatus] = useState<CidStatus>('neutral');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   // Quick-hold panel (WLH.md: "surfaced as a quick-action on PIP, SDP, and MNP" —
-  // inline, not a full navigation) for the scanned container's resolved location.
+  // inline, not a full navigation). `holdLocationId` is whichever location the worker
+  // actually picked (current or previous — issue #186); `holdPickerOpen` is the small
+  // current-vs-previous popup, shown only when both exist (see openHold below).
   const [holdOpen, setHoldOpen] = useState(false);
+  const [holdPickerOpen, setHoldPickerOpen] = useState(false);
+  const [holdLocationId, setHoldLocationId] = useState<string | null>(null);
   // Pending FP level-mismatch confirmation (issue #49) — set by handleLocationVerify on
   // LEVEL_MISMATCH, resolved by confirmLevelMismatch/cancelLevelMismatch.
   const [levelMismatch, setLevelMismatch] = useState<{ scannedLevel: number; actualLevel: number; locationValue: string } | null>(null);
@@ -277,6 +339,17 @@ export function PIPPage() {
   const pidFieldRef   = useRef<PalletIdFieldHandle>(null);
   const [pidValue, setPidValue] = useState('');
   const [pidActive, setPidActive] = useState(false);
+  // Invalid-wash flags (issue #185) — an unsuccessful Pallet ID/UPC/Location attempt now
+  // washes red and keeps the entered value on screen (matching the Label field's own
+  // already-correct behavior) instead of silently clearing it; cleared on the next
+  // successful pull (onPullSuccess) or a fresh Label scan (which resets the whole
+  // verifying attempt regardless of what was mid-typed). Location's is a single flag
+  // (not per-box) since a server-side ALTERNATE_MISMATCH doesn't attribute the failure to
+  // one specific box — a *locked* box's own mismatch is handled entirely inside
+  // LocationEntryFields itself instead (see handleLocationLockedMismatch below).
+  const [pidInvalid, setPidInvalid] = useState(false);
+  const [upcInvalid, setUpcInvalid] = useState(false);
+  const [locationInvalid, setLocationInvalid] = useState(false);
   // Issue #82 — UPC and Location replace the old single Alternate ID field; each is
   // independently scannable/enterable (one-active-field-at-a-time, same as everywhere
   // else), and confirming either alone immediately attempts a verify with just that value.
@@ -285,7 +358,9 @@ export function PIPPage() {
   // rather than a useNumpadField() — it manages its own three internal fields, so state
   // that used to live on a single field object is tracked separately here. `locationActive`
   // mirrors the other fields' `.isActive` for the demo-footer gating below; `locationEntryKey`
-  // forces a full remount (clearing all three boxes) on error/retry/reset, and
+  // forces a full remount (clearing all three boxes) — now only used to clear on a genuine
+  // reset (a fresh Label scan or a successful pull, issue #185 — no longer on a plain
+  // invalid attempt, which washes+keeps its value like every other field instead), and
   // `locationAutoFocusRef` is read by that fresh instance's `autoFocus` prop — mutating it
   // just before bumping the key is what lets a remount optionally auto-focus Aisle again,
   // matching how PID/UPC explicitly refocus themselves after an error.
@@ -306,10 +381,12 @@ export function PIPPage() {
   const loadingRef       = useRef(loading);
   const containerDataRef = useRef(containerData);
   const pullFunctionRef  = useRef(pullFunction);
+  const cidStatusRef     = useRef(cidStatus);
   screenStateRef.current  = screenState;
   loadingRef.current      = loading;
   containerDataRef.current = containerData;
   pullFunctionRef.current = pullFunction;
+  cidStatusRef.current    = cidStatus;
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -329,11 +406,14 @@ export function PIPPage() {
       setPidValue('');
       upcField.clear();
       resetLocationField(false);
+      setPidInvalid(false);
+      setUpcInvalid(false);
+      setLocationInvalid(false);
     }
     setPullFunction(fn);
     setScreenState('ready');
     containerField.clear();
-    setContainerInvalid(false);
+    setCidStatus('neutral');
     setTimeout(() => focusContainerField(), 50);
   }
 
@@ -389,6 +469,9 @@ export function PIPPage() {
       setPidValue('');
       upcField.clear();
       resetLocationField(false);
+      setPidInvalid(false);
+      setUpcInvalid(false);
+      setLocationInvalid(false);
     }
     setLoading(true);
     try {
@@ -399,13 +482,17 @@ export function PIPPage() {
         // re-focusing (not clearing) still arms a fresh start for the next input, so a
         // manual retry replaces rather than appends onto the stale value.
         focusContainerField();
-        setContainerInvalid(true);
+        setCidStatus('invalid');
         setMessage({ type: 'error', text: `Wrong function — label requires ${data.container.pullFunction}` });
         return;
       }
       setContainerData(data);
-      setContainerInvalid(false);
-      clearMessage();
+      // Issue #188 — only clear the message bar when replacing an actual error (invalid →
+      // valid); a fresh scan landing right after a successful pull (neutral → valid) must
+      // NOT stomp that pull's own "Last Pull ... count" confirmation, which is exactly the
+      // bug this status was introduced to fix.
+      if (cidStatusRef.current === 'invalid') clearMessage();
+      setCidStatus('valid');
       if (priorState !== 'verifying') {
         setScreenState('verifying');
         // PID field auto-focuses via the verifying effect.
@@ -420,7 +507,7 @@ export function PIPPage() {
       // the Wrong Function branch above for why focusContainerField() (not .clear()) is what
       // arms a fresh start for the next input.
       focusContainerField();
-      setContainerInvalid(true);
+      setCidStatus('invalid');
       if (code === 'NOT_FOUND') {
         setMessage({ type: 'error', text: 'Label not found' });
       } else {
@@ -433,13 +520,27 @@ export function PIPPage() {
 
   /**
    * Submit handler for the Pallet ID field. Calls POST /api/pulls/verify with palletId.
-   * On mismatch (PALLET_MISMATCH), clears and re-focuses the PID field for retry.
-   * On success, calls onPullSuccess.
+   * On mismatch (PALLET_MISMATCH), washes the field red and keeps the entered value
+   * visible (issue #185) — re-focusing (not clearing) still arms a fresh start for the
+   * next input, same as the Label field's own established pattern. On success, calls
+   * onPullSuccess.
+   *
+   * The `loadingRef.current` guard is checked *before* `setPidValue` (not after, unlike
+   * a plain early-return order would suggest) — this call can legitimately re-enter itself
+   * while the original call's own `await apiFetch` is still pending: `onPullSuccess` moves
+   * focus to the Label field, and `useNumpadField`'s own submittingRef guard against a
+   * reentrant Blur only covers this handler's *synchronous* prefix (up to its first
+   * `await`), not the whole async operation — so that focus change's synthetic Blur at PID
+   * (the field being left) re-fires this same handler a second time, synchronously, before
+   * `onPullSuccess`'s own `setPidValue('')` has actually been applied. Setting `pidValue`
+   * unconditionally on that reentrant call would silently overwrite the pending clear with
+   * the just-verified value again — the PID box never visually clears. Checking the guard
+   * first makes that reentrant call a true no-op instead.
    */
   async function handlePidVerify(value: string) {
     const v = value.trim();
-    setPidValue(v);
     if (!v || loadingRef.current) return;
+    setPidValue(v);
     const ld = containerDataRef.current;
     if (!ld) return;
     // Read synchronously, before the await below — isScanningRef.current is still true
@@ -457,7 +558,7 @@ export function PIPPage() {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
-      setPidValue('');
+      setPidInvalid(true);
       pidFieldRef.current?.focus();
       if (code === 'PALLET_MISMATCH') {
         setMessage({ type: 'error', text: 'Incorrect Pallet ID' });
@@ -473,8 +574,9 @@ export function PIPPage() {
 
   /**
    * Submit handler for the UPC field. Calls POST /api/pulls/verify with upc.
-   * On mismatch (ALTERNATE_MISMATCH), clears and re-focuses the UPC field for retry.
-   * On success, calls onPullSuccess.
+   * On mismatch (ALTERNATE_MISMATCH), washes the field red and keeps the entered value
+   * visible (issue #185), re-focusing (not clearing) for a fresh retry — same pattern as
+   * Pallet ID. On success, calls onPullSuccess.
    */
   async function handleUpcVerify(value: string) {
     const v = value.trim();
@@ -494,7 +596,7 @@ export function PIPPage() {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
-      upcField.clear();
+      setUpcInvalid(true);
       upcField.focus(handleUpcVerify);
       if (code === 'ALTERNATE_MISMATCH') {
         setMessage({ type: 'error', text: 'Invalid UPC' });
@@ -518,8 +620,11 @@ export function PIPPage() {
    * both the pull function and entry method (see verifyPull's docstring): scanned CA needs
    * a full match, scanned CF only Aisle+Bin, scanned FP a full match with a level-mismatch
    * recovery popup, hand-entered CA/FP a full match with no popup. On mismatch
-   * (ALTERNATE_MISMATCH), clears and re-focuses Location for retry. On success, calls
-   * onPullSuccess.
+   * (ALTERNATE_MISMATCH), washes the boxes red and keeps whatever was entered (issue
+   * #185) — this is the server-side "the whole value doesn't match" case, which can't be
+   * attributed to one specific box, unlike a locked-field mismatch (see
+   * handleLocationLockedMismatch, which never reaches the server at all). On success,
+   * calls onPullSuccess.
    */
   async function handleLocationVerify(value: string, wasScanned: boolean) {
     const v = value.trim();
@@ -544,7 +649,7 @@ export function PIPPage() {
         }
       }
       playAlert('error');
-      resetLocationField(true);
+      setLocationInvalid(true);
       if (code === 'ALTERNATE_MISMATCH') {
         setMessage({ type: 'error', text: 'Invalid Location' });
       } else if (code === 'WRONG_PULL_FUNCTION') {
@@ -555,6 +660,18 @@ export function PIPPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  /**
+   * Fires when LocationEntryFields itself detects a scanned value's Aisle or Level
+   * segment disagreeing with what's locked (issue #183's follow-up) — never reaches the
+   * server at all, since a locked field is always a known-correct value already. The
+   * component washes the specific mismatched box and shows what was actually scanned on
+   * its own internally; this just surfaces the message it hands back.
+   */
+  function handleLocationLockedMismatch(message: string) {
+    playAlert('error');
+    setMessage({ type: 'error', text: message });
   }
 
   /**
@@ -581,7 +698,7 @@ export function PIPPage() {
       onPullSuccess(result.location, ld.container.quantity, result.updatedQuantity);
     } catch {
       playAlert('error');
-      resetLocationField(true);
+      setLocationInvalid(true);
       setMessage({ type: 'error', text: 'Verification failed — please try again' });
     } finally {
       setLoading(false);
@@ -592,7 +709,7 @@ export function PIPPage() {
   function cancelLevelMismatch() {
     setLevelMismatch(null);
     playAlert('error');
-    resetLocationField(true);
+    setLocationInvalid(true);
     setMessage({ type: 'error', text: 'Invalid Location' });
   }
 
@@ -620,10 +737,15 @@ export function PIPPage() {
     setContainerData(null);
     setScreenState('ready');
     containerField.clear();
-    setContainerInvalid(false);
+    // Issue #188 — 'neutral', not cleared-and-forgotten: a fresh scan landing right after
+    // this (neutral → valid) must not stomp the success message just set above.
+    setCidStatus('neutral');
     setPidValue('');
     upcField.clear();
     resetLocationField(false);
+    setPidInvalid(false);
+    setUpcInvalid(false);
+    setLocationInvalid(false);
     focusContainerField();
   }
 
@@ -762,6 +884,37 @@ export function PIPPage() {
   const locationLockedAisle = containerData?.location.id ? containerData.location.id.slice(0, 3) : undefined;
   const locationLockedLevel = pullFunction === 'CF' && containerData?.location.id ? containerData.location.id.slice(6, 8) : undefined;
 
+  // Issue #186 — the currently-scanned container's location, and the most recently
+  // completed pull's location this session (history is prepended, so [0] is newest).
+  // Either, both, or neither may exist at any given moment.
+  const currentHoldLocation = containerData?.location.id ?? null;
+  const previousHoldLocation = history[0]?.location ?? null;
+
+  /**
+   * Opens Hold for whichever location makes sense: a small picker when both a current and
+   * a previous location exist (the worker may need either — see the Hold button's own
+   * comment below), or straight to HoldPanel when only one does. A worker realizing they
+   * need to hold a location only after having already scanned the next label is the
+   * common case this exists for.
+   */
+  function openHold() {
+    if (currentHoldLocation && previousHoldLocation) {
+      setHoldPickerOpen(true);
+      return;
+    }
+    const only = currentHoldLocation ?? previousHoldLocation;
+    if (!only) return;
+    setHoldLocationId(only);
+    setHoldOpen(true);
+  }
+
+  /** Worker picked one of the two locations from the Hold picker popup. */
+  function pickHoldLocation(locationId: string) {
+    setHoldLocationId(locationId);
+    setHoldPickerOpen(false);
+    setHoldOpen(true);
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -770,22 +923,40 @@ export function PIPPage() {
       <div className="flex-1 flex flex-col p-5 gap-3 overflow-y-auto">
 
         {/* Pull Function — persistent dropdown, always reachable; changing it mid-
-            verification discards the unverified label (handlePullFunctionChange). */}
+            verification discards the unverified label (handlePullFunctionChange). Grown
+            1.25x (issue #186), matching Hold's own growth, to read closer to the size of
+            the Scan Label entry box below. */}
         <div className="flex items-center gap-3">
           <Dropdown
             label="Pull Function"
             value={pullFunction}
+            size="large"
             options={PULL_FUNCTIONS.map(fn => ({ value: fn.code, label: `${fn.code} — ${fn.desc}` }))}
             onChange={handlePullFunctionChange}
           />
-          {containerData?.location.id && (
-            <button
-              type="button"
-              onClick={() => setHoldOpen(true)}
-              className="ml-auto h-[38px] px-4 rounded-[8px] font-ui text-[14px] font-medium border border-[#3A3A3A] text-[#9A9A9A] hover:border-[#555] hover:text-white transition-colors"
-            >
-              Hold
-            </button>
+          {/* Issue #186 — red, 1.25x larger (was easy to lose on screen), and now offers a
+              choice of the currently-scanned location or the previous pull's: the normal
+              flow is scan-PID-to-verify then immediately scan the next label while the
+              scanner's still in hand, so a worker often only realizes a location needs
+              holding after they've already moved on to the next one. */}
+          {(currentHoldLocation || previousHoldLocation) && (
+            <div className="relative ml-auto">
+              <button
+                type="button"
+                onClick={openHold}
+                className="h-[48px] px-6 rounded-[10px] font-ui text-[16px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white transition-colors"
+              >
+                Hold
+              </button>
+              {holdPickerOpen && currentHoldLocation && previousHoldLocation && (
+                <HoldLocationPicker
+                  currentLocation={currentHoldLocation}
+                  previousLocation={previousHoldLocation}
+                  onPick={pickHoldLocation}
+                  onClose={() => setHoldPickerOpen(false)}
+                />
+              )}
+            </div>
           )}
         </div>
 
@@ -795,71 +966,87 @@ export function PIPPage() {
           value={containerField.value}
           onFocus={focusContainerField}
           active={containerField.isActive}
-          invalid={containerInvalid}
+          invalid={cidStatus === 'invalid'}
+          valid={cidStatus === 'valid'}
         />
 
-        {/* State 2 — scan data + verification */}
-        {screenState === 'verifying' && containerData && (
-          <>
-                <div className="flex flex-col mt-1">
-                  <DataRow label="Location" dense labelWidth={160}>
-                    {containerData.location.id
-                      ? (
-                        <span className="inline-flex px-3 py-1 rounded-[10px] bg-[#CC0000]/10 border-2 border-[#CC0000]/40">
-                          <LiveId type="location" id={containerData.location.id} className="!text-[46px] !font-bold !text-[#FF1A1A]" />
-                        </span>
-                      )
-                      : <span className="text-[#9A9A9A]">—</span>}
-                  </DataRow>
-                  <DataRow label="Item" dense labelWidth={160}>{containerData.container.descShort}</DataRow>
-                  <DataRow label="DPCI" dense labelWidth={160}><LiveId type="dpci" id={containerData.container.dpci} /></DataRow>
-                  <QtyTable
-                    current={containerData.pallet.quantity}
-                    pull={containerData.container.quantity}
-                    remaining={remaining}
-                    remainingZero={remainingZero}
-                  />
-                </div>
+        {/* Issue #187 — always rendered now, not gated behind a scanned label; every value
+            below falls back to a blank placeholder while containerData is null. Issue
+            #188 — Pallet ID/UPC/Location are each `disabled` unless the Label field above
+            is 'valid': there's nothing loaded to verify against otherwise. */}
+        <div className="flex flex-col mt-1">
+          <DataRow label="Location" dense labelWidth={160}>
+            {containerData?.location.id
+              ? (
+                // Issue #186 — blue (was red), font shrunk to 0.8x (46px→37px) to help
+                // make room for Pull Function/Hold's own 1.25x growth above. Vertical
+                // padding tuned (not a plain 0.8x of the old py-1) so the two rows'
+                // combined height change nets to ~0 — measured live: row 1 +11px,
+                // this row -11.5px, per the explicit "should be a wash" requirement.
+                <span className="inline-flex px-2.5 py-[5px] rounded-[8px] bg-[#3A6BB0]/10 border-2 border-[#3A6BB0]/40">
+                  <LiveId type="location" id={containerData.location.id} className="!text-[37px] !font-bold !text-[#5B9BD5]" />
+                </span>
+              )
+              : <span className="text-[#9A9A9A]">—</span>}
+          </DataRow>
+          <DataRow label="Item" dense labelWidth={160}>
+            {containerData?.container.descShort ?? <span className="text-[#9A9A9A]">—</span>}
+          </DataRow>
+          <DataRow label="DPCI" dense labelWidth={160}>
+            {containerData ? <LiveId type="dpci" id={containerData.container.dpci} /> : <span className="text-[#9A9A9A]">—</span>}
+          </DataRow>
+          <QtyTable
+            current={containerData?.pallet.quantity ?? null}
+            pull={containerData?.container.quantity ?? null}
+            remaining={remaining}
+            remainingZero={remainingZero}
+          />
+        </div>
 
-                <div className="flex flex-col gap-2 mt-1">
-                  <PalletIdField
-                    ref={pidFieldRef}
-                    label="Pallet ID"
-                    value={pidValue}
-                    onChange={handlePidVerify}
-                    boxClass="h-[72px] px-5 rounded-[12px]"
-                    valueClass="text-[32px] font-medium tracking-[0.04em]"
-                    caretClass="w-[3px] h-[38px]"
-                    onActiveChange={setPidActive}
-                  />
-                  {/* Issue #82 — UPC and Location, side by side, replacing the old combined
-                      Alternate ID field. Each is independently scannable/enterable; confirming
-                      either alone immediately attempts a verify with just that value. */}
-                  <div className="flex items-end gap-4">
-                    <div className="flex-1">
-                      <FieldDisplay
-                        label="UPC"
-                        value={upcField.value}
-                        onFocus={focusUpcField}
-                        active={upcField.isActive}
-                      />
-                    </div>
-                    <div className="w-px self-stretch bg-[#2A2A2A]" />
-                    <div className="flex flex-col gap-1">
-                      <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Location</span>
-                      <LocationEntryFields
-                        key={locationEntryKey}
-                        autoFocus={locationAutoFocusRef.current}
-                        onResolved={handleLocationVerify}
-                        onActiveChange={setLocationActive}
-                        lockedAisle={locationLockedAisle}
-                        lockedLevel={locationLockedLevel}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
+        <div className="flex flex-col gap-2 mt-1">
+          <PalletIdField
+            ref={pidFieldRef}
+            label="Pallet ID"
+            value={pidValue}
+            onChange={handlePidVerify}
+            boxClass="h-[72px] px-5 rounded-[12px]"
+            valueClass="text-[32px] font-medium tracking-[0.04em]"
+            caretClass="w-[3px] h-[38px]"
+            onActiveChange={setPidActive}
+            disabled={cidStatus !== 'valid'}
+            invalid={pidInvalid}
+          />
+          {/* Issue #82 — UPC and Location, side by side, replacing the old combined
+              Alternate ID field. Each is independently scannable/enterable; confirming
+              either alone immediately attempts a verify with just that value. */}
+          <div className="flex items-end gap-4">
+            <div className="flex-1">
+              <FieldDisplay
+                label="UPC"
+                value={upcField.value}
+                onFocus={focusUpcField}
+                active={upcField.isActive}
+                disabled={cidStatus !== 'valid'}
+                invalid={upcInvalid}
+              />
+            </div>
+            <div className="w-px self-stretch bg-[#2A2A2A]" />
+            <div className="flex flex-col gap-1">
+              <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Location</span>
+              <LocationEntryFields
+                key={locationEntryKey}
+                autoFocus={locationAutoFocusRef.current}
+                onResolved={handleLocationVerify}
+                onActiveChange={setLocationActive}
+                lockedAisle={locationLockedAisle}
+                lockedLevel={locationLockedLevel}
+                disabled={cidStatus !== 'valid'}
+                groupInvalid={locationInvalid}
+                onLockedMismatch={handleLocationLockedMismatch}
+              />
+            </div>
+          </div>
+        </div>
 
         {loading && (
           <div className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Working…</div>
@@ -891,9 +1078,9 @@ export function PIPPage() {
         )}
       />
 
-      {holdOpen && containerData?.location.id && (
+      {holdOpen && holdLocationId && (
         <ModalOverlay backdropClassName="p-8" padding="p-6" cardClassName="max-h-full overflow-y-auto" shadow={false}>
-          <HoldPanel locationId={containerData.location.id} onDone={() => setHoldOpen(false)} showClose />
+          <HoldPanel locationId={holdLocationId} onDone={() => { setHoldOpen(false); setHoldLocationId(null); }} showClose />
         </ModalOverlay>
       )}
 

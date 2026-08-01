@@ -32,6 +32,7 @@ opinions about commit semantics.
 | `active` | `boolean` | no | `false` | Shows the blinking caret + red border |
 | `disabled` | `boolean` | no | `false` | |
 | `invalid` | `boolean` | no | `false` | App-wide red wash — wins over active, same precedence as every other washed field |
+| `valid` | `boolean` | no | `false` | **Issue #188 (PIP CID status).** App-wide blue "confirmed valid" wash — takes precedence over the plain active border but loses to `invalid` (a field can't be both, and a genuine error always wins). The caret still renders on top of it as usual |
 | `width` | `string` | no | — | Wrapping width class; applied to the label+box wrapper when a label is present, or directly to the box otherwise |
 | `boxClass` | `string` | yes | — | Height/padding/corner-radius, e.g. `h-[72px] px-5 rounded-[12px]` — no default, every screen sizes differently |
 | `valueClass` | `string` | yes | — | Value text classes, e.g. `text-[32px] font-medium tracking-[0.04em]` |

@@ -9,3 +9,13 @@
  * single box's own border/background classes for an individual field wash.
  */
 export const INVALID_WASH = 'bg-[#CC0000]/30 border-[#CC0000]';
+
+/**
+ * Shared translucent-blue "this field is confirmed valid" background wash (PIP #188 —
+ * CID's 3-state valid/neutral/invalid status). 90%-transparent blue, mirroring
+ * `INVALID_WASH`'s own construction — a solid border plus a low-opacity fill of the same
+ * color, applied directly to a field's own border/background classes. Not a group-wash
+ * variant (no `INVALID_WASH`-style "wrapping div" form) since every current consumer washes
+ * a single box, not several as one unit.
+ */
+export const VALID_WASH = 'bg-[#3A6BB0]/10 border-[#3A6BB0]';

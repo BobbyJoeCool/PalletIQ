@@ -13,6 +13,10 @@ interface DropdownProps<T extends string> {
    *  every other field label in the app). Omit for a bare dropdown with no caption. */
   label?: string;
   disabled?: boolean;
+  /** `large` is 1.25x `default`'s height/text (PIP #186 — Pull Function grown to read
+   *  closer to the size of the Scan Label entry box it sits above). Every other current
+   *  consumer is a demo-scanner-bar's own compact filter and stays at `default`. */
+  size?: 'default' | 'large';
 }
 
 /**
@@ -26,9 +30,12 @@ interface DropdownProps<T extends string> {
  * Generic over the option-value type, so each caller keeps full type safety on its own
  * value union (e.g. PIP's pull function `'CA' | 'CF' | 'FP'`).
  */
-export function Dropdown<T extends string>({ value, options, onChange, label, disabled = false }: DropdownProps<T>) {
+export function Dropdown<T extends string>({ value, options, onChange, label, disabled = false, size = 'default' }: DropdownProps<T>) {
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.value === value);
+  const large = size === 'large';
+  const boxHeight = large ? 'h-[55px]' : 'h-[44px]';
+  const textSize = large ? 'text-[22px]' : 'text-[18px]';
 
   return (
     <div className="relative inline-flex items-center gap-3">
@@ -41,9 +48,9 @@ export function Dropdown<T extends string>({ value, options, onChange, label, di
         type="button"
         onClick={() => !disabled && setOpen((o) => !o)}
         disabled={disabled}
-        className="flex items-center gap-3 h-[44px] pl-4 pr-3 rounded-[8px] bg-[#0D0D0D] border border-[#3A3A3A] disabled:opacity-40 transition-colors hover:border-[#555] active:scale-[0.98]"
+        className={`flex items-center gap-3 ${boxHeight} pl-4 pr-3 rounded-[8px] bg-[#0D0D0D] border border-[#3A3A3A] disabled:opacity-40 transition-colors hover:border-[#555] active:scale-[0.98]`}
       >
-        <span className="font-data text-[18px] font-semibold text-white">{current?.label ?? value}</span>
+        <span className={`font-data ${textSize} font-semibold text-white`}>{current?.label ?? value}</span>
         <span className={`text-[#9A9A9A] text-[12px] transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
       </button>
 

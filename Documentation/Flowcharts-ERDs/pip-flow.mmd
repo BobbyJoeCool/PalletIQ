@@ -15,18 +15,18 @@ flowchart TD
     SCAN_L --> API_L[GET /api/containers/:id\napi/functions/containers.ts — getContainer\nvalidate status\nresolve Container→Pallet→Location]
 
     API_L --> L_FOUND{Found?}
-    L_FOUND -->|NOT_FOUND| ERR_L1[Error: Label not found\ncontainerField cleared\nremain in ready]
-    L_FOUND -->|BAD STATUS\ne.g. PULLED/CANCELLED| ERR_L2[Error: Invalid status\ncontainerField cleared\nremain in ready]
+    L_FOUND -->|NOT_FOUND| ERR_L1[Error: Label not found\ncontainerField keeps its value + refocused\ncidStatus -> invalid, issue #188\nremain in ready]
+    L_FOUND -->|BAD STATUS\ne.g. PULLED/CANCELLED| ERR_L2[Error: Invalid status\ncontainerField keeps its value + refocused\ncidStatus -> invalid\nremain in ready]
     L_FOUND -->|OK| FN_CHECK{pullFunction\nmatch?}
 
-    FN_CHECK -->|Mismatch| ERR_L3[Error: Wrong function\ncontainerField cleared\nremain in ready]
+    FN_CHECK -->|Mismatch| ERR_L3[Error: Wrong function\ncontainerField keeps its value + refocused\ncidStatus -> invalid\nremain in ready]
     FN_CHECK -->|Match| S3
 
     ERR_L1 --> S2
     ERR_L2 --> S2
     ERR_L3 --> S2
 
-    S3[State: verifying\nstores containerData\npidField auto-focuses\nvia useEffect on screenState]
+    S3[State: verifying\nstores containerData, cidStatus -> valid\npidField auto-focuses\nvia useEffect on screenState\nPallet ID/UPC/Location enabled - issue #188\nbottom section was already visible pre-scan\nwith blank placeholders - issue #187]
 
     S3 --> RESCAN{New label\nscanned while verifying?}
     RESCAN -->|Yes — handleContainerScan\nissue #45: no status-bar\nupdate on a plain rescan| RELOAD[Clear PID + UPC + Location fields\nreload container data\nsilently]
@@ -36,19 +36,22 @@ flowchart TD
 
     VER_PATH -->|Pallet ID\nPID field| PID_VERIFY[POST /api/pulls/verify\nwith palletId\napi/functions/pulls.ts — verifyPull]
     VER_PATH -->|UPC\nUPC field — issue #82| UPC_VERIFY[POST /api/pulls/verify\nwith upc\napi/functions/pulls.ts — verifyPull]
-    VER_PATH -->|Location\nLocationEntryFields 3-box| LOC_VERIFY[POST /api/pulls/verify\nwith location + wasScanned\napi/functions/pulls.ts — verifyPull]
+    VER_PATH -->|Location, scanned/demo-filled\nfull value's locked Aisle/Level\nsegment disagrees — issue #183| ERR_LOCK[Error: Scanned Location incorrect\nAisle/Level - value, e.g. -316-\nmessage bar only, locked box keeps\nits own known-correct value unchanged\nnever reaches the server]
+    VER_PATH -->|Location, otherwise\nLocationEntryFields 3-box| LOC_VERIFY[POST /api/pulls/verify\nwith location + wasScanned\napi/functions/pulls.ts — verifyPull]
+
+    ERR_LOCK --> S3
 
     PID_VERIFY --> PID_OK{Result?}
-    PID_OK -->|PALLET_MISMATCH| ERR_PID[Error: Incorrect Pallet ID\npidField cleared + re-focused]
+    PID_OK -->|PALLET_MISMATCH| ERR_PID[Error: Incorrect Pallet ID\npidField washes red, keeps entered\nvalue, re-focused — issue #185]
     PID_OK -->|WRONG_PULL_FUNCTION| ERR_PID2[Error: Pull function mismatch]
     PID_OK -->|OK| SUCCESS
 
     UPC_VERIFY --> UPC_OK{UPC match\nagainst pallet's DPCI?}
-    UPC_OK -->|No — ALTERNATE_MISMATCH| ERR_UPC[Error: Invalid UPC\nupcField cleared + re-focused]
+    UPC_OK -->|No — ALTERNATE_MISMATCH| ERR_UPC[Error: Invalid UPC\nupcField washes red, keeps entered\nvalue, re-focused — issue #185]
     UPC_OK -->|Yes| SUCCESS
 
     LOC_VERIFY --> LOC_BIN{aisle+bin match?}
-    LOC_BIN -->|No — ALTERNATE_MISMATCH, any\nfunction/entry method| ERR_LOC[Error: Invalid Location\nLocationEntryFields cleared + re-focused]
+    LOC_BIN -->|No — ALTERNATE_MISMATCH, any\nfunction/entry method| ERR_LOC[Error: Invalid Location\nboxes wash red as a group, keep\nentered values — issue #185]
     LOC_BIN -->|Yes| LOC_METHOD{wasScanned?}
     LOC_METHOD -->|No — hand-entered\nany pullFunction| LOC_LEVEL_MANUAL{level also\nmatches?}
     LOC_LEVEL_MANUAL -->|Yes| SUCCESS
@@ -72,8 +75,8 @@ flowchart TD
     SUCCESS[onPullSuccess\ncontainer marked PULLED\nquantities deducted\nwriteLog PULL]
 
     SUCCESS --> HIST[Append history entry\nlocation + updatedQty + timestamp]
-    HIST --> MSG[MessageBar: success\nPull location + remaining qty]
-    MSG --> RESET[Clear all fields\nsetContainerData null\nsetScreenState ready]
+    HIST --> MSG[MessageBar: success\nPull location + remaining qty\npersists through the return to ready\nand the next label scan — issue #45/#188]
+    MSG --> RESET[Clear PID/UPC/Location fields\nsetContainerData null, cidStatus -> neutral\nsetScreenState ready\nbottom section stays visible, blank - #187]
     RESET --> S2
 
     style START fill:#1a1a1a,stroke:#555,color:#fff
@@ -85,4 +88,5 @@ flowchart TD
     style ERR_PID2 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_UPC fill:#330000,stroke:#660000,color:#ff8080
     style ERR_LOC fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_LOCK fill:#330000,stroke:#660000,color:#ff8080
     style CORRECT fill:#332200,stroke:#665500,color:#ffcc66

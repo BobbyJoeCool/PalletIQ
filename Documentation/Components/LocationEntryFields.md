@@ -43,6 +43,8 @@ those props are omitted.
 | `demoScanner` | `boolean` | no | `false` | **Feature 9, Phase 2.** Opts into the built-in Location ID Demo Scanner — registered via the shared footer demo-slot only while one of the three boxes has focus, mirroring `PalletIdField`'s own `demoScanner` prop. WLH/LII/MNP/PAR opt in; PIP/SDP don't — their own Location ✓/✗ buttons stay screen-owned |
 | `demoItemStorageCode` | `string` | no | | PAR's own "Wrong Storage Type" Demo Scanner option — the already-resolved item's own Storage Code, passed through to `LocationDemoScannerBar` |
 | `demoScannedPalletId` | `number` | no | | MNP's own "Consolidate" Demo Scanner option — the already-scanned pallet's own id, passed through to `LocationDemoScannerBar` |
+| `disabled` | `boolean` | no | `false` | **Issue #188 (PIP).** Disables all three boxes; auto-focus is skipped while true |
+| `onLockedMismatch` | `(message: string) => void` | no | | **Issue #183's follow-up.** Fires instead of `onResolved` when a scanned/demo-filled value's Aisle or Level segment disagrees with `lockedAisle`/`lockedLevel` — a locked field is a known-correct value, so this short-circuits before ever reaching the server. Delivers a ready-to-display message, e.g. `"Scanned Location incorrect Aisle (316)"`, meant for the caller's message bar — the locked box itself keeps showing its own known-correct value throughout, unchanged (2026-08-01 — an earlier version instead swapped the box's own display to the scanned wrong value; found confusing on a greyed-out/disabled-looking box and reverted). Omit for a caller with no locked fields (LII/WLH) |
 
 ## Output
 
@@ -74,6 +76,16 @@ Deliberately split ownership, not all-or-nothing:
   mirroring what a real scan of that length would do: deliver the 6-digit id as-is (plus
   `demoLevel`, for MNP's Level Confirmation pre-fill) when the field accepts that;
   otherwise splice `level` in to form a full 8-digit value before calling `onResolved`.
+- **Locked-field mismatch short-circuit** (issue #183's follow-up) — a full-value
+  scan/demo-fill still splits and displays across the *editable* boxes, matching what was
+  actually scanned. A locked box never changes what it displays, whether or not it matches —
+  it's a known-correct value already, so there's nothing to show — but if its own segment of
+  the scanned value disagrees with `lockedAisle`/`lockedLevel`, `onLockedMismatch` fires with
+  a ready-to-display message and `onResolved` is never called: a mismatched locked field is
+  definitively wrong (it's the pallet's own known-real value), so there's nothing the server
+  could usefully add. Only Aisle is checked before Level (same "attribute to the
+  first/smallest checkable unit" convention every other box in this component already
+  follows) — a value wrong in both only ever reports Aisle.
 
 ## Consumers
 
@@ -83,8 +95,10 @@ Deliberately split ownership, not all-or-nothing:
   `demoScanner`
 - `MNPPage.tsx` — `levelOptional`, no invalid-wash props (message-bar + remount instead);
   `demoScanner` + `demoScannedPalletId`
-- `PIPPage.tsx` — `lockedAisle`/`lockedLevel`, `onActiveChange`, no invalid-wash props; own
-  Location ✓/✗ buttons stay screen-owned, no `demoScanner`
+- `PIPPage.tsx` — `lockedAisle`/`lockedLevel`, `onActiveChange`, `disabled` (issue #188 —
+  gated on CID status), `onLockedMismatch` (issue #183's follow-up), `groupInvalid` (issue
+  #185 — whole-value server mismatch); own Location ✓/✗ buttons stay screen-owned, no
+  `demoScanner`
 - `SDPPage.tsx` — `size="large"`, `onActiveChange`, no invalid-wash props; own Location ✓/✗
   buttons stay screen-owned, no `demoScanner`
 - `WLHPage.tsx` — `groupInvalid` (the prop's own original motivating example); `demoScanner`

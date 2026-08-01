@@ -7,11 +7,11 @@
 ## Flow
 
 1. Worker lands on `/pull` with the **Pull Function** dropdown at the top, defaulted to the first option (`CA — Carton Air`). This dropdown is persistent — always reachable, not a separate initial step — and filters which containers can be scanned in this session (a scanned container whose `pullFunction` doesn't match the selected value is rejected).
-2. Worker scans or keys a label into the **Scan Label** field and confirms. `GET /api/containers/:id` resolves the container.
-   - 2a. If the container's `pullFunction` doesn't match the dropdown's selection: rejected with an error; Label field keeps its scanned value and stays focused for a retry.
-   - 2b. If the container isn't found, or isn't in `PRINTED` status (i.e. it's `PULLED`/`CANCELED`/`PURGED`): rejected with an error; Label field clears and stays focused.
-   - 2c. On success: screen transitions to the verification state. Pull data (Location, Item, DPCI, and a Current/Pull/Remaining quantity table) renders immediately alongside three independent verification fields — there is no separate review step.
-3. Worker scans/keys **any one** of Pallet ID, UPC, or Location to confirm the pull. Each independently calls `POST /api/pulls/verify` with only that one field.
+2. Worker scans or keys a label into the **Scan Label** field and confirms. `GET /api/containers/:id` resolves the container. The Label field carries its own 3-state status (**CID status** — issue #188): `neutral` (fresh load, or just reset after a successful pull), `valid` (a currently-loaded, verified label — Label field shows the blue "valid" wash), or `invalid` (a failed scan — Label field shows the red "invalid" wash).
+   - 2a. If the container's `pullFunction` doesn't match the dropdown's selection: rejected with an error; Label field keeps its scanned value and stays focused for a retry; CID status → `invalid`.
+   - 2b. If the container isn't found, or isn't in `PRINTED` status (i.e. it's `PULLED`/`CANCELED`/`PURGED`): rejected with an error; Label field keeps its scanned value and stays focused for a retry; CID status → `invalid`.
+   - 2c. On success: screen transitions to the verification state; CID status → `valid`. Pull data (Location, Item, DPCI, and a Current/Pull/Remaining quantity table) and the Pallet ID/UPC/Location verification fields are **always visible on this screen** (issue #187) — before any label has ever been scanned they render with blank (`—`) placeholders rather than being hidden, so a worker always sees the full layout; there is no separate review step once a label does resolve.
+3. Pallet ID/UPC/Location are only enterable while CID status is `valid` (issue #188) — each renders disabled (with its blank placeholder) at every other time, since there's nothing loaded yet to verify against. Once enabled, the worker scans/keys **any one** of them to confirm the pull; each independently calls `POST /api/pulls/verify` with only that one field.
    - 3a. **Pallet ID** — must exactly match the pallet at the container's resolved location.
    - 3b. **UPC** — must resolve (by DPCI lookup) to the same item as the pallet.
    - 3c. **Location** — resolved by the shared 3-box Aisle/Bin/Level entry, either from one atomic 8-digit scan or by typing all three boxes. The match rule depends on both the pull function and whether the value was scanned or hand-typed (see `outline.md`'s Location Barcode Handling exception):
@@ -20,30 +20,36 @@
      - Scanned Carton Floor (CF): only Aisle+Bin compared — level ignored. (Hand-entered CF also only meaningfully checks Bin, since PIP locks the Aisle and Level boxes to the pallet's real values for this combination.)
      - Scanned Full Pallet (FP): full match required, but an aisle+bin match with a level-only mismatch does not reject outright — it opens the **Level Correction popup** (step 3c-i below).
    - An aisle+bin mismatch (any function/entry method) is always an outright reject — no popup.
+   - A **locked box** (Aisle always, Level additionally for Carton Floor — see Input handling below) whose scanned segment disagrees with its known-correct locked value is caught client-side inside `LocationEntryFields` itself, before ever reaching the server (issue #183's follow-up): the mismatched box washes red and temporarily shows the scanned (wrong) value in place of the locked one, and the message bar names exactly which box and value were wrong — e.g. `"Scanned Location incorrect Aisle (316)"`. This is distinct from a server-side whole-value mismatch (an editable box, like Bin on CA/FP, disagreeing) — see the Mis-scan / error handling section below for both.
    - 3c-i. **FP level-mismatch recovery:** the popup shows the scanned level vs. the pallet's actual recorded level and asks what level the pallet was actually pulled from. The worker types a level (1–2 digits); this is accepted as their attestation with no further validation, and the pull resubmits with the corrected level and `confirmLevelMismatch: true`. Backing out of the popup (Cancel) is treated as an ordinary invalid Location.
-4. On a successful verify (any of 3a/3b/3c): the container is marked `PULLED`, the pallet's carton/SSP quantities are deducted (floored at 0; a carton pull always zeroes the pallet's full-pallet count), the pull is prepended to the session's Pull History (right column), and the screen resets to the ready state (Label field cleared, focused for the next scan).
-5. **Hold quick-action:** while in the verification state, a "Hold" button (visible whenever the container's location is known) opens the shared `HoldPanel` inline, for flagging the current location without leaving PIP.
+4. On a successful verify (any of 3a/3b/3c): the container is marked `PULLED`, the pallet's carton/SSP quantities are deducted (floored at 0; a carton pull always zeroes the pallet's full-pallet count), the pull is prepended to the session's Pull History (right column), CID status resets to `neutral`, and the screen returns to the ready state (Label field cleared, focused for the next scan; Pallet ID/UPC/Location disable again).
+5. **Hold quick-action (issue #186):** while in the verification state, a "Hold" button (visible whenever a current and/or previous-pull location is known) opens the shared `HoldPanel` for flagging a location without leaving PIP. The button offers a choice — a worker's normal flow is to verify a pull, then immediately scan the next label while the scanner's still in hand, so they often only realize a location needs holding after they've already moved on:
+   - Only the currently-scanned container's location known (no pull completed yet this session) → tapping Hold opens `HoldPanel` directly for that location.
+   - Only a previous pull's location known (e.g. right after a successful pull, before scanning the next label) → tapping Hold opens `HoldPanel` directly for that location.
+   - Both known → tapping Hold opens a small anchored picker offering **Current Location** and **Previous Location** as separate, individually-labeled options (each showing its actual location value), and `HoldPanel` opens for whichever the worker taps.
 6. **Changing Pull Function mid-verification:** selecting a different function while a container is scanned-but-unverified discards it (warns "Label not verified"), clears Pallet ID/UPC/Location, and returns to the ready state under the new function. Re-selecting the same function already active is a no-op.
 7. **Rescanning a new label while unverified:** scanning a different label while the previous one hasn't yet been verified is treated as a normal part of the fast scan-then-verify-in-batch workflow (no warning) — Pallet ID/UPC/Location clear and the new container's data loads in their place.
 
 ### Mis-scan / error handling
 
-- Label not found (`404`) → error, `"Label not found"`, field keeps its value (corrected here — this doc previously said "clears," which hasn't matched the actual code's `focusContainerField()`-not-`.clear()` behavior) and refocuses; also picks up the app-wide red-wash treatment (v1.7.0 — see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) via `FieldDisplay`'s new `invalid` prop, since it's the one field on this screen where a failed value stays visible long enough to be worth washing.
-- Container not `PRINTED` (`409`) → error, `"Invalid status: {status}"` (e.g. `PULLED`/`CANCELED`/`PURGED`), field keeps its value (same correction as above) and refocuses; same red-wash treatment.
-- Container's pull function doesn't match the selected dropdown value → error, `"Wrong function — label requires {fn}"`, field keeps its value and refocuses; same red-wash treatment.
-- Pallet ID mismatch (`400 PALLET_MISMATCH`) → error, `"Incorrect Pallet ID"`, Pallet ID field only clears/refocuses; other fields untouched. Not washed — the field clears atomically with the error (no visible moment where a bad value sits in the box), unlike Label above.
-- UPC mismatch (`400 ALTERNATE_MISMATCH`) → error, `"Invalid UPC"`, UPC field only clears/refocuses. Not washed, same reasoning as Pallet ID.
-- Location mismatch (`400 ALTERNATE_MISMATCH`) → error, `"Invalid Location"`, Location's three boxes remount/clear and Aisle refocuses. Not washed, same reasoning — `LocationEntryFields`' own per-box `invalid` props (used by PAR) aren't wired here since PIP's Location failure is a whole-value verify mismatch, not a per-box existence check, and the boxes clear before any wash would be visible anyway.
+- Label not found (`404`) → error, `"Label not found"`, field keeps its value and refocuses; picks up the app-wide red-wash treatment (v1.7.0 — see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) via CID status → `invalid` (issue #188 — previously a dedicated `containerInvalid` flag, now the same 3-state status that also gates Pallet ID/UPC/Location).
+- Container not `PRINTED` (`409`) → error, `"Invalid status: {status}"` (e.g. `PULLED`/`CANCELED`/`PURGED`), field keeps its value and refocuses; CID status → `invalid`.
+- Container's pull function doesn't match the selected dropdown value → error, `"Wrong function — label requires {fn}"`, field keeps its value and refocuses; CID status → `invalid`.
+- Pallet ID mismatch (`400 PALLET_MISMATCH`) → error, `"Incorrect Pallet ID"`; Pallet ID field washes red and **keeps its entered value** visible, refocused for a fresh retry (issue #185 — previously cleared to blank; changed so the worker can see exactly what they scanned instead of having to re-scan blind). Other fields untouched.
+- UPC mismatch (`400 ALTERNATE_MISMATCH`) → error, `"Invalid UPC"`; UPC field washes red and keeps its entered value, refocused. Same #185 behavior as Pallet ID.
+- Location whole-value mismatch (`400 ALTERNATE_MISMATCH`, an editable box disagreeing — e.g. Bin on a CA/FP pull) → error, `"Invalid Location"`; the three boxes wash red as a group (`groupInvalid`) and **keep their entered values** — no remount/clear (issue #185; previously the boxes remounted blank and Aisle refocused). This is the server-side "the whole value doesn't match, can't attribute to one specific box" case.
+- Location **locked-box** mismatch (issue #183's follow-up — Aisle always, Level additionally on Carton Floor) → never reaches the server at all; caught client-side inside `LocationEntryFields` the instant a scanned/demo-filled value's locked segment disagrees. Error text names the exact box and value, e.g. `"Scanned Location incorrect Aisle (316)"`, surfaced via the message bar only — the locked box itself keeps showing its own known-correct value throughout, unchanged (2026-08-01 — an earlier version of this fix instead swapped the box's own display to the scanned wrong value, found confusing on a greyed-out/disabled-looking box and reverted).
 - Pull function mismatch at verify time (`409 WRONG_PULL_FUNCTION`) → error, `"Pull function mismatch"`.
-- FP level-only mismatch (`400 LEVEL_MISMATCH`) → opens the Level Correction popup instead of an error message; declining it produces the same `"Invalid Location"` error as an ordinary mismatch.
+- FP level-only mismatch (`400 LEVEL_MISMATCH`) → opens the Level Correction popup instead of an error message; declining it produces the same `"Invalid Location"` whole-value-mismatch error above.
 - Any other verify failure → generic error, `"Verification failed — please try again"`.
 
 ### Status / messaging behavior
 
 - Errors are transient but not auto-cleared — they persist until the next message-bar update.
-- The success message (`"Last Pull {location} — {pallets}P / {cartons}C / {ssps}S"`) deliberately persists through the return to the ready state and through the next label scan (not cleared on state transition) — a worker can verify their previous pull while already moving to the next one. A rescan while still-unverified does *not* stomp this message with a spurious warning (issue #45 fix) — only a genuine error path updates the message bar in that case.
+- The success message (`"Last Pull {location} — {pallets}P / {cartons}C / {ssps}S"`) deliberately persists through the return to the ready state (CID status → `neutral`) and through the next label scan (issue #188 — CID status `neutral` → `valid` on that next scan does *not* clear the message bar) — a worker can verify their previous pull while already moving to the next one. A rescan while still-unverified does *not* stomp this message with a spurious warning (issue #45 fix) — only a genuine error path updates the message bar in that case.
 - All error paths play `playAlert('error')`; successful pulls play `playAlert('info')`.
-- **(v1.7.0, issue #95)** `handleContainerScan`'s success path also calls `clearMessage()` (right after `setContainerInvalid(false)`), so a stale error clears on the next successful label load. The later PID/UPC/Location verify steps already overwrite any stale error via their shared `onPullSuccess`'s own success message, so no gap existed there.
+- **(issue #188)** A scan that lands CID status on `invalid` *does* clear a stale message first (there's an actual error to replace it with) — so the clear-on-success behavior below is specifically neutral→valid, not every transition into `valid`.
+- **(v1.7.0, issue #95)** `handleContainerScan`'s success path also calls `clearMessage()`, but only when the prior CID status was `invalid` (see above) — so a stale error clears on the next successful label load, without also clearing a still-relevant "Last Pull" confirmation on a neutral→valid transition. The later PID/UPC/Location verify steps already overwrite any stale message via their shared `onPullSuccess`'s own success message, so no gap existed there.
 
 ## Layout
 
@@ -55,14 +61,17 @@
 ├───────────────────────────────────────────────────────────┬──────────────────────────┤
 │ Content (792px)                                            │ Pull History (456px)     │
 │                                                              │                          │
-│ Pull Function [CA — Carton Air ▾]           [Hold]          │  ┌────────────────────┐  │
+│ Pull Function [CA — Carton Air ▾] (1.25x, #186)   [HOLD]     │  ┌────────────────────┐  │
 │                                                              │  │ 030105-08   10:42a │  │
 │ Scan Label  [______________________]                        │  │ Pulled 0P/4C/0S     │  │
 │                                                              │  │ 2P/1C/0S remaining  │  │
-│  (once a label verifies, below appears:)                    │  └────────────────────┘  │
-│  Location   [ 030105-08 ]                                    │  ┌────────────────────┐  │
-│  Item       Widget, Blue, 12ct                                │  │ ...                 │  │
-│  DPCI       012-34-5678                                       │  └────────────────────┘  │
+│  (bottom section always renders — #187 — blank "—"          │  └────────────────────┘  │
+│   placeholders before any label is scanned, disabled        │  ┌────────────────────┐  │
+│   Pallet ID/UPC/Location until CID status is 'valid'):      │  │ ...                 │  │
+│  Location  [030105-08] (blue, 0.8x — #186, wash-neutral      │  └────────────────────┘  │
+│            with Pull Function's own growth above)            │                          │
+│  Item       Widget, Blue, 12ct                                │                          │
+│  DPCI       012-34-5678                                       │                          │
 │  ┌───────────────┬────────┬────────┬────────┐                │                          │
 │  │               │ Pallet │ Carton │  SSP   │                │                          │
 │  │ Current       │   2    │   5    │   0    │                │                          │
@@ -77,13 +86,27 @@
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+Tapping **Hold** when both a current and a previous-pull location exist opens a small anchored
+popup instead of `HoldPanel` directly (issue #186):
+
+```text
+                                              ┌────────────────────────┐
+                                              │ CURRENT LOCATION        │
+                                              │ 030105-08               │
+                                              ├────────────────────────┤
+                                              │ PREVIOUS LOCATION       │
+                                              │ 020204-03               │
+                                              └────────────────────────┘
+```
+
 ## Input handling
 
 - All text entry goes through `NumpadContext` — the on-screen Numpad (numeric) or Keyboard (for alpha UPCs), bound per-field via `useNumpadField().focus(handler)`. Exactly one field holds the numpad/keyboard registration at a time; tapping a `FieldDisplay` box calls its `onFocus`, which re-registers the handler.
 - Hardware barcode scanner input flows through the same path via `deliverScan()` — a scan is delivered to whichever field currently holds focus.
 - Field boxes are 72px tall (60/26px "compact" variant for the side-by-side UPC pair) — meets the 72px minimum touch target except where two fields intentionally share a row.
 - Location is the shared 3-box `LocationEntryFields` component (Aisle/Bin/Level), not a plain `useNumpadField` — it manages its own three sub-fields and reports back via `onResolved(value, wasScanned)`. `wasScanned` is structurally derived (a value longer than a single box's own max length can only arrive via a scan) — this is what feeds the entry-method-dependent match rule described in Flow step 3c.
-- Screen-specific override: the Location boxes can be **locked** (shown disabled, not part of the typed sequence) — Aisle is always locked to the pallet's real value for hand-entry; Level is additionally locked for Carton Floor. A full 8-digit scan into any box still overrides regardless of locks.
+- Screen-specific override: the Location boxes can be **locked** (shown disabled, not part of the typed sequence) — Aisle is always locked to the pallet's real value for hand-entry; Level is additionally locked for Carton Floor. A full 8-digit scan into any box still overrides regardless of locks, unless the scanned Aisle/Level segment disagrees with the locked value, in which case `LocationEntryFields` short-circuits with a locked-mismatch message instead (issue #183's follow-up — see Mis-scan / error handling above); this is a shared-component behavior available to every `LocationEntryFields` consumer with a locked field, not PIP-specific.
+- Pallet ID/UPC/Location are wrapped in `disabled={cidStatus !== 'valid'}` (issue #188) — each still renders (with its blank placeholder) while disabled, it just isn't tappable.
 - The footer demo-button slot is state- and field-aware: it shows a different demo control set depending on which field currently holds focus. Label gets the full Feature 9 3-button pattern (**Valid Label** / **Label by Status** / **Invalid Label**, via [`ContainerDemoScannerBar`](../Components/ContainerDemoScannerBar.md)) — Pallet ID/UPC/Location each get a plain valid/invalid pair, since PIP's own PID/UPC/Location scans must match the already-loaded container's specific values, not a random valid one (same compound-submit reasoning `useUpcField`'s own docstring establishes).
 
 ## Data
@@ -152,6 +175,10 @@ flowchart TD
 
 **Focus-race guard.** `PIPPage.tsx` re-focuses the Label field synchronously inside `onPullSuccess` rather than relying solely on the `'ready'`-state effect's 50ms-delayed call — without this, a fast scanner scan of the next label could land on the just-cleared-but-still-registered Pallet ID/UPC field instead of Label, producing a spurious "Label not verified" warning (this was issue #45's actual root cause, fixed in v1.0.9/v1.1.0).
 
+**Locked-field mismatch short-circuit (issue #183's follow-up).** A locked box (Aisle always, Level on Carton Floor) is a known-correct value already — the pallet's own real location — so `LocationEntryFields` checks a scanned/demo-filled full value's Aisle/Level segment against it client-side, before ever calling `onResolved` or hitting `POST /api/pulls/verify`. There's nothing the server could usefully add: a mismatch there is definitively wrong regardless of what it would say. This is a shared-component behavior (`onLockedMismatch` prop), not PIP-specific — any of the six `LocationEntryFields` consumers with a locked field gets it for free.
+
+**Pallet ID's reentrant-Blur guard (2026-08-01 fix).** `handlePidVerify` checks its `loadingRef.current`/`!v` early-return guard *before* calling `setPidValue`, not after. This matters specifically because `onPullSuccess` moves focus to the Label field via `focusContainerField()`, which fires a synthetic 'Blur' at whichever field is being left (PID, if that's how the pull was verified) — and `useNumpadField`'s own reentrancy guard (`submittingRef`) only covers a submit handler's *synchronous* prefix, not the time an `async` handler spends awaiting its own network call. That Blur therefore re-invokes `handlePidVerify` a second time, synchronously, before React has applied `onPullSuccess`'s own `setPidValue('')` — a version of this handler that set `pidValue` unconditionally on every call would let that reentrant invocation silently restore the just-verified value, so the box never visually cleared despite disabling correctly. UPC/Location aren't vulnerable to the same bug: neither mirrors its displayed value through a caller-owned piece of state the way `PalletIdField`'s controlled `value` prop requires — `upcField`/`LocationEntryFields`' own internal fields clear directly via `.clear()`, with no intermediate prop round-trip for a reentrant call to race against.
+
 ## Open items still remaining
 
 - [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — scanning an unknown Pallet ID crashes with a 500 instead of a 404 on the Manual/SDP put screens; PIP's own Pallet ID mismatch path (`PALLET_MISMATCH`) was not reported as affected, but the same non-numeric-input class of bug is worth re-checking against PIP's `handlePidVerify` path given it shares patterns with SDP/MNP.
@@ -162,6 +189,7 @@ flowchart TD
 
 | Date | Change |
 |---|---|
+| 2026-08-01 | GitHub #188/#187/#186/#185/#183 batch fix-and-polish pass. **#188** — CID's own valid/neutral/invalid status (`FieldDisplay` shows the blue/red wash) replaces the old plain `containerInvalid` flag; Pallet ID/UPC/Location are now disabled until CID is `valid`, and the neutral→valid transition (a fresh scan right after a successful pull) no longer clears the still-relevant "Last Pull" success message — only invalid→valid does. **#187** — the bottom section (Location/Item/DPCI/quantity table, Pallet ID/UPC/Location) is always rendered with blank `—` placeholders instead of being hidden until a label resolves. **#185** — Pallet ID/UPC/Location now wash red and keep their entered value on a failed verify (previously cleared to blank), refocused for a fresh retry. **#186** — Hold redesigned: red/larger button, offering a small picker between **Current Location** and **Previous Location** (each showing its own value) once both exist; Pull Function grown 1.25x to read closer to the Scan Label box's own size, with the Location display recolored blue and shrunk (~0.8x) so the two rows' combined height is unchanged (a deliberate wash, not a net size change). **#183's follow-up** — `LocationEntryFields`' locked Aisle/Level boxes now name the specific field and scanned value on a mismatch (e.g. `"Scanned Location incorrect Aisle (316)"`) instead of relying on a generic server error; built into the shared component (not PIP-only), so every consumer with a locked field benefits. Also added: `NumpadFieldBox`'s `valid` prop (blue wash) and `Dropdown`'s `size="large"` variant, both new shared-component surface area, not PIP-specific. |
 | 2026-07-30 | Feature 9 CID phase: Label field's demo footer replaced with [`ContainerDemoScannerBar`](../Components/ContainerDemoScannerBar.md) — the standard **Valid Label** / **Label by Status** / **Invalid Label** 3-button pattern, matching Pallet ID/Location ID's own already-shipped shape. Retires the old bespoke `✓/✗ Scan Label` pair and the dedicated `⚠ Invalid Label` picker (Wrong Function/Pulled/Canceled/Purged) — those four options are now plain Status/Pull-Function picks in the new by-status popup, per the design doc's "Invalid is strictly not-found" rule. Button *text* changed (`✓ Scan Label`→`✓ Valid Label`, `✗ Scan Label`→`✗ Invalid Label`); `Label not found`/`Label not verified`/wrong-function toast text unchanged. |
 | 2026-07-30 | Internal-only rename: the `Label` Prisma model/table is now `Container` (`lid` → `cid`), per the app-wide Label→Container rename (the printed physical label stays "Label" in worker-facing text — see `DevNotes/DesignPrompts/Feature-9-AppWide-Demo-Scanner.md`'s note on Label's double duty). `GET /api/labels/:id` → `GET /api/containers/:id`; `POST /api/pulls/verify`'s `labelId` body field → `containerId`; `handleLabelScan`/`labelData`/`labelInvalid` → `handleContainerScan`/`containerData`/`containerInvalid`; `PIPLabelScanResult` → `PIPContainerScanResult`. No UI-visible text, button labels, or toast messages changed. |
 | 2026-07-27 (Feature 10 / #158) | Internal-only: the Pallet ID box (local `FieldDisplay`/`NumpadFieldBox`) replaced with the shared `PalletIdField` component, matching its existing 72px box size via override props. Since this field now owns its own internal numpad instance, the demo footer's "which field is active" routing switched from reading `pidField.isActive` directly to a new `pidActive` state fed by `PalletIdField`'s `onActiveChange` callback. `handlePidVerify`'s own submit logic and clear-and-refocus-on-error (no wash) behavior are unchanged. |
