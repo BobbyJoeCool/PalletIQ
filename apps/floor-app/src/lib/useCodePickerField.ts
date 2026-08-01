@@ -134,6 +134,12 @@ export function useCodePickerField(
   function selectOption(code: string) {
     setOpen(false);
     onChange(code);
+    // GitHub #156 — picking a popup option is as much an explicit "done with this field" as
+    // an Enter/OK commit is (see `focusField`'s own `if (explicit ...) hidePanel()` above),
+    // but this path never called it: if the shared numpad/keyboard panel was still open from
+    // this field's own earlier typed entry (or another field's), it stayed open and could
+    // sit on top of — and intercept clicks meant for — whatever's rendered underneath it.
+    hidePanel();
   }
 
   return { field, open, setOpen, wrapperRef, focusField, selectOption, invalid };

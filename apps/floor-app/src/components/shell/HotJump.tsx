@@ -20,7 +20,7 @@ interface HotJumpProps {
  *     and Cancel / Go buttons.
  *   - Right: a quick-jump shortcuts panel with the most common destinations.
  *
- * Navigating to an unbuilt screen shows an error message in the message bar rather than
+ * Navigating to an unbuilt screen shows an info message in the message bar rather than
  * navigating, so the overlay can remain open for correction.
  *
  * @param onClose - Callback invoked on Cancel and on any successful navigation
@@ -50,7 +50,7 @@ export function HotJump({ onClose }: HotJumpProps) {
   };
 
   /**
-   * Navigates to the given jump code's route, or shows an error if the screen
+   * Navigates to the given jump code's route, or shows an info message if the screen
    * is not yet built in this demo version.
    *
    * @param entry - Resolved JumpCode entry (guaranteed non-null by callers)
@@ -58,7 +58,7 @@ export function HotJump({ onClose }: HotJumpProps) {
   const go = (entry: NonNullable<ReturnType<typeof resolveJump>>) => {
     onClose();
     if (!entry.built) {
-      setMessage({ type: 'error', text: `${entry.label} — not available in this demo` });
+      setMessage({ type: 'info', text: `${entry.label} — screen not yet available` });
       return;
     }
     navigate(entry.route);

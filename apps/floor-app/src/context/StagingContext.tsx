@@ -16,10 +16,12 @@ export interface StackState {
   aisleOverride: boolean;
   storageCodeOverride: boolean;
   sizeOverride: boolean;
-  /** Zone override (issue #99 follow-up) — unlike Aisle/StorageCode/Size, Master Control has
-   *  no Zone field to inherit from; overriding this restricts the stack's own destination
-   *  search to a specific zone (1-4) instead of searching the whole aisle. Off means "no zone
-   *  restriction," not "inherit," since there's nothing to inherit. */
+  /** Zone override (issue #99 follow-up; Master Control gained its own Zone to inherit from
+   *  in GitHub #192 — previously it had none). Same inherit-unless-overridden shape as
+   *  Aisle/StorageCode/Size now (see `effectiveStack`): overriding restricts this stack's
+   *  own destination search to a specific starting zone (1-4) instead of Master Control's
+   *  current one; off inherits Master Control's Zone, which itself may be blank ("no zone
+   *  restriction" — Master Control's Zone is optional, unlike its Aisle/StorageCode/Size). */
   zone: string;
   zoneOverride: boolean;
 }
@@ -75,8 +77,8 @@ interface StagingContextValue {
    *  just-staged stack's Aisle/StorageCode/Size for convenience, so restaging into the same
    *  aisle/type only needs a new Quantity — matching the old single-front-stack behavior. */
   resetStackAfterStage: () => void;
-  master: { aisle: string; storageCode: string; size: string };
-  setMaster: (patch: Partial<{ aisle: string; storageCode: string; size: string }>) => void;
+  master: { aisle: string; storageCode: string; size: string; zone: string };
+  setMaster: (patch: Partial<{ aisle: string; storageCode: string; size: string; zone: string }>) => void;
   log: StagingLogEntry[];
   addLogEntry: (text: string, warning?: boolean) => void;
   logExpanded: boolean;
@@ -105,7 +107,7 @@ let logIdCounter = 0;
  */
 export function StagingProvider({ children }: { children: React.ReactNode }) {
   const [stacks, setStacks] = useState<[StackState, StackState, StackState]>([emptyStack(), emptyStack(), emptyStack()]);
-  const [master, setMasterState] = useState({ aisle: '', storageCode: '', size: '' });
+  const [master, setMasterState] = useState({ aisle: '', storageCode: '', size: '', zone: '' });
   const [log, setLog] = useState<StagingLogEntry[]>([]);
   const [logExpanded, setLogExpanded] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
@@ -170,7 +172,7 @@ export function StagingProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /** Merges a partial patch into the master control bar's state. */
-  const setMaster = useCallback((patch: Partial<{ aisle: string; storageCode: string; size: string }>) => {
+  const setMaster = useCallback((patch: Partial<{ aisle: string; storageCode: string; size: string; zone: string }>) => {
     setMasterState((prev) => ({ ...prev, ...patch }));
   }, []);
 

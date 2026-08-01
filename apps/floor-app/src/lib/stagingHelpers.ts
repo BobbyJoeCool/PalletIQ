@@ -1,23 +1,25 @@
 import type { StackState } from '../context/StagingContext';
 
 /**
- * Resolves a stack's *effective* Aisle/StorageCode/Size — Master Control's current value
- * for any field not overridden, the stack's own stored value for any field that is (issue
- * #99). This is what every consumer of a stack's Aisle/Storage/Size should read instead of
- * the raw `StackState` fields directly, since a non-overridden field's raw value is unused/
- * stale (cleared whenever its override toggles off — see StackBox in STGPage.tsx). Kept in
- * its own file (not StagingContext.tsx) since that file only exports the provider
- * component and its `useStaging` hook — a plain function export there breaks Fast Refresh.
+ * Resolves a stack's *effective* Aisle/StorageCode/Size/Zone — Master Control's current
+ * value for any field not overridden, the stack's own stored value for any field that is
+ * (issue #99; Zone joined this same inherit-unless-overridden shape in GitHub #192 — Master
+ * Control previously had no Zone of its own to inherit, so a non-overridden stack Zone
+ * always resolved to "no restriction" rather than an actual inherited value). This is what
+ * every consumer of a stack's Aisle/Storage/Size/Zone should read instead of the raw
+ * `StackState` fields directly, since a non-overridden field's raw value is unused/stale
+ * (cleared whenever its override toggles off — see StackBox in STGPage.tsx). Kept in its
+ * own file (not StagingContext.tsx) since that file only exports the provider component and
+ * its `useStaging` hook — a plain function export there breaks Fast Refresh.
  */
 export function effectiveStack(
   stack: StackState,
-  master: { aisle: string; storageCode: string; size: string },
+  master: { aisle: string; storageCode: string; size: string; zone: string },
 ): { aisle: string; storageCode: string; size: string; zone: string } {
   return {
     aisle: stack.aisleOverride ? stack.aisle : master.aisle,
     storageCode: stack.storageCodeOverride ? stack.storageCode : master.storageCode,
     size: stack.sizeOverride ? stack.size : master.size,
-    // No Master Control equivalent to inherit from — off just means "no zone restriction."
-    zone: stack.zoneOverride ? stack.zone : '',
+    zone: stack.zoneOverride ? stack.zone : master.zone,
   };
 }

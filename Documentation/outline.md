@@ -81,17 +81,25 @@ On opening the app, the user is always prompted to log in first — there is no 
 
 ## Home Screen
 
-After login, the user lands on a menu of function buttons:
+After login, the user lands on a 6-column menu of function buttons (Main Menu Reorg,
+GitHub #174), each column 3 buttons tall except Inventory Management, which is 4:
 
-- Pull
-- Put
-- Pallet ID
-- Location ID
-- Empty Locations by Aisle
-- Empty Locations by Zone
-- Stage Aisle
+- **Production:** Pallet ID Pull, System Directed Put, Manual Put
+- **GPM Functions:** Empty Locations by Aisle, Empty Locations by Zone, Stage Aisle
+- **Inventory Management:** Pallet ID Info, Item ID Lookup, Pallet Reinstate, Overpack
+  Carton Create
+- **Location Management:** Location ID Info, Warehouse Location Hold, Item Storage
+  Inquiry
+- **Container Management:** Pull Request by Label, Container Reprint, Container ID
+  Inquiry
+- **Reporting Functions:** Staged Aisle Report, Individual Reporting, Warehouse Team
+  Reporting
 
-All buttons are visible to all roles. Restricted functionality within a screen is gated inside that screen, not by hiding the entry point.
+All buttons are visible to all roles. Restricted functionality within a screen is gated
+inside that screen, not by hiding the entry point. Several buttons above (Overpack Carton
+Create, Container Reprint, Container ID Inquiry, Warehouse Team Reporting) are reserved
+jump-code slots for not-yet-built screens — tapping one shows an info message instead of
+navigating, per each screen's own tracked feature/GitHub issue.
 
 ---
 
@@ -300,7 +308,15 @@ Holds communicate that something is operationally wrong with a location and gate
 
 ## Empty Locations by Aisle
 
-The worker enters a **Storage Code** (required) and, optionally, a **Size** to narrow further. The system returns, per aisle, a count of empty locations matching those criteria — Storage Code alone lists every aisle with that code, broken down by every size present. Results are sortable by tapping the Aisle or any Size column (v1.6.4).
+The worker enters a **Storage Code** (required); an **Aisle Range** and **Workstation**
+filter can further narrow which aisles come back. The system returns, per aisle, a count
+of empty locations, broken down by every size present — every qualifying aisle's full
+size breakdown always shows, regardless of Size. Results are sortable by tapping the
+Aisle or any Size column (v1.6.4); tapping a Size column also fills it into the **Size**
+field, but Size itself is a sort/display control, not a query filter (GitHub #191) — it
+only affects sort order and what pre-fills into Stage Aisle, never which aisles or size
+columns appear. A size an aisle stocks but currently has none available for renders
+distinctly (blue-washed) from a size it doesn't stock at all.
 
 From a result, the worker can select an aisle and choose to:
 
@@ -326,10 +342,10 @@ Below or alongside the grid, a **per-zone summary** (combining both odd and even
 
 ## Stage Aisle
 
-**New feature, not present in the legacy system being improved upon.** Fully designed and built (Phase 7; redesigned to a pallet-rider-triple graphic in Phase 11.2; graphic flipped/shortened and consolidated to a single stageable front stack, with a location suggestion reject/hold flow, in v1.3.0/issue #77; restored to three independent stack boxes on the forks — with only the front slot ever stageable — and a dedicated bubble-grid Locations panel, in v1.4.1/issue #81) — see `DevNotes/Screen-Specs/STG.md` for the complete spec.
+**New feature, not present in the legacy system being improved upon.** Fully designed and built (Phase 7; redesigned to a pallet-rider-triple graphic in Phase 11.2; graphic flipped/shortened and consolidated to a single stageable front stack, with a location suggestion reject/hold flow, in v1.3.0/issue #77; restored to three independent stack boxes on the forks — with only the front slot ever stageable — and a dedicated bubble-grid Locations panel, in v1.4.1/issue #81) — see `Documentation/ScreenSpecs/STG.md` for the complete spec.
 
 - Entry points: Home menu, Empty Locations by Aisle (per-aisle button), Empty Locations by Zone (per-aisle button) — all pre-populate the aisle.
-- Purpose: a General Pallet Mover (GPMer) brings a pallet stack into an aisle via a fork-truck graphic showing three independent stack-entry positions ("On Deck," "Next," "Staging"); only the front ("Staging," furthest-from-operator) position is ever stageable, so a GPMer can queue up what's loaded on the forks without re-entering fields between stages. The worker enters each stack's Storage Code, Size, and quantity, and the system assigns the front stack's pallets destination locations, marking each `STAGED` rather than `STORED` — a placeholder reservation that a subsequent Put confirms. Staging the front stack compacts the queue: whichever of the other two positions is filled slides all the way into "Staging," skipping past an empty position if one exists. The system's suggested next location can be rejected (puts it on hold with a reason code and suggests another) without staging anything.
+- Purpose: a General Pallet Mover (GPMer) brings a pallet stack into an aisle via a fork-truck graphic showing three independent stack-entry positions ("On Deck," "Next," "Staging"); only the front ("Staging," furthest-from-operator) position is ever stageable, so a GPMer can queue up what's loaded on the forks without re-entering fields between stages. The worker enters each stack's Storage Code, Size, and quantity, and the system assigns the front stack's pallets destination locations, marking each `STAGED` rather than `STORED` — a placeholder reservation that a subsequent Put confirms. An optional **Zone** (per-stack, or set once at Master Control and inherited by every stack — GitHub #192) restricts the search to start in that zone and continue toward bin 1, without restarting in an already-covered zone. Staging the front stack compacts the queue: whichever of the other two positions is filled slides all the way into "Staging," skipping past an empty position if one exists. The system's suggested next location can be rejected (puts it on hold with a reason code and suggests another) without staging anything.
 - Staging always fills an aisle from the back forward (highest bin, lowest level first) — the same direction Directed Put's own location search now fills from (see Directed Put's Location Search step) — so a GPMer staging an aisle and the search a worker's Directed Put runs land in the same, predictable order.
 - `STAGED` locations are preferred Directed Put candidates over `EMPTY` ones when the putting worker does not have Consolidating mode on (excluded entirely, in favor of `EMPTY` only, when Consolidating is on). A Manual Put onto a `STAGED` location is allowed but shows a non-blocking warning.
 - IM and above can Unstage (clear) or Restage an aisle's `STAGED` locations via a modal on the Stage Aisle screen.

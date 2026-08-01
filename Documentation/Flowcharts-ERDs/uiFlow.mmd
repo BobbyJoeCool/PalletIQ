@@ -23,24 +23,12 @@ flowchart TD
     LGN --> PIN["PinPage — /pin\nsrc/pages/PinPage.tsx"]
     PIN --> HOM
 
-    HOM{{"HomePage — MMN — /\nsrc/pages/HomePage.tsx\n15-button function grid, 5 columns"}}
+    HOM{{"HomePage — MMN — /\nsrc/pages/HomePage.tsx\n19-button function grid, 6 columns (Inventory Management holds 4, all others 3)"}}
 
     subgraph PROD["Production"]
         PIP["PIP — Pallet ID Pull\n/pull — PIPPage.tsx"]
         SDP["SDP — System Directed Put\n/put/directed — SDPPage.tsx"]
         MNP["MNP — Manual Put\n/put/manual — MNPPage.tsx"]
-    end
-
-    subgraph INV["Inventory Management"]
-        PII["PII — Pallet ID Info\n/pallet — PIIPage.tsx"]
-        IID["IID — Item ID Lookup\n/item — IIDPage.tsx"]
-        PAR["PAR — Pallet Reinstate\n/pallet/reinstate — PARPage.tsx"]
-    end
-
-    subgraph LOC["Location Management"]
-        LII["LII — Location ID Info\n/location — LIIPage.tsx"]
-        WLH["WLH — Warehouse Location Hold\n/hold — WLHPage.tsx"]
-        ISI["ISI — Item Storage Inquiry\n/storage-inquiry — ISIPage.tsx"]
     end
 
     subgraph GPM["GPM Functions"]
@@ -49,58 +37,86 @@ flowchart TD
         STG["STG — Stage Aisle\n/stage — STGPage.tsx"]
     end
 
-    subgraph RPTG["Reporting Functions"]
-        SAR["SAR — Staged Aisle Report\n/staged-aisle — SARPage.tsx"]
-        IRP["IRP — Individual Reporting\n/reporting/individual — PlaceholderPage (not built)"]
-        PRQ["PRQ — Pull Request by Label\n/reporting/pull-request — PlaceholderPage (not built)"]
+    subgraph INV["Inventory Management"]
+        PII["PII — Pallet ID Info\n/pallet — PIIPage.tsx"]
+        IID["IID — Item ID Lookup\n/item — IIDPage.tsx"]
+        PAR["PAR — Pallet Reinstate\n/pallet/reinstate — PARPage.tsx"]
+        OCC["OCC — Overpack Carton Create\n/overpack — PlaceholderPage (not built)"]
     end
 
-    %% Home screen function grid — tapping a button navigates directly. Reporting
-    %% Functions is a mixed group: SAR is built (solid arrow), IRP/PRQ are not
-    %% (dashed arrow, same as before).
+    subgraph LOC["Location Management"]
+        LII["LII — Location ID Info\n/location — LIIPage.tsx"]
+        WLH["WLH — Warehouse Location Hold\n/hold — WLHPage.tsx"]
+        ISI["ISI — Item Storage Inquiry\n/storage-inquiry — ISIPage.tsx"]
+    end
+
+    subgraph CTM["Container Management"]
+        PRQ["PRQ — Pull Request by Label\n/reporting/pull-request — PlaceholderPage (not built)"]
+        LRP["LRP — Container Reprint\n/container/reprint — PlaceholderPage (not built)"]
+        CII["CII — Container ID Inquiry\n/container — PlaceholderPage (not built)"]
+    end
+
+    subgraph RPTG["Reporting Functions"]
+        SAR["SAR — Staged Aisle Report\n/staged-aisle — SARPage.tsx"]
+        IRP["IRP — Individual Reporting\n/reporting/individual — IRPPage.tsx"]
+        WTP["WTP — Warehouse Team Reporting\n/reporting/team — PlaceholderPage (not built)"]
+    end
+
+    %% Home screen function grid — tapping a button navigates directly. Container
+    %% Management is entirely not-built (dashed arrow to the subgraph). Inventory
+    %% Management and Reporting Functions are each a mixed group: the built buttons get a
+    %% solid arrow to the subgraph, the one not-built button in each gets its own dashed
+    %% arrow.
     HOM -->|tap button| PROD
-    HOM -->|tap button| INV
-    HOM -->|tap button| LOC
     HOM -->|tap button| GPM
-    HOM -->|"tap SAR"| SAR
-    HOM -.->|"tap IRP/PRQ — built:false in JUMP_CODES\nMessageBar error, stays on Home"| RPTG
+    HOM -->|"tap PII/IID/PAR"| INV
+    HOM -.->|"tap OCC — built:false in JUMP_CODES\nMessageBar info, stays on Home"| OCC
+    HOM -->|tap button| LOC
+    HOM -.->|"tap PRQ/LRP/CII — built:false in JUMP_CODES\nMessageBar info, stays on Home"| CTM
+    HOM -->|"tap SAR/IRP"| RPTG
+    HOM -.->|"tap WTP — built:false in JUMP_CODES\nMessageBar info, stays on Home"| WTP
 
     %% Header "Home" button from any built screen
     PROD -.->|"Header ⌂ Home"| HOM
+    GPM -.->|"Header ⌂ Home"| HOM
     INV -.->|"Header ⌂ Home"| HOM
     LOC -.->|"Header ⌂ Home"| HOM
-    GPM -.->|"Header ⌂ Home"| HOM
-    SAR -.->|"Header ⌂ Home"| HOM
+    RPTG -.->|"Header ⌂ Home"| HOM
 
     JMP{{"HotJump overlay\nsrc/components/shell/HotJump.tsx\ntype a 3-letter jump code"}}
 
     %% Header "Jump" button opens the overlay from any authenticated screen, including Home
     HOM ---|"Header ›_ Jump"| JMP
     PROD ---|"Header ›_ Jump"| JMP
+    GPM ---|"Header ›_ Jump"| JMP
     INV ---|"Header ›_ Jump"| JMP
     LOC ---|"Header ›_ Jump"| JMP
-    GPM ---|"Header ›_ Jump"| JMP
-    SAR ---|"Header ›_ Jump"| JMP
+    RPTG ---|"Header ›_ Jump"| JMP
 
     %% From HotJump, a valid built code navigates immediately, closing the overlay
     JMP -->|"resolved code, built:true"| HOM
     JMP -->|"resolved code, built:true"| PROD
+    JMP -->|"resolved code, built:true"| GPM
     JMP -->|"resolved code, built:true"| INV
     JMP -->|"resolved code, built:true"| LOC
-    JMP -->|"resolved code, built:true"| GPM
-    JMP -->|"resolved code, built:true"| SAR
-    JMP -.->|"resolved code, built:false\nMessageBar error, overlay stays open"| RPTG
+    JMP -->|"resolved code, built:true"| RPTG
+    JMP -.->|"resolved code, built:false\nMessageBar info, overlay stays open"| OCC
+    JMP -.->|"resolved code, built:false\nMessageBar info, overlay stays open"| CTM
+    JMP -.->|"resolved code, built:false\nMessageBar info, overlay stays open"| WTP
 
     %% Header "Logout" button from any authenticated screen, including Home
     HOM -.->|"Header Logout"| LGN
     PROD -.->|"Header Logout"| LGN
+    GPM -.->|"Header Logout"| LGN
     INV -.->|"Header Logout"| LGN
     LOC -.->|"Header Logout"| LGN
-    GPM -.->|"Header Logout"| LGN
-    SAR -.->|"Header Logout"| LGN
+    RPTG -.->|"Header Logout"| LGN
 
     style HOM fill:#1a1a1a,stroke:#CC0000,color:#fff
     style JMP fill:#1a1a1a,stroke:#CC0000,color:#fff
     style LGN fill:#1a1a1a,stroke:#555,color:#fff
-    style IRP fill:#330000,stroke:#660000,color:#ff8080
+    style OCC fill:#330000,stroke:#660000,color:#ff8080
     style PRQ fill:#330000,stroke:#660000,color:#ff8080
+    style LRP fill:#330000,stroke:#660000,color:#ff8080
+    style CII fill:#330000,stroke:#660000,color:#ff8080
+    style WTP fill:#330000,stroke:#660000,color:#ff8080

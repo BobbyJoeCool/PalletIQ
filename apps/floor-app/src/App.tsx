@@ -95,6 +95,10 @@ export default function App() {
           <Route path="/reporting/individual"    element={<IRPPage />} />
           <Route path="/reporting/individual/:functionCode" element={<IRPHourlyPage />} />
           <Route path="/reporting/pull-request"  element={<PlaceholderPage code="PRQ" />} />
+          <Route path="/reporting/team"          element={<PlaceholderPage code="WTP" />} />
+          <Route path="/container"               element={<PlaceholderPage code="CII" />} />
+          <Route path="/container/reprint"       element={<PlaceholderPage code="LRP" />} />
+          <Route path="/overpack"                element={<PlaceholderPage code="OCC" />} />
         </Route>
       </Route>
 

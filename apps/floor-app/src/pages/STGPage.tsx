@@ -8,6 +8,7 @@ import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { SizeField } from '../components/shared/SizeField';
 import { ZoneCodeBadge } from '../components/shared/ZoneCodeBadge';
+import { ZoneField } from '../components/shared/ZoneField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { useAuth } from '../context/AuthContext';
 import { useMessageBar } from '../context/MessageBarContext';
@@ -118,8 +119,19 @@ function FieldDisplay({
  *  Size's, since only PalletCodePicker's own flex-1 wrapper splits its width with a `▾`
  *  button sibling. */
 function PalletBox({
-  label, value, onFocus, active = false, tinted = false, large = false, reserveToggleSpace = false, invalid = false,
-}: { label: string; value: string; onFocus: () => void; active?: boolean; tinted?: boolean; large?: boolean; reserveToggleSpace?: boolean; invalid?: boolean }) {
+  label, value, onFocus, active = false, tinted = false, large = false, reserveToggleSpace = false, invalid = false, autoFocus = false,
+}: { label: string; value: string; onFocus: () => void; active?: boolean; tinted?: boolean; large?: boolean; reserveToggleSpace?: boolean; invalid?: boolean; autoFocus?: boolean }) {
+  // Focuses once on mount when this box just replaced an InheritedDisplay (GitHub #156)
+  // — InheritedDisplay's own tap only arms the override (a state flip its parent owns);
+  // without this, the box this swaps in for renders visibly editable but the numpad never
+  // opens, silently requiring an unexpected second tap to actually start typing. Only ever
+  // passed by a conditionally-rendered call site (a field that toggles between
+  // InheritedDisplay and this box), never by an always-mounted one (e.g. Qty) — this only
+  // fires on that swap-in mount, not on every render.
+  useEffect(() => {
+    if (autoFocus) onFocus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
       <button
@@ -147,7 +159,13 @@ function PalletBox({
 /** Display of a field currently inheriting Master Control's value (issue #99) — same
  *  visual chrome as PalletBox (so swapping between this and the real entry field on
  *  override-toggle never shifts layout). Tapping it activates that field's override
- *  directly (STG fix — previously required tapping the separate OVERRIDE toggle first).
+ *  directly (STG fix — previously required tapping the separate OVERRIDE toggle first) —
+ *  and, since GitHub #156, actually focuses/opens the input panel too: `onActivate` only
+ *  flips the override state here (this component doesn't know how to focus the field that
+ *  replaces it), so the box that swaps in on the other side of that toggle is the one that
+ *  focuses itself, via its own `autoFocus` prop (see PalletBox/PalletCodePicker) — this
+ *  component's own doc note previously overstated that a single tap alone was already
+ *  sufficient, when arming and focusing had actually stayed two separate un-linked steps.
  *  `reserveToggleSpace` reserves the same trailing width `PalletCodePicker`'s own popup
  *  toggle button occupies (STG fix — Storage/Size/Zone's box was narrower than Aisle's
  *  while overridden, since only they have that extra button eating into their row's
@@ -219,7 +237,7 @@ function OverrideToggle({ active, onClick, ariaLabel }: { active: boolean; onCli
  * dependency-prop shape.
  */
 function PalletCodePicker({
-  label, ariaLabel, value, onChange, field: fieldKind, aisle, storageCodeForSize, maxLength, transform, earlyCommit, onInvalid, onValidityChange, tinted = false, invalid: forcedInvalid = false,
+  label, ariaLabel, value, onChange, field: fieldKind, aisle, storageCodeForSize, maxLength, transform, earlyCommit, onInvalid, onValidityChange, tinted = false, invalid: forcedInvalid = false, autoFocus = false,
 }: {
   label: string;
   ariaLabel: string;
@@ -251,6 +269,9 @@ function PalletCodePicker({
   /** Forces the wash on top of this field's own internal narrowed-list check — not needed
    *  for the ordinary case, which the field now handles on its own (Feature 10). */
   invalid?: boolean;
+  /** Focuses once on mount (GitHub #156) — see PalletBox's own doc on the same prop; only
+   *  ever passed by a call site that swaps in from InheritedDisplay on override-arm. */
+  autoFocus?: boolean;
 }) {
   // Always called (Rules of Hooks) — internally no-ops (returns null) while `aisle` is
   // null, and simply unused for `field === 'zone'`.
@@ -269,6 +290,12 @@ function PalletCodePicker({
     panel: 'keyboard', maxLength, transform, earlyCommit, strict: true, onInvalid, onValidityChange, optionsLoading,
   });
   const invalid = forcedInvalid || computedInvalid;
+
+  // See PalletBox's identical effect for the full rationale (GitHub #156).
+  useEffect(() => {
+    if (autoFocus) focusField();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div ref={wrapperRef} className="relative flex-1 min-h-0 flex items-stretch gap-1">
@@ -503,11 +530,11 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   const toggleSizeOverride = useCallback(() => {
     updateStack(index, stack.sizeOverride ? { sizeOverride: false, size: '' } : { sizeOverride: true, size: master.size });
   }, [index, stack.sizeOverride, master.size, updateStack]);
-  // Zone has no Master Control field to pre-fill from (unlike Aisle/Storage/Size) — arming
-  // just starts it blank, disarming clears it back out the same as the others.
+  // Zone now has a Master Control field to pre-fill from too (GitHub #192 — previously it
+  // had none, so arming always started blank); same pre-fill/clear shape as the other three.
   const toggleZoneOverride = useCallback(() => {
-    updateStack(index, stack.zoneOverride ? { zoneOverride: false, zone: '' } : { zoneOverride: true, zone: '' });
-  }, [index, stack.zoneOverride, updateStack]);
+    updateStack(index, stack.zoneOverride ? { zoneOverride: false, zone: '' } : { zoneOverride: true, zone: master.zone });
+  }, [index, stack.zoneOverride, master.zone, updateStack]);
 
   /** Clears this one stack's Aisle/Storage/Size/Zone/Qty (and any active overrides on them)
    *  and any computed locations/shortfall — the single-slot version of `clearForks()`'s own
@@ -556,7 +583,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
         <div className="relative flex-1 min-h-0 flex items-stretch gap-1">
           <OverrideToggle active={stack.aisleOverride} onClick={toggleAisleOverride} ariaLabel={`${STACK_LABELS[index]} Aisle override`} />
           {stack.aisleOverride ? (
-            <PalletBox label="Aisle" value={aisleFields.field.value} onFocus={aisleFields.focusField} active={aisleFields.field.isActive} tinted reserveToggleSpace invalid={aisleFields.invalid} />
+            <PalletBox label="Aisle" value={aisleFields.field.value} onFocus={aisleFields.focusField} active={aisleFields.field.isActive} tinted reserveToggleSpace invalid={aisleFields.invalid} autoFocus />
           ) : (
             <InheritedDisplay label="Aisle" value={master.aisle} onActivate={toggleAisleOverride} reserveToggleSpace />
           )}
@@ -578,6 +605,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               maxLength={1}
               onValidityChange={handleZoneValidityChange}
               tinted
+              autoFocus
             />
           ) : (
             <InheritedDisplay label="Zone" value="" onActivate={toggleZoneOverride} reserveToggleSpace />
@@ -597,6 +625,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               transform={(v) => v.toUpperCase()}
               onValidityChange={handleStorageValidityChange}
               tinted
+              autoFocus
             />
           ) : (
             <InheritedDisplay label="Storage" value={master.storageCode} onActivate={toggleStorageOverride} reserveToggleSpace />
@@ -618,6 +647,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               earlyCommit={(v) => ['S', 'M', 'L'].includes(v)}
               onValidityChange={handleSizeValidityChange}
               tinted
+              autoFocus
             />
           ) : (
             <InheritedDisplay label="Size" value={master.size} onActivate={toggleSizeOverride} reserveToggleSpace />
@@ -1564,9 +1594,12 @@ function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }
  * `grid-cols-3`) per direct instruction — the field group's position now depends on the
  * other two elements' actual widths rather than always centering against the row's own
  * full width regardless of them. Fill All was removed in issue #99 — every stack's
- * Aisle/StorageCode/Size now inherits these fields' current values live unless a worker
- * explicitly overrides one (see StackBox), so there's no separate "push to the stacks"
- * step left to trigger; the left-hand button group is simply empty for non-IM+ roles now.
+ * Aisle/StorageCode/Size/Zone now inherits these fields' current values live unless a
+ * worker explicitly overrides one (see StackBox), so there's no separate "push to the
+ * stacks" step left to trigger; the left-hand button group is simply empty for non-IM+
+ * roles now. Zone (GitHub #192) is the newest of the four and, unlike the other three, only
+ * ever restricts the front stack's own destination search (via `effectiveStack`) — it has
+ * no separate "does this aisle even have this?" narrowing role the way Storage Code/Size do.
  */
 function MasterControl({ isIM, onUnstage, onRefresh }: {
   isIM: boolean;
@@ -1619,6 +1652,20 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
       setMessage({ type: 'error', text: 'Master Control - Size - Invalid Entry' });
     }
   }, [setMessage]);
+  // GitHub #192 — Master Control's own optional Zone control, mirroring the per-stack Zone
+  // override that already existed (issue #99 follow-up): sets the target *starting* zone
+  // for staging (front stack only, same as every other Master Control field) — staging
+  // begins in that zone, then continues to the beginning of the aisle (bin 1) without
+  // restarting in zones already covered, matching the per-stack override's own established
+  // search behavior exactly, since both now flow through the same `effectiveStack().zone`
+  // (see stagingHelpers.ts) into the same `fetchStagingLocations` call. Blank means "no zone
+  // restriction," same as before Master Control had a Zone at all.
+  const handleZoneValidityChange = useCallback((inv: boolean) => {
+    if (inv) {
+      playAlert('error');
+      setMessage({ type: 'error', text: 'Master Control - Zone - Invalid Entry' });
+    }
+  }, [setMessage]);
 
   return (
     <div className="pt-3 pb-4 border-b border-[#1C1C1C] shrink-0 px-4">
@@ -1666,6 +1713,14 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
             ariaLabel="Master Size"
             strict
             onValidityChange={handleSizeValidityChange}
+          />
+          <ZoneField
+            value={master.zone ? parseInt(master.zone, 10) : null}
+            onChange={(v) => setMaster({ zone: v != null ? String(v) : '' })}
+            size="compact"
+            label="Zone"
+            strict
+            onValidityChange={handleZoneValidityChange}
           />
         </div>
 
@@ -1722,14 +1777,17 @@ function STGScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routerLocation.state]);
 
-  /** Clears all 3 stacks' Aisle/Storage/Size/Qty (and any active overrides or computed
+  /** Clears all 3 stacks' Aisle/Storage/Size/Zone/Qty (and any active overrides or computed
    *  locations/shortfall) — Master Control is untouched. Available to every role, unlike
    *  Unstage Aisle (which acts on real, already-staged locations — this only clears local,
-   *  unsubmitted entry). */
+   *  unsubmitted entry). Mirrors StackBox's own single-stack `clearStack` field-for-field
+   *  (fixed here, GitHub #192 — this one had drifted to omit zone/zoneOverride, the only
+   *  one of the four override pairs it was missing). */
   function clearForks() {
     ([0, 1, 2] as const).forEach((i) => updateStack(i, {
       aisle: '', storageCode: '', size: '', quantity: '', locations: [], shortfall: 0,
       aisleOverride: false, storageCodeOverride: false, sizeOverride: false,
+      zone: '', zoneOverride: false,
     }));
   }
 

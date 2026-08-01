@@ -218,8 +218,12 @@ export function ELAPage() {
     // Default sort matches what was actually searched for: the queried size's own count
     // when one was given (so its column shows as already sorted), otherwise Aisle number.
     setSort(size ? { column: size, direction: 'desc' } : { column: 'aisle', direction: 'asc' });
+    // GitHub #191: Size is a sort/display control here, not a query-narrowing filter —
+    // deliberately never sent to the API (unlike STG's own InfoPanel, which reuses this
+    // same endpoint but still narrows by its Master Control Size). Only Aisle Range and
+    // Workstation narrow which aisles come back; every qualifying aisle's full sizes
+    // breakdown is always returned regardless of `size`.
     const params = new URLSearchParams({ storageCode });
-    if (size) params.set('size', size);
     if (aisleStart) params.set('aisleStart', aisleStart);
     if (aisleEnd) params.set('aisleEnd', aisleEnd);
     if (workstation) params.set('workstation', workstation);
@@ -248,11 +252,15 @@ export function ELAPage() {
   }
 
   /** Sorts by the tapped column; tapping the already-active column flips its direction.
-   *  Sorting by a size column also fills that size into the Size filter above (direct
+   *  Sorting by a size column also fills that size into the Size field above (direct
    *  instruction) — column is literally a size code whenever it isn't 'aisle' (see
-   *  AisleSizeTable's own column definitions), so this is the same value the filter field
-   *  itself would hold; re-triggers the existing fetch-on-filter-change effect and clears
-   *  the current row selection, same as changing Size directly via the field does. */
+   *  AisleSizeTable's own column definitions), so this is the same value the field itself
+   *  would hold. Size is a display/sort control, not a query filter (GitHub #191 — it's
+   *  deliberately excluded from the fetch effect's own params below), so writing it here
+   *  doesn't narrow the grid; it's kept in sync because Stage Aisle reads Size straight off
+   *  this same state to pre-populate STG (see stageAisle below), and because it drives the
+   *  fetch effect's own default-sort-on-refetch logic. Clears the current row selection,
+   *  same as changing Size directly via the field does. */
   function handleSort(column: string) {
     setSort((prev) => (prev.column === column
       ? { column, direction: prev.direction === 'asc' ? 'desc' : 'asc' }

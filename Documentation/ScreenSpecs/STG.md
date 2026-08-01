@@ -29,13 +29,19 @@ local state by default — it *live-inherits* Master Control's current value con
 automatically, with no button, unless a worker explicitly arms a per-field override toggle
 (one each for Aisle/Storage Code/Size — three per stack) for that one stack. An overridden
 field becomes a normal editable box again (pre-filled with Master Control's value at the
-moment it was armed); disarming it reverts to a plain display of whatever Master Control
+moment it was armed) and, as of GitHub #156, is auto-focused the instant it's armed — a
+single tap on the field (not the small OVERRIDE toggle) both arms the override *and* opens
+the input panel in one action, rather than requiring a first tap to arm and a second to
+actually start typing. Disarming reverts to a plain display of whatever Master Control
 currently holds. Since an override (a boolean flag plus its own value) is stored directly
 on the stack's own state, it rides along automatically through `compactStacks`/
 `resetStackAfterStage` below — no separate position-indexed override tracking was needed
 for an override to "travel down the forks" as the queue advances. This replaced the old
 Fill All/per-stack Fill buttons entirely (removed — inheritance no longer needs a manual
-trigger).
+trigger). **(GitHub #192)** Zone joined this same inherit-unless-overridden shape — Master
+Control gained its own optional Zone control (previously only the per-stack override
+existed, with nothing at Master Control to inherit from); see the Master Control bullet
+below.
 
 When Staging stages and clears, the queue **compacts forward**: whichever of Next/On Deck is filled slides
 all the way into Staging, skipping past an empty slot in between if one exists (e.g. if
@@ -74,23 +80,38 @@ exactly as left. State clears only when the authenticated route tree unmounts (l
 2. **Master Control** (top bar): worker fills Aisle (3-digit numpad, auto-commits/pads),
    Storage Code and Size (both `CodePickerField`-family, `strict` — a value typed that
    isn't actually valid clears itself and posts `"Master Control - Storage Code/Size -
-   Invalid Entry"`). These three fields independently drive the **Live Info Panel** at
-   the bottom of the screen (see step 6), and are live-inherited by every stack box that
-   isn't individually overriding a given field (see step 3).
-3. **(v1.7.2, issue #99)** Each of the three stack boxes (**On Deck**, **Next**,
-   **Staging**, left to right) shows its own Aisle/Storage Code/Size as a plain,
-   non-interactive display of Master Control's current value by default — no fill step
-   needed, it just tracks Master Control live. Next to each of the three fields is a small
-   override toggle; tapping it arms that one field for that one stack only (turning it
-   blue, pre-filled with Master Control's value at that moment) so the worker can type a
-   different value for just that field on just that stack, independent of Master Control
-   and the other two stacks. Tapping the toggle again disarms it, reverting to the plain
-   inherited display. Quantity is unaffected by any of this — it's always its own direct
-   entry field, never inherited from anywhere.
+   Invalid Entry"`), and **(GitHub #192)** an optional **Zone** (`ZoneField`, 1-4, also
+   `strict`). Note: Storage Code validates against the codes narrowed to the *current*
+   Aisle (`strictToAisle`) — with no Aisle yet, that narrowed list is empty rather than
+   "still loading," so a Storage Code typed before an Aisle is entered is rejected
+   regardless of its own validity; fill Aisle first to avoid this, even though Storage
+   Code sits to its left in the layout. These four fields independently drive the **Live
+   Info Panel** at the bottom of the screen (see step 6; Zone does not affect the panel),
+   and are live-inherited by every stack box that isn't individually overriding a given
+   field (see step 3). Zone has no bearing on Storage Code/Size validity or the Live Info
+   Panel — it only ever affects the Staging slot's own destination-location search (see
+   step 4): staging begins in that zone, then continues to the beginning of the aisle
+   (bin 1) without restarting in zones already covered, identical to the per-stack Zone
+   override's own established behavior (both now flow through the same
+   `effectiveStack().zone` — see `src/lib/stagingHelpers.ts`).
+3. **(v1.7.2, issue #99; Zone joined in GitHub #192)** Each of the three stack boxes
+   (**On Deck**, **Next**, **Staging**, left to right) shows its own Aisle/Storage
+   Code/Size/Zone as a plain, non-interactive display of Master Control's current value by
+   default — no fill step needed, it just tracks Master Control live. Next to each of the
+   four fields is a small override toggle; tapping the *field itself* (not just the
+   toggle) arms that one field for that one stack only — pre-filling it with Master
+   Control's value at that moment, turning it blue, and (GitHub #156) auto-focusing it so
+   the input panel is already open and ready to type into, no second tap needed — so the
+   worker can enter a different value for just that field on just that stack, independent
+   of Master Control and the other two stacks. Tapping the toggle again disarms it,
+   reverting to the plain inherited display. Quantity is unaffected by any of this — it's
+   always its own direct entry field, never inherited from anywhere.
    - Each stack's own **Clear** pill (now sharing Quantity's row, to its left), or the
      Cab's **Clear Forks** button — clears that one stack's (or all three stacks')
-     Aisle/Storage Code/Size/Quantity/computed locations and disarms any active overrides;
-     never touches Master Control.
+     Aisle/Storage Code/Size/Zone/Quantity/computed locations and disarms any active
+     overrides; never touches Master Control. (GitHub #156 — Clear Forks had drifted to
+     omit Zone/zoneOverride, the only one of the four override pairs it was missing; fixed
+     to match the single-stack Clear, which already reset it correctly.)
 4. Once the **Staging** slot's Aisle + Storage Code + Size + Quantity are all filled, the
    **Locations panel** (right of the stack boxes) fetches and displays up to Quantity
    destination locations as tappable bubbles (`{Aisle}-{Bin}-{Level}` format), laid out
@@ -201,11 +222,12 @@ through a subsequent valid one.
 ├────────────────────────────── Message Bar (74px) ────────────────────────────────┤
 ├──────────────────────────── Content slot (792px) ────────────────────────────────┤
 │              Master Control                                                     │
-│ [Unstage▲]              [Storage▾][Aisle][Size▾]         [Refresh]              │
+│ [Unstage▲]        [Storage▾][Aisle][Size▾][Zone▾]         [Refresh]             │
 │ ┌────────────────────────────────────────────┐ ┌─────────────────────────────┐  │
 │ │ [Cab img]│ On Deck │  Next  │ Staging(blue) │ │ Locations                   │  │
 │ │ Clear    │[Ovr]Aisle│[Ovr]Aisle│[Ovr] Aisle  │ │  (bubbles, 1-3 cols,        │  │
-│ │ Forks    │[Ovr]Storag│[Ovr]Storag│[Ovr] Storage│ │   dynamic size)           │  │
+│ │ Forks    │[Ovr]Zone │[Ovr]Zone │[Ovr]  Zone   │ │   dynamic size)           │  │
+│ │          │[Ovr]Storag│[Ovr]Storag│[Ovr] Storage│ │                             │  │
 │ │          │[Ovr]Size │[Ovr]Size │[Ovr]  Size   │ │                             │  │
 │ │          │┌────────┐│┌────────┐│┌────────────┐│ │        [STAGE]              │  │
 │ │          ││Clr│ QTY ││Clr│ QTY │Clr│   QTY    ││ │                             │  │
@@ -234,15 +256,21 @@ own flipped orientation.
   while overridden — issue #99; a plain display otherwise): numpad-driven
   (`useNumpadField`), 3-digit auto-commit/pad (Master Control) or plain confirm-driven
   (stack boxes, via `handleAisleConfirm`, which also validates existence).
-- **Master Control Storage Code/Size** and each **stack's Storage Code/Size** (same
-  overridden-only rendering rule): both use the type-or-tap-chevron code-picker pattern —
-  Master Control via the shared `StorageCodeField`/`SizeField` components; each stack via
-  a local `PalletCodePicker` (a dedicated reimplementation of the same field+popup logic
-  inside the pallet-slat visual chrome `PalletBox` uses, since `CodePickerField`'s own
-  `size` variants don't match that box's rounding/height/label position). Both are
-  `strict` once their narrowing data has loaded.
-- **Each field's override toggle** (issue #99): a plain tap, no numpad/keyboard involved —
-  arms/disarms that one field's override for that one stack.
+- **Master Control Storage Code/Size/Zone** and each **stack's Storage Code/Size/Zone**
+  (same overridden-only rendering rule): all use the type-or-tap-chevron code-picker
+  pattern — Master Control via the shared `StorageCodeField`/`SizeField`/`ZoneField`
+  components (GitHub #192 added Zone); each stack via a local `PalletCodePicker` (a
+  dedicated reimplementation of the same field+popup logic inside the pallet-slat visual
+  chrome `PalletBox` uses, since `CodePickerField`'s own `size` variants don't match that
+  box's rounding/height/label position). All are `strict` once their narrowing data has
+  loaded (Zone never narrows by aisle — always the fixed 1-4 list).
+- **Each field's override toggle** (issue #99; Zone joined in GitHub #192): a plain tap,
+  no numpad/keyboard involved — arms/disarms that one field's override for that one
+  stack. Tapping the field itself (not just the toggle) also arms it, and — GitHub #156 —
+  auto-focuses the field the same tap opens, via each field's own `autoFocus` prop
+  (`PalletBox`/`PalletCodePicker`), which fires the field's normal focus handler once on
+  mount (i.e. exactly when the override just switched on and the box swapped in from
+  `InheritedDisplay`).
 - **Quantity** (each stack) and **Unstage/Restage's per-type Quantity**: plain numpad
   fields.
 - Physical barcode scanner input (`deliverScan()`) is available as a shared app
@@ -282,8 +310,9 @@ own flipped orientation.
   'HOLD_BOTH'` on the rejected location with the chosen reason code, via the reject/hold
   flow.
 
-**Not written:** Master Control's own Aisle/Storage Code/Size, and every stack's own
-Aisle/Storage Code/Size/Quantity/override flags (issue #99), live only in client-side
+**Not written:** Master Control's own Aisle/Storage Code/Size/Zone, and every stack's own
+Aisle/Storage Code/Size/Zone/Quantity/override flags (issue #99; Zone since GitHub #192),
+live only in client-side
 `StagingContext` (session state) — nothing about "what's currently queued on the forks"
 is persisted server-side until a `STAGE`/`RESTAGE` call actually commits a location's
 status change. The staging Log is likewise session-local and not the same thing as the
@@ -303,7 +332,7 @@ flowchart TD
     B -- No --> D[Restore StagingContext session state as-is]
     C --> E[Master Control filled]
     D --> E
-    E --> F[Every stack's Aisle/Storage/Size live-inherits Master Control]
+    E --> F[Every stack's Aisle/Storage/Size/Zone live-inherits Master Control]
     F -- Worker arms an override toggle --> G[That one field, that one stack, becomes editable]
     F -- No override --> H[Field stays a plain display, tracking Master Control]
     G --> I{Staging slot's effective Aisle+Storage+Size+Qty all set?}
@@ -335,18 +364,35 @@ flowchart TD
 
 ## Behind the Scenes
 
-**Per-field override / live inheritance (F/G/H, issue #99):** Every consumer of a stack's
-Aisle/Storage Code/Size — the field itself, Storage/Size dropdown narrowing, the Staging
-slot's location fetch, the Stage submission, `UnstageModal`'s aisle fallback — reads
-`effectiveStack(stack, master)` (`src/lib/stagingHelpers.ts`), never the stack's raw
-`aisle`/`storageCode`/`size` fields directly. `effectiveStack` returns Master Control's
-current value for any field not overridden, the stack's own stored value for any field
-that is — this is the entire mechanism; there's no separate "sync" step or effect
-propagating Master Control's changes outward, since every read already resolves live.
-Arming an override (`aisleOverride`/`storageCodeOverride`/`sizeOverride`, one boolean per
-field on `StackState`) pre-fills the stack's own field with Master Control's value at that
+**Per-field override / live inheritance (F/G/H, issue #99; Zone joined in GitHub #192):**
+Every consumer of a stack's Aisle/Storage Code/Size/Zone — the field itself, Storage/Size
+dropdown narrowing, the Staging slot's location fetch, the Stage submission,
+`UnstageModal`'s aisle fallback — reads `effectiveStack(stack, master)`
+(`src/lib/stagingHelpers.ts`), never the stack's raw `aisle`/`storageCode`/`size`/`zone`
+fields directly. `effectiveStack` returns Master Control's current value for any field not
+overridden, the stack's own stored value for any field that is — this is the entire
+mechanism; there's no separate "sync" step or effect propagating Master Control's changes
+outward, since every read already resolves live. Arming an override
+(`aisleOverride`/`storageCodeOverride`/`sizeOverride`/`zoneOverride`, one boolean per field
+on `StackState`) pre-fills the stack's own field with Master Control's value at that
 instant; disarming clears it back to `''` (unused while not overridden, but cleared anyway
-so a stale value never quietly resurfaces the next time the override arms again).
+so a stale value never quietly resurfaces the next time the override arms again). Before
+GitHub #192, Zone was the one field of the four with nothing at Master Control to inherit
+from (`effectiveStack`'s zone branch always resolved to `''` unless the stack's own
+override was armed) — Master Control's Zone control brought it in line with the other
+three.
+
+**Auto-focus on arm (GitHub #156):** arming an override via `InheritedDisplay`'s own tap
+(`onActivate`) only ever flips the boolean — it has no way to focus the *different*
+component that renders in its place once the override is on (`PalletBox` for Aisle,
+`PalletCodePicker` for Storage/Size/Zone). Each of those two components instead takes an
+`autoFocus` prop, passed `true` only at the four per-stack override call sites (never at
+Master Control's own, always-mounted fields), and fires its normal focus handler in a
+`useEffect` with an empty dependency array — meaning it fires exactly once, right when
+React swaps `InheritedDisplay` out for the real field on the override turning on, since
+that's a genuine mount for a component that wasn't there a render ago. A worker (or a
+Playwright helper) tapping the field only once now both arms the override and lands ready
+to type, instead of silently requiring an unnoticed second tap.
 
 **Override toggle placement and row sizing (issue #99, direct-instruction follow-up to
 the initial build):** each field's override toggle renders to the *left* of the field it
@@ -459,6 +505,8 @@ next to the zone summary, not a bug where the log renders twice (it's the same
 
 | Date | Change |
 |---|---|
+| 2026-07-31 (#192) | Master Control gained its own optional Zone control (`ZoneField`), mirroring the per-stack Zone override that already existed — previously Master Control had no Zone at all, so a non-overridden stack's Zone always resolved to "no restriction." `effectiveStack`/`StagingContext`'s `master` state extended to carry `zone`; arming a per-stack Zone override now pre-fills from Master Control's current Zone, matching Aisle/Storage/Size's existing pre-fill behavior. **Real behavior fix found and corrected in the same pass:** `findNextStagingLocation` (`api/lib/stagingLogic.ts`) filtered candidates by an *exact* `zone: opts.zone` match instead of "starting zone, continuing toward bin 1" — meaning a Zone restriction (Master Control's new one, or the pre-existing per-stack override from #129, which shipped with the same bug) could return zero candidates even with real, eligible locations sitting a zone or two further in. Fixed to `zone: { gte: opts.zone }` plus `{ zone: 'asc' }` as the primary sort — the same range-search shape SDP's own `findNextLocation` (`api/lib/zoneLogic.ts`) already uses for its own "at or above this zone" preference. Confirmed live (aisle 303, CR-L): before the fix, restricting to a zone with real empty capacity elsewhere in the aisle returned "No Location" for every slot; after, it correctly falls through to the nearest zone that actually has capacity. Incidental fix found in the same area: Clear Forks (all 3 stacks) had drifted to omit `zone`/`zoneOverride` from its reset, unlike the single-stack Clear, which already reset it correctly. |
+| 2026-07-31 (#156) | Tapping a not-yet-overridden field (`InheritedDisplay`) armed the override but never actually focused/opened the input panel, silently requiring an unnoticed second tap to start typing — `PalletBox`/`PalletCodePicker` gained an `autoFocus` prop, passed only at the four per-stack override call sites, that focuses the field once on the mount that occurs when the override just switched on. Root-caused while investigating why `tests/e2e/stg.spec.ts`'s fill flow (15 of 22 e2e tests across STG/ELA) had been failing; see also ELA.md's Change Log for the sibling fix. Several additional stale test-only issues fixed in the same pass (wrong seed-data aisle/size pairing, a stale "Fill All" test for a button removed in issue #99, a shared `useCodePickerField.selectOption` that never closed the input panel on a popup pick) — no further product behavior changes from those. |
 | 2026-07-28 (Feature 10 / #161) | Both Aisle fields (Master Control and each stack's per-stack override) now use the shared `useAisleField` hook. Master Control's Aisle field previously had **no existence check at all** — an inconsistency with the per-stack override's own check, fixed here (documented behavior addition: Master Control's Aisle now washes red and shows "Master Control - Aisle - Invalid Entry" on a nonexistent aisle, same as the per-stack override already did). The per-stack override's own check switched from `GET /api/locations/empty-by-zone` to the purpose-built `GET /api/locations/aisle-exists` (confirmed identical existence semantics — no behavior change from that switch alone). |
 | 2026-07-28 (#126) | STG's embedded Zone Map (shared `AisleGrid` component) redesigned along with ELZ's own — see ELZ.md's Change Log for the full description. Each of the 8 zone/side columns is now its own dynamically-sized list of occupied levels instead of a fixed one-row-per-level grid; every column fills full height, entries weighted by Size (same-session refinement); Level badge enlarged to 1.5x. |
 | 2026-07-28 (Zone Summary columns) | STG's own Zone Summary panel updated to match ELZ's: one column per Storage Code, each column's badges sorted largest Size first — see ELZ.md's Change Log for the full description. Shared via the new `groupBreakdownByStorageCode` helper (`lib/zoneSummary.ts`). |

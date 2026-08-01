@@ -23,6 +23,10 @@ export const JUMP_CODES: Record<string, JumpCode> = {
   STG: { code: 'STG', label: 'Stage Aisle',                 route: '/stage',                  built: true  },
   IRP: { code: 'IRP', label: 'Individual Reporting',        route: '/reporting/individual',   built: true  },
   PRQ: { code: 'PRQ', label: 'Pull Request by Label',       route: '/reporting/pull-request', built: false },
+  CII: { code: 'CII', label: 'Container ID Inquiry',        route: '/container',              built: false },
+  LRP: { code: 'LRP', label: 'Container Reprint',           route: '/container/reprint',      built: false },
+  WTP: { code: 'WTP', label: 'Warehouse Team Reporting',    route: '/reporting/team',          built: false },
+  OCC: { code: 'OCC', label: 'Overpack Carton Create',      route: '/overpack',                built: false },
 };
 
 /** The subset of jump codes shown as quick-access buttons in the HotJump shortcuts panel. */

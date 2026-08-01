@@ -172,7 +172,17 @@ async function getWorkstations(req: HttpRequest): Promise<unknown> {
  * `size` is optional (added for STG's live info panel — see Feature 2 in
  * DevNotes/DesignPrompts/Feature-2-STG-Live-Matching-Aisle-Zone-Info.md, "Storage Code
  * only" state): when omitted, an aisle qualifies if *any* size has a non-zero empty or
- * staged count, rather than requiring one specific queried size to be non-zero.
+ * staged count, rather than requiring one specific queried size to be non-zero. ELAPage.tsx
+ * itself stopped sending `size` here as of GitHub #191 — Size is a sort/display control on
+ * that screen now, not a narrowing filter (an aisle no longer needs *the queried size* to
+ * have availability to qualify) — but STG's InfoPanel still sends it unchanged, so this
+ * branch stays live for that caller.
+ *
+ * Each returned size entry also carries `total` (GitHub #191) — every non-contracted
+ * location of that aisle+size, regardless of status/hold, vs. `empty`/`staged` which are
+ * both eligibility-filtered. `total > 0` with `empty === 0 && staged === 0` is the "this
+ * aisle stocks this size but nothing's available right now" case the frontend washes blue
+ * instead of rendering blank (indistinguishable from "doesn't stock this size at all").
  *
  * `aisleStart`/`aisleEnd`, `workstation`, and `excludeWorkstations` (GitHub #124/#125)
  * are all optional additional narrowing filters, independent of each other and of
@@ -184,8 +194,8 @@ async function getWorkstations(req: HttpRequest): Promise<unknown> {
  * @param req - HTTP request with query param `storageCode` (required); `size`,
  *   `aisleStart`, `aisleEnd`, `workstation`, `excludeWorkstations` (comma-separated
  *   workstation ids) all optional
- * @returns Array of `{ aisle, totalEmpty, sizes: [{ size, empty, staged }] }`, sizes sorted
- *   per SIZE_ORDER
+ * @returns Array of `{ aisle, totalEmpty, sizes: [{ size, empty, staged, total }] }`, sizes
+ *   sorted per SIZE_ORDER
  * @throws 400 INVALID_INPUT if `storageCode` is missing, or `aisleStart`/`aisleEnd` are
  *   given but non-numeric
  */
@@ -236,7 +246,20 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
   // GitHub #91: match the same eligibility filter findNextLocation/findNextStagingLocation
   // apply before actually offering a candidate — a held (Inbound/Both/Permanent) or
   // contracted location shouldn't count as available capacity here either.
-  const [empties, stageds] = await Promise.all([
+  //
+  // `totals` (GitHub #191) — every non-contracted location for this aisle+size, regardless
+  // of status or hold — exists purely so a size an aisle genuinely stocks, but currently has
+  // zero *available* capacity for (e.g. every unit FILLED, or EMPTY but held), can still be
+  // told apart from a size the aisle never carries at all. Deliberately not run through
+  // NOT_HELD_FILTER like empties/stageds below: a held location still physically exists at
+  // this aisle/size, it's just temporarily unofferable — exactly the "has locations but none
+  // currently available" case this exists to surface, not something to exclude from it.
+  const [totals, empties, stageds] = await Promise.all([
+    prisma.location.groupBy({
+      by: ['aisle', 'size'],
+      where: { storageCode, contraction: false, ...aisleWhere },
+      _count: { _all: true },
+    }),
     prisma.location.groupBy({
       by: ['aisle', 'size'],
       where: { storageCode, status: 'EMPTY', contraction: false, ...NOT_HELD_FILTER, ...aisleWhere },
@@ -249,15 +272,22 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
     }),
   ]);
 
-  const byAisle = new Map<number, Map<string, { empty: number; staged: number }>>();
+  const byAisle = new Map<number, Map<string, { empty: number; staged: number; total: number }>>();
+  for (const row of totals) {
+    if (!byAisle.has(row.aisle)) byAisle.set(row.aisle, new Map());
+    byAisle.get(row.aisle)!.set(row.size, { empty: 0, staged: 0, total: row._count._all });
+  }
   for (const row of empties) {
     if (!byAisle.has(row.aisle)) byAisle.set(row.aisle, new Map());
-    byAisle.get(row.aisle)!.set(row.size, { empty: row._count._all, staged: 0 });
+    const sizes = byAisle.get(row.aisle)!;
+    const existing = sizes.get(row.size) ?? { empty: 0, staged: 0, total: 0 };
+    existing.empty = row._count._all;
+    sizes.set(row.size, existing);
   }
   for (const row of stageds) {
     if (!byAisle.has(row.aisle)) byAisle.set(row.aisle, new Map());
     const sizes = byAisle.get(row.aisle)!;
-    const existing = sizes.get(row.size) ?? { empty: 0, staged: 0 };
+    const existing = sizes.get(row.size) ?? { empty: 0, staged: 0, total: 0 };
     existing.staged = row._count._all;
     sizes.set(row.size, existing);
   }
@@ -272,7 +302,7 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
     })
     .map(([aisle, sizes]) => {
       const sizeCounts = [...sizes.entries()]
-        .map(([s, counts]) => ({ size: s, empty: counts.empty, staged: counts.staged }))
+        .map(([s, counts]) => ({ size: s, empty: counts.empty, staged: counts.staged, total: counts.total }))
         .sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size));
       const totalEmpty = sizeCounts.reduce((sum, s) => sum + s.empty, 0);
       return { aisle, totalEmpty, sizes: sizeCounts };

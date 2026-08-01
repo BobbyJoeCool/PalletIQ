@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.4 — 2026-07-31](#184--2026-07-31)
 - [1.8.0 — 2026-07-26](#180--2026-07-26)
 - [1.7.0 — 2026-07-21](#170--2026-07-21)
 - [1.6.10 — 2026-07-20](#1610--2026-07-20)
@@ -175,6 +176,67 @@ See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the spe
 screen(s) each one touches.
 
 ---
+
+## [1.8.4] — 2026-07-31
+
+Bundles everything shipped since v1.8.0 into one version — the usual one-version-per-change
+cadence (and the one-screen-per-version cadence for the two screen-fix rounds below) was
+skipped this round per direct instruction, so this single entry covers three separate
+pieces of work: the Main Menu Reorg (GitHub #174), ELA's Size-filter fix (#191), and a
+combined STG/ELA round (#192, #156) worked as one pass rather than sequential versions.
+Full session-by-session detail: `DevNotes/Logs/V1.8/version-1_8_0.md` §1.2.48–§1.2.49.
+
+### 1.8.4 — Added
+
+- **Main Menu Reorg (#174):** Home Screen's 5-column grid restructured to 6 columns —
+  Production, GPM Functions, Inventory Management (now 4 buttons — OCC added),
+  Location Management, **Container Management** (new column — PRQ, LRP, CII), Reporting
+  Functions (WTP added). New reserved jump codes `CII`/`LRP`/`WTP`/`OCC`, all `built:
+  false` pending their own feature builds.
+  Every "screen not yet built" message app-wide (not just PRQ) switched from an
+  error-styled message to an info-styled one, since it's an expected/reserved state, not
+  an error.
+- **STG Master Control Zone (#192):** an optional Zone control, mirroring the per-stack
+  Zone override from #129 — sets a starting zone for the Staging slot's destination
+  search, inherited by every stack that isn't overriding its own Zone (same
+  inherit-unless-overridden model Aisle/Storage/Size already used).
+- **ELA — Size an aisle stocks but has zero available** now renders as a distinct
+  blue-washed `0(0)` cell instead of being indistinguishable from a size the aisle
+  doesn't stock at all (#191).
+
+### 1.8.4 — Fixed
+
+- **ELA (#191):** sorting by (or typing) a Size no longer narrows the results grid —
+  previously it could hide an aisle entirely (if it lacked the sorted/typed size) or hide
+  other size columns on aisles that did qualify. Size is now purely a sort/display
+  control; only Storage Code, Aisle Range, and Workstation narrow which aisles appear.
+- **STG Zone search, both Master Control's new control and the pre-existing per-stack
+  override (#129) — found while verifying #192 live:** the destination search filtered by
+  an *exact* zone match instead of "start in this zone, continue toward bin 1, don't
+  restart in an earlier zone" — a Zone restriction could return no candidates even with
+  real capacity a zone or two further in. This bug shipped with #129 originally; #192
+  just made it far more visible. Fixed to a range search matching the same pattern SDP's
+  own directed-put search already uses for its own zone preference.
+- **STG (#156):** tapping a not-yet-overridden field armed the override but never
+  actually focused/opened the input panel, silently requiring an unnoticed second tap.
+- **Shared, app-wide (#156):** picking a value from any dropdown-style field's popup
+  (`CodePickerField`/`PalletCodePicker`, used well beyond STG) never closed the shared
+  input panel the way an Enter/OK commit did — could leave it open on top of, and
+  intercepting clicks meant for, whatever's rendered underneath.
+- **Clear Forks (STG, found alongside #192):** had drifted to not reset a stack's Zone
+  override, unlike the single-stack Clear, which already did.
+- `tests/e2e/ela.spec.ts`/`stg.spec.ts` — full pass now 22/22 (was 7/22 at the start of
+  the #156 investigation): a batch of independent stale assertions fixed alongside the
+  two real bugs above (a seed-data aisle/size pairing that never actually matched, since
+  #191/#156's own fixes exposed it; a test for STG's "Fill All" button, removed in issue
+  #99; several stale selectors/text assertions that had drifted from the current UI).
+
+### 1.8.4 — Known Issues
+
+- [#193](https://github.com/BobbyJoeCool/PalletIQ/issues/193) — STG Master Control's
+  Storage Code field rejects any typed value if Aisle isn't filled first (found, not
+  fixed, while verifying #192 — Storage Code sits to Aisle's *left* in the layout, so a
+  natural left-to-right fill order hits this every time).
 
 ## [1.8.0] — 2026-07-26
 

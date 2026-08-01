@@ -20,11 +20,20 @@ const COLUMNS: { heading: string; buttons: FunctionButton[] }[] = [
     ],
   },
   {
+    heading: 'GPM Functions',
+    buttons: [
+      { code: 'ELA', label: 'Empty Locations by Aisle', route: '/empty/aisle' },
+      { code: 'ELZ', label: 'Empty Locations by Zone',  route: '/empty/zone' },
+      { code: 'STG', label: 'Stage Aisle',              route: '/stage' },
+    ],
+  },
+  {
     heading: 'Inventory Management',
     buttons: [
-      { code: 'PII', label: 'Pallet ID Info',   route: '/pallet' },
-      { code: 'IID', label: 'Item ID Lookup',   route: '/item' },
-      { code: 'PAR', label: 'Pallet Reinstate', route: '/pallet/reinstate' },
+      { code: 'PII', label: 'Pallet ID Info',        route: '/pallet' },
+      { code: 'IID', label: 'Item ID Lookup',        route: '/item' },
+      { code: 'PAR', label: 'Pallet Reinstate',      route: '/pallet/reinstate' },
+      { code: 'OCC', label: 'Overpack Carton Create', route: '/overpack' },
     ],
   },
   {
@@ -36,11 +45,11 @@ const COLUMNS: { heading: string; buttons: FunctionButton[] }[] = [
     ],
   },
   {
-    heading: 'GPM Functions',
+    heading: 'Container Management',
     buttons: [
-      { code: 'ELA', label: 'Empty Locations by Aisle', route: '/empty/aisle' },
-      { code: 'ELZ', label: 'Empty Locations by Zone',  route: '/empty/zone' },
-      { code: 'STG', label: 'Stage Aisle',              route: '/stage' },
+      { code: 'PRQ', label: 'Pull Request by Label', route: '/reporting/pull-request' },
+      { code: 'LRP', label: 'Container Reprint',      route: '/container/reprint' },
+      { code: 'CII', label: 'Container ID Inquiry',   route: '/container' },
     ],
   },
   {
@@ -48,16 +57,23 @@ const COLUMNS: { heading: string; buttons: FunctionButton[] }[] = [
     buttons: [
       { code: 'SAR', label: 'Staged Aisle Report',         route: '/staged-aisle' },
       { code: 'IRP', label: 'Individual Reporting',        route: '/reporting/individual' },
-      { code: 'PRQ', label: 'Pull Request by Label',       route: '/reporting/pull-request' },
+      { code: 'WTP', label: 'Warehouse Team Reporting',    route: '/reporting/team' },
     ],
   },
 ];
 
 /**
- * App home screen — 5-column function grid (3 buttons per column, 15 total).
- * Columns: Production, Inventory Management, Location Management, GPM Functions, Reporting.
- * Tapping a button whose jump code is not yet built shows an error in the message bar
- * instead of navigating, keeping the worker on the home screen.
+ * App home screen — 6-column function grid, 19 buttons total. Every column holds 3
+ * buttons except Inventory Management, which holds 4 (OCC) — the grid's flex layout
+ * (each column stretches to the row's full height, each button is flex-1 within its
+ * own column) means that column's buttons are shorter, not that other columns grow a
+ * matching empty 4th slot. Per direct instruction (2026-07-31, issue #174 Main Menu
+ * Reorg), the fixed 5-column/3-per-column grid this comment used to describe no longer
+ * holds.
+ * Columns: Production, GPM Functions, Inventory Management, Location Management,
+ * Container Management, Reporting Functions.
+ * Tapping a button whose jump code is not yet built shows an info message in the
+ * message bar instead of navigating, keeping the worker on the home screen.
  * Shows a welcome info message on mount via the shell's MessageBarContext.
  */
 export function HomePage() {
@@ -73,7 +89,7 @@ export function HomePage() {
   }, [displayName]);
 
   /**
-   * Navigates to the tapped function's route, or shows an error if the function
+   * Navigates to the tapped function's route, or shows an info message if the function
    * is marked as not yet built in the JUMP_CODES registry.
    *
    * @param btn - The button definition (code, label, route) that was tapped
@@ -81,7 +97,7 @@ export function HomePage() {
   const handleSelect = (btn: FunctionButton) => {
     const entry = JUMP_CODES[btn.code];
     if (!entry?.built) {
-      setMessage({ type: 'error', text: `${btn.label} — not available in this demo` });
+      setMessage({ type: 'info', text: `${btn.label} — screen not yet available` });
       return;
     }
     navigate(btn.route);
@@ -106,7 +122,7 @@ export function HomePage() {
         ))}
       </div>
 
-      {/* Button grid: 3 rows × 5 columns */}
+      {/* Button grid: 6 columns; 3 rows tall except Inventory Management, which is 4 */}
       <div className="flex gap-4 flex-1">
         {COLUMNS.map((col) => (
           <div key={col.heading} className="flex-1 flex flex-col gap-4">

@@ -2,7 +2,11 @@ import { useMemo } from 'react';
 import { CellValue } from './CellValue';
 import { SIZES } from '../../lib/sizes';
 
-export interface AisleSizeCount { size: string; empty: number; staged: number }
+/** `total` (GitHub #191) — every location of this size at this aisle regardless of status/
+ *  hold, vs. `empty`/`staged` which are both eligibility-filtered. Distinguishes "this
+ *  aisle stocks this size but nothing's available right now" (`total > 0`, both others 0)
+ *  from "doesn't stock this size at all" (no entry for this size at all). */
+export interface AisleSizeCount { size: string; empty: number; staged: number; total: number }
 
 export interface AisleSizeRow { aisle: number; totalEmpty: number; sizes: AisleSizeCount[] }
 
@@ -98,9 +102,17 @@ export function AisleSizeTable({
             </div>
             {sizeCols.map((s, i) => {
               const cell = row.sizes.find((sz) => sz.size === s);
+              // GitHub #191 — locations of this size exist at this aisle but none are
+              // currently available; washed blue (80%-transparent, matching STG's own
+              // "Staging" box convention) so it doesn't look identical to a size this aisle
+              // doesn't stock at all (which leaves `cell` undefined and the div plain).
+              const unavailable = cell != null && cell.empty === 0 && cell.staged === 0 && cell.total > 0;
               return (
-                <div key={s} className={`flex-1 px-4 py-3 text-center ${i > 0 ? 'border-l border-[#1F1F1F]' : ''}`}>
-                  {cell && <CellValue empty={cell.empty} staged={cell.staged} large />}
+                <div
+                  key={s}
+                  className={`flex-1 px-4 py-3 text-center ${i > 0 ? 'border-l border-[#1F1F1F]' : ''} ${unavailable ? 'bg-[#3A6BB033]' : ''}`}
+                >
+                  {cell && <CellValue empty={cell.empty} staged={cell.staged} total={cell.total} large />}
                 </div>
               );
             })}

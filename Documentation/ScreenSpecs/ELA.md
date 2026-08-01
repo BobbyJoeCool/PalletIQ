@@ -24,19 +24,27 @@ Route: `/empty/aisle` · Jump code: `ELA` · Component: `src/pages/ELAPage.tsx`
      plain active border, via `StorageCodeField`'s new `invalid` prop.
 3. Worker optionally types or picks a **Size** (`SizeField` — XS/HS/S/M/L, same
    type-or-tap-chevron pattern; a two-letter code auto-commits at 2 characters, a single
-   letter S/M/L commits immediately after 1 keystroke). Size only narrows which aisles
-   qualify — it has never been required. Changing either field re-runs the query
-   immediately, clears the current row selection, and resets sort to the query's default
-   (see step 5).
+   letter S/M/L commits immediately after 1 keystroke). **(GitHub #191, resolved)** Size is
+   a display/sort *control*, not a query-narrowing filter — it has never been required, and
+   as of #191 it no longer excludes aisles or size columns from the results either; it only
+   sets the default sort column (see step 5) and rides along to Stage Aisle's
+   pre-population (step 9). Only the **Storage Code**, Aisle Range, and Workstation fields
+   narrow which aisles come back. Changing Storage Code re-runs the query immediately and
+   clears the current row selection; changing Size re-sorts the already-loaded rows
+   client-side and also clears the selection, without re-querying.
    - 3a. If the typed value isn't one of XS/HS/S/M/L, the message bar shows `"Invalid Size
      — {size}"` and no query runs; the results area shows *"Enter a valid Size to see
      available locations"*. Same red-wash treatment as Storage Code above, via
      `SizeField`'s new `invalid` prop — each field washes independently since Storage Code
      and Size each have their own, independently-checkable validity.
-4. Once a valid Storage Code (with or without Size) resolves, a banner reads *"Displaying
-   {code}: {description}"* above the results table, and the table fills with one row per
-   aisle that has at least one non-zero empty or staged count (aisles that are all-zero
-   across every size are omitted entirely).
+4. Once a valid Storage Code resolves, a banner reads *"Displaying {code}: {description}"*
+   above the results table, and the table fills with one row per aisle that has at least
+   one non-zero empty or staged count *in any size* (aisles that are all-zero across every
+   size are omitted entirely) — Size no longer affects this (#191). Every qualifying
+   aisle's row always shows every size it stocks: a size with real availability renders the
+   normal blank/E/E(S)/(S) count; a size the aisle stocks but has zero currently available
+   (e.g. every unit FILLED, or held) renders a blue-washed `0(0)` cell instead of looking
+   identical to a size the aisle doesn't carry at all (which stays blank, no wash).
 5. **Default sort:** if a Size was given, the table starts sorted descending by that
    size's own empty count (that column already shows the ▼ indicator). If only a Storage
    Code was given, the table starts sorted ascending by Aisle number.
@@ -47,11 +55,14 @@ Route: `/empty/aisle` · Jump code: `ELA` · Component: `src/pages/ELAPage.tsx`
    count for that size to the bottom (a `0` isn't a useful "smallest" result); descending
    already puts zeros last naturally. Ties keep prior relative row order (stable sort).
    Staged counts never affect sort order, only empty counts (or the aisle number itself).
-   **(v1.7.0)** Sorting by a Size column also fills that size into the **Size** filter field
-   above (direct instruction) — the column key *is* the size code, so this reuses the same
-   value the field itself would hold; re-triggers the existing fetch-on-filter-change effect
-   and clears the current row selection, same as changing Size directly via the field does.
-   Sorting by Aisle doesn't touch the Size filter.
+   **(v1.7.0)** Sorting by a Size column also fills that size into the **Size** field above
+   (direct instruction) — the column key *is* the size code, so this reuses the same value
+   the field itself would hold, and clears the current row selection, same as changing Size
+   directly via the field does. **(GitHub #191, resolved)** This no longer re-queries or
+   narrows anything — Size stopped being a query filter entirely, so writing it here is now
+   purely bookkeeping (keeps the field's displayed value in sync, and keeps Stage Aisle's
+   pre-population accurate), not something that changes which rows/columns are shown.
+   Sorting by Aisle doesn't touch the Size field.
 7. Worker taps a row to select it (highlights it) — this activates the **View Zone Map**
    and **Stage Aisle** buttons in the top-right of the screen. Tapping the same row again
    deselects it and disables both buttons; tapping a different row moves the selection.
@@ -140,7 +151,9 @@ column, no history log; the on-screen keyboard slides in only while a field is f
 **Reads:**
 - `Location.storageCode`, `Location.size`, `Location.status` (`EMPTY` vs `STAGED`),
   `Location.aisle` — grouped/counted server-side (`prisma.location.groupBy`) to build the
-  per-aisle, per-size empty/staged breakdown.
+  per-aisle, per-size empty/staged breakdown, plus (GitHub #191) a third, unfiltered-by-
+  status/hold `total` count per aisle+size, used only to distinguish a size with zero
+  *available* capacity from a size the aisle doesn't stock at all.
 - `StorageCode.id`/`StorageCode.desc` — via `GET /api/storage-codes`, feeds the Storage
   Code field's dropdown-helper popup and the "Displaying {code}: {description}" banner.
 
@@ -187,7 +200,20 @@ flowchart TD
 yet flagged invalid") while `useStorageCodes()` is still `null` (its reference list
 hasn't loaded yet), so a valid code isn't wrongly flagged invalid during the brief window
 before the list arrives. Every fetch is guarded by a `cancelled` flag so a fast filter
-change doesn't let a stale, slower response overwrite a newer one.
+change doesn't let a stale, slower response overwrite a newer one. **(GitHub #191)** `size`
+is still a fetch-effect dependency (a `size` change still reruns the effect, to recompute
+the default sort — see below) but is deliberately never added to the request's own query
+params — `GET /api/locations/empty-by-aisle` is called with only `storageCode` (plus Aisle
+Range/Workstation, when set), so the response always covers every size the Storage Code's
+qualifying aisles stock, regardless of Size's current value.
+
+**Zero-but-exists cells (GitHub #191):** the API response's per-size `total` (every
+location of that size at that aisle, regardless of status/hold — unlike `empty`/`staged`,
+which are both eligibility-filtered) lets `CellValue`/`AisleSizeTable` tell "0 available,
+but this aisle genuinely stocks this size" (`total > 0`, blue-washed `0(0)`) apart from
+"doesn't stock this size at all" (no entry for that size in the row's `sizes` array,
+renders blank). Purely a rendering concern — `total` doesn't affect sorting or which rows
+qualify.
 
 **Default sort (M):** Recomputed inside the same effect that triggers the fetch, not a
 separate effect — `setSort` runs synchronously right before the `apiFetch` call, so the
@@ -238,6 +264,8 @@ button, which is the only behavioral difference between the two call sites.
 
 | Date | Change |
 |---|---|
+| 2026-07-31 (#191) | Size stopped being a query-narrowing filter — sorting by (or typing) a Size no longer excludes aisles lacking that size, or hides other size columns on aisles that do qualify; `GET /api/locations/empty-by-aisle` is now called with only Storage Code + Aisle Range/Workstation. Added a `total` count per size (regardless of status/hold) so a size an aisle stocks but currently has zero available for renders as a blue-washed `0(0)` instead of blank (indistinguishable from not stocking that size at all). |
+| 2026-07-31 (#156) | Fixed a shared bug (`src/lib/useCodePickerField.ts`'s `selectOption`, used by every `CodePickerField`/`PalletCodePicker` instance app-wide, including this screen's Storage Code/Size fields) that never closed the shared numpad/keyboard panel after a popup pick — only an Enter/OK/maxLength commit did. Picking a value from a field's dropdown popup (instead of typing it out) could leave the panel open on top of, and intercepting clicks meant for, whatever's rendered underneath it (surfaced here as row-selection clicks silently missing after picking Size from its popup). Root-caused while investigating STG's own e2e failures; see STG.md's Change Log for the sibling fix. |
 | 2026-07-28 (Feature 10 / #161) | Start/End Aisle Range fields now each check real aisle existence (`GET /api/locations/aisle-exists`, via the new shared `useAisleField` hook) — previously "any non-negative number" was accepted with no existence check at all. A nonexistent aisle end still applies to the range filter as typed (this is a range, not a single-value field — a range partly or wholly matching zero aisles is a legitimate, non-error outcome) but now washes red as a hint that the value may be a typo. |
 | 2026-07-27 (Feature 10) | Internal-only: the Workstation restrict-to filter's inline `CodePickerField` usage replaced with a new shared `WorkstationField` component (mechanical extraction — same options list, `strict`, `optionsLoading`, and `onValidityChange` wiring as before, just named/reusable now). No change to documented wash/message conditions. |
 | 2026-07-27 (Feature 10) | Internal-only: Storage Code/Size's invalid-check now lives inside `StorageCodeField`/`SizeField` themselves instead of this screen computing `isInvalidCode`/`isInvalidSize` externally; the Workstation field's strict-mode gate switched from manually disabling `strict` while the reference list loads to passing `optionsLoading` (the mechanism `CodePickerField` already supported, previously unused here). No change to documented wash/message conditions. |
