@@ -5,6 +5,7 @@ import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { parseFullLocationBarcode } from '../lib/locationParser.js';
+import { completePull } from '../lib/logicGate.js';
 
 /**
  * Confirms a container pull via one of three independent verification paths: Pallet ID, UPC,
@@ -220,13 +221,22 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
   // actually been pulled, not just this one. Uses the interactive transaction form (not
   // the array form) since the pallet update depends on a read that must happen after this
   // container's own status write.
+  //
+  // The status transition itself (COMPLETE_PULL, Logic Gate — #149) happens via a separate
+  // call just below, outside this transaction — quantities/lastPulled are plain field
+  // writes, not a status concern, so they stay here; completePull owns only the status
+  // write. A narrow, deliberate tradeoff (same as puts.ts's own Gate-migrated call sites):
+  // this reintroduces a small window between the transaction committing and completePull
+  // running, acceptable given how unlikely two concurrent pulls against the exact same
+  // pallet's last-remaining container are in practice.
+  let remainingPending = 0;
   await prisma.$transaction(async (tx) => {
     await tx.container.update({
       where: { cid: container.cid },
       data: { status: 'PULLED' },
     });
 
-    const remainingPending = await tx.container.count({
+    remainingPending = await tx.container.count({
       where: { pid: pallet.pid, status: { in: ['AVAILABLE', 'PRINTED'] } },
     });
 
@@ -238,10 +248,13 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
         currentSSPs:    newSSPs,
         lastPulledByZ:  auth.zNumber,
         lastPulledAt:   new Date(),
-        ...(remainingPending === 0 && { status: 'STORED' }),
       },
     });
   });
+
+  if (remainingPending === 0) {
+    await completePull(pallet.pid);
+  }
 
   await writeLog({
     userId: auth.zNumber,

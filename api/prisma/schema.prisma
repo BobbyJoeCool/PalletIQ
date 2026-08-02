@@ -137,6 +137,16 @@ model Location {
   // indicator, which destroys the location's real operational state (EMPTY vs STORED)
   // the moment a hold is placed; fixed to use this field instead. See phase-10 log.
   holdCategory String? @db.VarChar(10)
+  // Logic Gate-managed (issue #149/#150) — mirrors the expiry/revert-target data the
+  // separate `Reservation` table (createdAt + wasStaged) already tracks for SDP's own
+  // 5-minute reservation timeout, enforced today by reservationTimer.ts's cron sweep,
+  // which remains the sole *active* enforcer. These two columns exist for design-doc
+  // conformance and future lazy-check use (evaluated on read/touch, not swept) — not
+  // wired to any new enforcement logic yet. Only ever set/cleared by api/lib/logicGate.ts,
+  // never written directly by a screen handler. Both null outside an expiry-bearing
+  // intent's lifetime (RESERVE_PUT today; RESERVE_REINSTATE once a future caller uses it).
+  statusExpiry DateTime?
+  revertStatus String?   @db.VarChar(15)
 
   holdType   HoldType?   @relation(fields: [holdTypeCode], references: [code])
   storageRef StorageCode @relation(fields: [storageCode], references: [id])

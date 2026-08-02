@@ -4,7 +4,55 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
+
+---
+
+## [1.1.0] — 2026-08-02
+
+### 1.1.0 — Added
+
+- **Logic Gate** (`api/lib/logicGate.ts`, GitHub #149) — a single shared module now owns
+  every status write to `Location` and `Pallet`; no handler writes `status` (or
+  `Location.holdCategory`'s reservation-clearing side effect) directly anymore outside
+  `demo-reseed.ts`, an explicit carve-out (see the module's own doc comment). All 9 intents
+  from `DevNotes/DesignPrompts/Shared-Infrastructure-Design-Spec.md`'s Intent Reference
+  tables are implemented — `RECEIVE_PALLET`, `ZERO_PALLET`, `PUT_COMPLETE`, `COMPLETE_PULL`
+  (Pallet-side); `CLEAR_LOCATION`, `RESERVE_PUT`, `RESERVE_BULK`, `RESERVE_REINSTATE`,
+  `STAGE_LOCATION` (Location-side) — migrated onto every currently-existing real call site:
+  SDP's `directedPut`/`confirmPut`/`unassignPut`/`blockPut`, MNP's `manualConfirm`
+  consolidate branch, PIP's `verifyPull`, PAR's `reinstatePallet`, STG's
+  `stageLocations`/`restageAisle`, and `reservationTimer.ts`'s own cron-based revert.
+  `RECEIVE_PALLET`/`RESERVE_BULK`/`RESERVE_REINSTATE` have no live caller yet (no receiving
+  flow, Bulk Pull #137, and a future PAR redesign respectively) — implemented per spec,
+  ready for whoever builds those.
+- **`statusExpiry`** (GitHub #150) — `Location.statusExpiry`/`revertStatus` columns, written
+  by `RESERVE_PUT` and cleared by `CLEAR_LOCATION`/`PUT_COMPLETE`. A Gate-managed mirror,
+  not a replacement for the pre-existing `Reservation` table + `reservationTimer.ts`'s
+  5-minute cron (the codebase's only prior expiry mechanism, which the original design
+  session didn't account for) — that cron remains the sole active enforcer; these columns
+  exist for design-doc conformance and future lazy-check use.
+- **WLH: placing a hold now clears an active reservation** (`placeHold`, single-location
+  only) — previously a hold placed on a `RESERVED` location left it reserved-but-unusable;
+  now it force-reverts to `EMPTY` via `CLEAR_LOCATION`'s override-revert parameter,
+  regardless of what the reservation would otherwise have reverted to. Matches the design
+  doc's own "placing a hold also calls the Gate" requirement, newly wired in — the
+  codebase never had this before. Not wired into the range-hold endpoints (a bulk
+  operation across many locations with no natural single-location Gate-call shape — a rare
+  edge case left as a deliberate scope line for a future pass).
+- **`RESERVE_PUT`'s new race-safety check** — re-validates a location's hold/contraction
+  state at write time, not just at search time (`findNextLocation`'s own filter already
+  excluded held/contracted candidates, but the reserve write itself never re-checked
+  before now). A genuine correctness improvement, not just a refactor.
+
+### 1.1.0 — Changed
+
+- Schema migration `20260801234810_add_location_status_expiry` — see `statusExpiry` above.
+
+No request/response contract changes — every migrated endpoint keeps its existing shape;
+this release is a write-path implementation swap underneath already-shipped behavior, not
+a new feature surface. Full detail: `DevNotes/Logs/V1.8/version-1_8_0.md` §1.2.54.
 
 ---
 

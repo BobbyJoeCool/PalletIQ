@@ -2,6 +2,7 @@ import { app } from '@azure/functions';
 import type { Timer, InvocationContext } from '@azure/functions';
 import prisma from '../lib/prisma.js';
 import { writeLog } from '../lib/activityLog.js';
+import { clearLocation } from '../lib/logicGate.js';
 
 const TIMEOUT_MINUTES = 5;
 
@@ -50,11 +51,11 @@ async function clearExpiredReservations(_timer: Timer, ctx: InvocationContext): 
       const claimed = await prisma.reservation.deleteMany({ where: { id: res.id } });
       if (claimed.count === 0) continue; // already claimed by confirm/unassign/block (#93)
 
-      const releasedStatus = res.wasStaged === true ? 'STAGED' : 'EMPTY';
-      await prisma.location.update({
-        where: { LocationID: { aisle: res.locationAisle, bin: res.locationBin, level: res.locationLevel } },
-        data: { status: releasedStatus },
-      });
+      // CLEAR_LOCATION (Logic Gate — #149) — also clears the location's own statusExpiry/
+      // revertStatus mirror, which a plain status write wouldn't have (this reservation
+      // row is already gone via the claim above, so clearLocation's own defensive
+      // reservation.deleteMany is a harmless no-op here, same as every other caller).
+      await clearLocation({ aisle: res.locationAisle, bin: res.locationBin, level: res.locationLevel });
 
       await writeLog({
         userId:        res.workerZ,

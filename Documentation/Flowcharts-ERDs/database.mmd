@@ -107,6 +107,8 @@ erDiagram
         string storageCode FK "VarChar(2) → StorageCode"
         string size "VarChar(2), LocationSize values"
         boolean contraction "default: false, set by Lead+ via Aisle Setup (out of scope) — read-only in this app"
+        datetime statusExpiry "nullable — Logic Gate-managed (#149/#150) mirror of SDP's Reservation.createdAt-based expiry; not the active enforcer, see revertStatus"
+        string revertStatus "nullable, VarChar(15) — paired with statusExpiry; set by RESERVE_PUT, cleared by CLEAR_LOCATION/PUT_COMPLETE"
     }
 
     HoldType {

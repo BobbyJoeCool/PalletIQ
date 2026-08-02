@@ -7,33 +7,21 @@ import { writeLog } from '../lib/activityLog.js';
 import { checkPalletEligibility } from '../lib/eligibility.js';
 import { findNextLocation, resolveEffectiveCriteria } from '../lib/zoneLogic.js';
 import { parseLocationBarcode, formatLocationId as locationString } from '../lib/locationParser.js';
+import { clearLocation, putComplete, reservePut, zeroPallet } from '../lib/logicGate.js';
 
 /**
- * Resolves what a vacated location's status should become once a pallet leaves it (#86).
- * Unconditionally setting it to `EMPTY` is wrong if a second pallet still shares that exact
- * (aisle, bin, level) — possible via MNP's dual-occupancy "Proceed Anyway" override, since
- * no `@@unique` constraint blocks two pallets pointing at the same location — clearing to
- * `EMPTY` in that case would silently corrupt the remaining occupant's own location status.
- * Falls back to `STORED` if anyone else is still there; excludes the pallet that's leaving.
- */
-async function vacatedLocationStatus(aisle: number, bin: number, level: number, leavingPid: number): Promise<'EMPTY' | 'STORED'> {
-  const stillOccupied = await prisma.pallet.count({
-    where: { locationAisle: aisle, locationBin: bin, locationLevel: level, pid: { not: leavingPid } },
-  });
-  return stillOccupied > 0 ? 'STORED' : 'EMPTY';
-}
-
-/**
- * Atomically stores a pallet at a new location.
- * Clears the pallet's previous location (if any) by setting it to EMPTY,
- * then marks the new location as STORED and updates the pallet's location fields
- * and status in a single database transaction so the pallet can never appear in two locations.
+ * Atomically stores a pallet at a new location (PUT_COMPLETE, via the Logic Gate — #149).
+ * Clears the pallet's previous location (if any, via CLEAR_LOCATION) then marks the new
+ * location STORED and updates the pallet's location fields/status (PUT_COMPLETE) — two
+ * separate Gate calls, not one combined transaction, since they're independently-owned
+ * intents; the pallet can still never observably appear in two locations, since nothing
+ * reads pallet/location state between them.
  *
  * Also copies the target location's Storage Code/Size/Zone onto the pallet itself
- * (`Pallet.storageCode`/`.size`/`.zone`) — the pallet's own source of truth for these,
- * read by Directed Put's default location search when no IM+ override is given (see
- * directedPut below). Kept in sync here since this is the one place both SDP (confirmPut)
- * and MNP (manualConfirm) funnel through to actually complete a put.
+ * (`Pallet.storageCode`/`.size`/`.zone`, inside `putComplete`) — the pallet's own source of
+ * truth for these, read by Directed Put's default location search when no IM+ override is
+ * given (see directedPut below). Kept in sync here since this is the one place both SDP
+ * (confirmPut) and MNP (manualConfirm) funnel through to actually complete a put.
  *
  * @param palletId - Numeric pallet ID to move
  * @param newAisle - Target location aisle
@@ -51,56 +39,19 @@ async function placePallet(
   newLevel: number,
   workerZ: string,
 ) {
-  const [pallet, newLoc] = await Promise.all([
-    prisma.pallet.findUnique({
-      where: { pid: palletId },
-      select: { locationAisle: true, locationBin: true, locationLevel: true },
-    }),
-    prisma.location.findUniqueOrThrow({
-      where: { LocationID: { aisle: newAisle, bin: newBin, level: newLevel } },
-      select: { storageCode: true, size: true, zone: true },
-    }),
-  ]);
+  const pallet = await prisma.pallet.findUnique({
+    where: { pid: palletId },
+    select: { locationAisle: true, locationBin: true, locationLevel: true },
+  });
 
-  const ops = [];
-
-  // Clear old location if applicable — falls back to STORED instead of EMPTY if a second
-  // pallet still occupies it (#86).
   if (pallet?.locationAisle != null) {
-    const vacatedStatus = await vacatedLocationStatus(pallet.locationAisle, pallet.locationBin!, pallet.locationLevel!, palletId);
-    ops.push(
-      prisma.location.update({
-        where: { LocationID: { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel! } },
-        data: { status: vacatedStatus },
-      }),
-    );
+    await clearLocation({
+      aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel!,
+      excludePalletId: palletId,
+    });
   }
 
-  // Store pallet at new location.
-  ops.push(
-    prisma.location.update({
-      where: { LocationID: { aisle: newAisle, bin: newBin, level: newLevel } },
-      data: { status: 'STORED' },
-    }),
-  );
-  ops.push(
-    prisma.pallet.update({
-      where: { pid: palletId },
-      data: {
-        locationAisle: newAisle,
-        locationBin:   newBin,
-        locationLevel: newLevel,
-        storageCode:   newLoc.storageCode,
-        size:          newLoc.size,
-        zone:          newLoc.zone,
-        status:        'STORED',
-        putByZ:        workerZ,
-        putAt:         new Date(),
-      },
-    }),
-  );
-
-  await prisma.$transaction(ops);
+  await putComplete({ palletId, aisle: newAisle, bin: newBin, level: newLevel, workerZ });
 
   return pallet?.locationAisle != null
     ? { wasMove: true, clearedLocation: locationString(pallet.locationAisle, pallet.locationBin!, pallet.locationLevel!) }
@@ -182,32 +133,18 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
     throw Object.assign(new Error('NO_LOCATIONS'), { status: 409 });
   }
 
-  // Reserve the location and create the Reservation record in sequence.
-  await prisma.location.update({
-    where: { LocationID: { aisle: loc.aisle, bin: loc.bin, level: loc.level } },
-    data: { status: 'RESERVED' },
-  });
-
-  const reservation = await prisma.reservation.create({
-    data: {
-      locationAisle:   loc.aisle,
-      locationBin:     loc.bin,
-      locationLevel:   loc.level,
-      palletId:        body.palletId,
-      workerZ:         auth.zNumber,
-      targetAisle:     body.aisle,
-      // Raw overrides only (null if none) — confirmPut's log-write reads these to show
-      // whether an IM+ override was actually used, so this must stay distinct from the
-      // *effective* criteria (which also folds in the pallet's own inherited values —
-      // see `effective` above). blockPut re-derives the same effective criteria itself
-      // from these raw fields plus the pallet's current inherited values.
-      targetSize:      body.size ?? null,
-      targetStorage:   body.storageCode ?? null,
-      targetZone:      body.zone ?? null,
-      consolidating:   body.consolidating ?? false,
-      pidWasScanned:   body.wasScanned ?? null,
-      wasStaged:       loc.wasStaged,
-    },
+  // Reserve the location (RESERVE_PUT, via the Logic Gate — #149) and create the
+  // Reservation record in the same call. Raw overrides only (null if none) on
+  // targetSize/targetStorage/targetZone — confirmPut's log-write reads these to show
+  // whether an IM+ override was actually used, so this must stay distinct from the
+  // *effective* criteria (which also folds in the pallet's own inherited values — see
+  // `effective` above). blockPut re-derives the same effective criteria itself from these
+  // raw fields plus the pallet's current inherited values.
+  const { reservationId } = await reservePut({
+    aisle: loc.aisle, bin: loc.bin, level: loc.level,
+    palletId: body.palletId, workerZ: auth.zNumber, targetAisle: body.aisle,
+    targetSize: body.size ?? null, targetStorage: body.storageCode ?? null, targetZone: body.zone ?? null,
+    consolidating: body.consolidating ?? false, wasScanned: body.wasScanned ?? null, wasStaged: loc.wasStaged,
   });
 
   await writeLog({
@@ -217,7 +154,7 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
     locationAisle: loc.aisle,
     locationBin:   loc.bin,
     locationLevel: loc.level,
-    details: { reservationId: reservation.id, aisle: body.aisle },
+    details: { reservationId, aisle: body.aisle },
   });
 
   const currentLocation = elig.currentLocation
@@ -225,7 +162,7 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
     : null;
 
   return {
-    reservationId:   reservation.id,
+    reservationId,
     directedLocation: locationString(loc.aisle, loc.bin, loc.level),
     pallet: {
       id:              elig.pallet.pid,
@@ -365,10 +302,11 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
 /**
  * Cancels an active put reservation without placing the pallet.
  * Atomically claims the Reservation (deletes it first, before touching Location state —
- * #93, same pattern as confirmPut) then sets the reserved location back to STAGED (if
- * that's genuinely how findNextLocation found it — `wasStaged`, set back in
- * directedPut/blockPut) or EMPTY otherwise — so the location is immediately available
- * for other puts/staging again, without silently erasing a GPMer's staging work.
+ * #93, same pattern as confirmPut) then releases the location via CLEAR_LOCATION (the
+ * Logic Gate — #149), which resolves to STAGED if that's genuinely how findNextLocation
+ * found it (mirrored from `wasStaged` onto the location's own `revertStatus` at reserve
+ * time) or EMPTY otherwise — so the location is immediately available for other
+ * puts/staging again, without silently erasing a GPMer's staging work.
  *
  * @param req - HTTP request with URL param `reservationId`
  * @returns `{ location: string; releasedStatus: 'STAGED' | 'EMPTY' }` — the released
@@ -385,22 +323,14 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
   const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
   if (!reservation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
-  // Restore to STAGED, not EMPTY, if that's genuinely how findNextLocation found it
-  // (wasStaged, set back in directedPut/blockPut) — unassigning shouldn't silently erase
-  // a GPMer's staging work. `=== true` (not `!== false`) is deliberate here: unlike the
-  // confirm-success message's more forgiving null-treatment, actually mutating status
-  // back to STAGED should only happen when we're sure, not merely "not known false."
-  const releasedStatus = reservation.wasStaged === true ? 'STAGED' : 'EMPTY';
-
   // Atomically claim the reservation before touching Location state (#93) — same pattern
   // as confirmPut: whichever of confirm/unassign/block/the expiry timer deletes this row
   // first wins; everyone else gets a clean 404 instead of racing a stale read into a write.
   const claimed = await prisma.reservation.deleteMany({ where: { id: reservationId } });
   if (claimed.count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
-  await prisma.location.update({
-    where: { LocationID: { aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel } },
-    data: { status: releasedStatus },
+  const releasedStatus = await clearLocation({
+    aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel,
   });
 
   await writeLog({
@@ -467,15 +397,16 @@ async function blockPut(req: HttpRequest, _ctx: InvocationContext): Promise<unkn
   if (claimed.count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
   // Place Hold Both on the blocked location. The location was RESERVED (never actually
-  // stored), so it reverts to EMPTY or STAGED (whichever findNextLocation actually found
-  // it as — see unassignPut's identical comment); holdCategory is independent of status
-  // (see Location.holdCategory's schema comment) — Phase 10 fixed this from `status:
-  // 'HOLD_BOTH'`, which clobbered operational state.
-  const blockedStatus = reservation.wasStaged === true ? 'STAGED' : 'EMPTY';
+  // stored), so CLEAR_LOCATION (the Logic Gate — #149) reverts it to EMPTY or STAGED
+  // (whichever findNextLocation actually found it as, mirrored onto revertStatus at
+  // reserve time — see unassignPut's identical comment); holdCategory is written
+  // separately, independent of status (see Location.holdCategory's schema comment) —
+  // Phase 10 fixed this from `status: 'HOLD_BOTH'`, which clobbered operational state.
+  await clearLocation({ aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel });
 
   await prisma.location.update({
     where: { LocationID: { aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel } },
-    data: { status: blockedStatus, holdCategory: 'HOLD_BOTH' },
+    data: { holdCategory: 'HOLD_BOTH' },
   });
 
   await writeLog({
@@ -511,27 +442,12 @@ async function blockPut(req: HttpRequest, _ctx: InvocationContext): Promise<unkn
     throw Object.assign(new Error('NO_LOCATIONS'), { status: 409 });
   }
 
-  // Reserve the new location.
-  await prisma.location.update({
-    where: { LocationID: { aisle: nextLoc.aisle, bin: nextLoc.bin, level: nextLoc.level } },
-    data: { status: 'RESERVED' },
-  });
-
-  const newReservation = await prisma.reservation.create({
-    data: {
-      locationAisle:   nextLoc.aisle,
-      locationBin:     nextLoc.bin,
-      locationLevel:   nextLoc.level,
-      palletId:        reservation.palletId,
-      workerZ:         auth.zNumber,
-      targetAisle:     reservation.targetAisle,
-      targetSize:      reservation.targetSize,
-      targetStorage:   reservation.targetStorage,
-      targetZone:      reservation.targetZone,
-      consolidating:   reservation.consolidating,
-      pidWasScanned:   reservation.pidWasScanned,
-      wasStaged:       nextLoc.wasStaged,
-    },
+  // Reserve the new location (RESERVE_PUT, via the Logic Gate — #149).
+  const { reservationId: newReservationId } = await reservePut({
+    aisle: nextLoc.aisle, bin: nextLoc.bin, level: nextLoc.level,
+    palletId: reservation.palletId, workerZ: auth.zNumber, targetAisle: reservation.targetAisle,
+    targetSize: reservation.targetSize, targetStorage: reservation.targetStorage, targetZone: reservation.targetZone,
+    consolidating: reservation.consolidating, wasScanned: reservation.pidWasScanned, wasStaged: nextLoc.wasStaged,
   });
 
   await writeLog({
@@ -541,12 +457,12 @@ async function blockPut(req: HttpRequest, _ctx: InvocationContext): Promise<unkn
     locationAisle: nextLoc.aisle,
     locationBin:   nextLoc.bin,
     locationLevel: nextLoc.level,
-    details: { reservationId: newReservation.id, afterBlock: blockedLoc },
+    details: { reservationId: newReservationId, afterBlock: blockedLoc },
   });
 
   return {
     blockedLocation:    blockedLoc,
-    newReservationId:   newReservation.id,
+    newReservationId,
     newDirectedLocation: locationString(nextLoc.aisle, nextLoc.bin, nextLoc.level),
   };
 }
@@ -769,52 +685,34 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
         throw Object.assign(new Error('CONSOLIDATE_MISMATCH'), { status: 409 });
       }
 
-      // Untyped-empty-then-push (matching placePallet's `const ops = []` idiom above) so
-      // TS infers a union across the mixed pallet.update/location.update op types below,
-      // rather than locking in whatever the first pushed element's type happens to be.
-      const ops = [];
-      ops.push(
-        prisma.pallet.update({
-          where: { pid: occupant.pid },
-          data: {
-            currentCartons: occupant.currentCartons + pallet.currentCartons,
-            currentPallets: occupant.currentPallets + pallet.currentPallets,
-            currentSSPs:    occupant.currentSSPs + pallet.currentSSPs,
-          },
-        }),
-      );
-      ops.push(
-        prisma.pallet.update({
-          where: { pid: pallet.pid },
-          data: {
-            currentCartons: 0,
-            currentPallets: 0,
-            currentSSPs:    0,
-            status:         'CONSOLIDATED',
-            locationAisle:  null,
-            locationBin:    null,
-            locationLevel:  null,
-            storageCode:    null,
-            size:           null,
-            zone:           null,
-          },
-        }),
-      );
+      // The occupant's quantity merge is a plain, direct write — not a status change, so
+      // it's outside the Logic Gate's own scope (#149 owns Location/Pallet *status*
+      // transitions, not arbitrary field updates). Note this is no longer in the same
+      // transaction as the zeroPallet call below (previously all three writes here were
+      // one combined transaction) — a narrow, deliberate tradeoff: zeroPallet owns its own
+      // transaction internally (shared by every other ZERO_PALLET caller), and threading
+      // an external transaction through the Gate's API for this one call site's benefit
+      // wasn't worth the added complexity for a race that requires two concurrent
+      // consolidate attempts on the exact same two pallets to ever matter.
+      await prisma.pallet.update({
+        where: { pid: occupant.pid },
+        data: {
+          currentCartons: occupant.currentCartons + pallet.currentCartons,
+          currentPallets: occupant.currentPallets + pallet.currentPallets,
+          currentSSPs:    occupant.currentSSPs + pallet.currentSSPs,
+        },
+      });
 
-      // Free the incoming pallet's own prior location, if it had one — same as
-      // placePallet's existing wasMove handling for a normal move, including the same
-      // dual-occupancy fallback to STORED instead of EMPTY (#86).
-      if (pallet.locationAisle != null) {
-        const vacatedStatus = await vacatedLocationStatus(pallet.locationAisle, pallet.locationBin!, pallet.locationLevel!, pallet.pid);
-        ops.push(
-          prisma.location.update({
-            where: { LocationID: { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel! } },
-            data: { status: vacatedStatus },
-          }),
-        );
-      }
-
-      await prisma.$transaction(ops);
+      // ZERO_PALLET (Logic Gate — #149): marks the incoming pallet CONSOLIDATED and frees
+      // its own prior location, if it had one (same dual-occupancy fallback to STORED
+      // instead of EMPTY, #86, as placePallet's own old-location clear).
+      await zeroPallet(
+        pallet.pid,
+        'CONSOLIDATED',
+        pallet.locationAisle != null
+          ? { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel! }
+          : null,
+      );
 
       await writeLog({
         userId: auth.zNumber,

@@ -8,6 +8,7 @@ import { generateUniquePid } from '../lib/palletId.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { TERMINAL_CONTAINER_STATUSES } from '../lib/eligibility.js';
 import { parseDpci } from '../lib/dpci.js';
+import { storeLocationForCreate } from '../lib/logicGate.js';
 
 /**
  * Retrieves all fields of a pallet, including item UPC/description, current location,
@@ -539,7 +540,7 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   const pids: number[] = [];
   for (let i = 0; i < rows.length; i++) pids.push(await generateUniquePid());
 
-  const ops: Array<ReturnType<typeof prisma.pallet.create> | ReturnType<typeof prisma.location.update>> = rows.map((row, i) =>
+  const ops: ReturnType<typeof prisma.pallet.create>[] = rows.map((row, i) =>
     prisma.pallet.create({
       data: {
         pid: pids[i], dept, class: cls, item: itm,
@@ -574,15 +575,18 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
       },
     }),
   );
-  if (locationAisle != null && locationWasEmpty) {
-    ops.push(
-      prisma.location.update({
-        where: { LocationID: { aisle: locationAisle, bin: locationBin!, level: locationLevel! } },
-        data: { status: 'STORED' },
-      }),
-    );
-  }
   await prisma.$transaction(ops);
+
+  // PUT_COMPLETE's location-side half (Logic Gate — #149), for the create-a-new-pallet
+  // shape `putComplete` itself doesn't support (see `storeLocationForCreate`'s own doc
+  // comment). Only when placing directly onto a location that was genuinely EMPTY — an
+  // override onto an already-occupied/staged/reserved location (the warn-then-allow path
+  // above) leaves that location's own row completely untouched, same as before this
+  // migration. Deliberately outside the pallet-creation transaction above — a narrow,
+  // acceptable tradeoff, same as this Gate rollout's other migrated call sites.
+  if (locationAisle != null && locationWasEmpty) {
+    await storeLocationForCreate(locationAisle, locationBin!, locationLevel!);
+  }
 
   for (let i = 0; i < rows.length; i++) {
     await writeLog({

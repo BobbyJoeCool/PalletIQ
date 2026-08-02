@@ -8,6 +8,7 @@ import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId } from
 import { sideOf, NOT_HELD_FILTER } from '../lib/zoneLogic.js';
 import { formatDpci } from '../lib/dpci.js';
 import type { Role } from '../lib/jwt.js';
+import { clearLocation } from '../lib/logicGate.js';
 
 // Canonical ascending size order (mirrors SIZES in src/pages/ELAPage.tsx and STGPage.tsx).
 const SIZE_ORDER = ['XS', 'HS', 'S', 'M', 'L'];
@@ -787,6 +788,16 @@ async function placeHold(req: HttpRequest): Promise<unknown> {
     where: { LocationID: { aisle: full.aisle, bin: full.bin, level: full.level } },
     data: { holdCategory: body.holdType },
   });
+
+  // CLEAR_LOCATION (Logic Gate — #149), forced to EMPTY: placing a hold on a RESERVED
+  // location clears its active reservation rather than leaving it reserved-but-unusable —
+  // per the design doc, "placing a hold also calls the Gate... forcing the reservation to
+  // revert to EMPTY regardless of what its stored revert-to value would otherwise have
+  // been." A location that isn't currently RESERVED has nothing to clear; skipped to avoid
+  // a pointless write (and, for an EMPTY location, a needless no-op transaction).
+  if (location.status === 'RESERVED') {
+    await clearLocation({ aisle: full.aisle, bin: full.bin, level: full.level, overrideRevert: 'EMPTY' });
+  }
 
   await writeLog({
     userId: auth.zNumber,

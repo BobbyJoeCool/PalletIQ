@@ -6,6 +6,7 @@ import { requireAuth, requireRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { findNextStagingLocation } from '../lib/stagingLogic.js';
+import { stageLocation } from '../lib/logicGate.js';
 
 /** Throws 404 NOT_FOUND unless at least one Location row exists for the given aisle. */
 async function requireAisleExists(aisle: number): Promise<void> {
@@ -61,11 +62,8 @@ async function stageLocations(req: HttpRequest): Promise<unknown> {
   let last: { bin: number; level: number } | undefined;
   for (const loc of parsed) {
     const { aisle, bin, level } = loc!;
-    const result = await prisma.location.updateMany({
-      where: { aisle, bin, level, status: 'EMPTY', contraction: false },
-      data: { status: 'STAGED' },
-    });
-    if (result.count > 0) {
+    const wasStaged = await stageLocation(aisle, bin, level);
+    if (wasStaged) {
       staged.push(formatLocationId(aisle, bin, level));
       last = { bin, level };
       await writeLog({
@@ -229,12 +227,15 @@ async function restageAisle(req: HttpRequest): Promise<unknown> {
         afterLevel: cursor?.level,
       });
       if (!next) break;
-      await prisma.location.update({
-        where: { LocationID: { aisle: next.aisle, bin: next.bin, level: next.level } },
-        data: { status: 'STAGED' },
-      });
-      staged++;
       cursor = { bin: next.bin, level: next.level };
+      // STAGE_LOCATION (Logic Gate — #149) — its own atomic conditional write denies
+      // (returns false) if the location somehow isn't EMPTY anymore by write time; skip
+      // this candidate rather than blindly trusting the search result the way the
+      // pre-Gate code did (a genuine correctness improvement, not just a refactor). The
+      // cursor still advances either way so the next search iteration doesn't retry it.
+      const wasStaged = await stageLocation(next.aisle, next.bin, next.level);
+      if (!wasStaged) continue;
+      staged++;
       await writeLog({
         userId: auth.zNumber,
         actionType: 'STAGE',
