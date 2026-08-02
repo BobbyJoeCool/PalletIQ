@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { DataRow } from '../components/shared/DataRow';
-import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { ZoneField } from '../components/shared/ZoneField';
-import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
@@ -20,6 +17,7 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { useAisleField } from '../lib/useAisleField';
+import { SDPVerifyPutModal } from './SDPVerifyPutModal';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,7 +33,7 @@ interface HistoryEntry {
   reservationId: number;
   palletId: number;
   directedLocation: string;
-  outcome: 'ASSIGNED' | 'PUT' | 'MOVE' | 'RELEASED' | 'BLOCKED';
+  outcome: 'ASSIGNED' | 'PUT' | 'MOVE' | 'RELEASED' | 'HELD';
   finalLocation?: string;
   timestamp: Date;
 }
@@ -91,38 +89,6 @@ function FieldDisplay({
   );
 }
 
-/**
- * Escape-hatch action button in the directed state. Used for Unassign and Blocked Put.
- * Three color variants: primary (blue), danger (red/dark), warning (amber/dark).
- */
-function ActionBtn({
-  label,
-  variant,
-  onClick,
-  disabled = false,
-}: {
-  label: string;
-  variant: 'primary' | 'danger' | 'warning';
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  const styles: Record<string, string> = {
-    primary: 'bg-[#003366] hover:bg-[#004488] text-white',
-    danger:  'bg-[#660000] hover:bg-[#770000] text-white',
-    warning: 'bg-[#554400] hover:bg-[#665500] text-white',
-  };
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`h-[72px] px-6 rounded-[12px] font-ui text-[20px] font-semibold transition-colors disabled:opacity-40 ${styles[variant]}`}
-    >
-      {label}
-    </button>
-  );
-}
-
 /** Colored footer demo button; `color` selects a background from a small fixed palette. */
 function DemoBtn({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
   const colors: Record<string, string> = {
@@ -156,14 +122,19 @@ type ScreenState = 'entry' | 'directed';
  *   which runs eligibility checks, resolves the target zone and location, creates a
  *   5-minute Reservation row, and returns the directed location. Transitions to directed.
  *
- * directed: Screen is locked. Worker scans the directed location to confirm
- *   (POST /api/puts/{id}/confirm). Two escapes:
+ * directed: `SDPVerifyPutModal` (GitHub #151) opens as a screen-blocking popup — Rack body
+ *   for everything but XS locations, Hand body (Carton Quantity beside Location, "Exists
+ *   elsewhere" redirect) for XS. Worker scans the directed location to confirm
+ *   (POST /api/puts/{id}/confirm). Two escapes, both inside the modal:
  *   - Unassign (POST /api/puts/{id}/unassign): releases reservation, returns to entry.
- *   - Blocked Put (POST /api/puts/{id}/block): places Hold Both on the current location,
- *     finds the next location, creates a new reservation, re-directs within the same state.
+ *   - Hold Location: embeds the shared `HoldPanel` — placing a hold already clears the
+ *     reservation server-side (Logic Gate — #149, `placeHold`'s own `CLEAR_LOCATION` side
+ *     effect), so this only needs a local reset once `HoldPanel` succeeds. Replaces the
+ *     old "Blocked Put" (hardcoded Hold Both + auto-continue to a new location) entirely —
+ *     stops once the hold is placed, no auto-continue.
  *   Reservation expiry (server-side 5-min timer) is detected when any action returns NOT_FOUND.
  *
- * A right-column history log tracks all reservation outcomes (ASSIGNED/PUT/MOVE/RELEASED/BLOCKED).
+ * A right-column history log tracks all reservation outcomes (ASSIGNED/PUT/MOVE/RELEASED/HELD).
  */
 export function SDPPage() {
   const { token, user } = useAuth();
@@ -185,7 +156,6 @@ export function SDPPage() {
   const [palletInvalid, setPalletInvalid] = useState(false);
   const [palletIdValue, setPalletIdValue] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [confirmBlock, setConfirmBlock] = useState(false);
 
   // Screen-locked: while a reservation is active, Back/Home/Jump/Logout are disabled
   // shell-wide so the worker must resolve (complete or unassign) before leaving.
@@ -575,56 +545,41 @@ export function SDPPage() {
   }
 
   /**
-   * Blocked Put: reports the directed location as unusable. Calls POST /api/puts/{id}/block,
-   * which places Hold Both on the current location, finds the next eligible location in the aisle,
-   * creates a new reservation, and returns the new directed location. The screen stays in directed
-   * state but re-directs to the new location. If no further locations are available (NO_LOCATIONS),
-   * resets to entry with a full clear.
+   * Hold Location succeeded — `SDPVerifyPutModal`'s embedded `HoldPanel` already placed
+   * the hold and (via `placeHold`'s own Logic Gate side effect) already cleared the
+   * reservation server-side, so there's no API call to make here, just local cleanup:
+   * stop polling a reservation that no longer exists, tag its history entry, and return
+   * to entry. Replaces the old `handleBlock`'s auto-continue entirely — Hold Location
+   * stops here, it doesn't re-direct to a new location.
    */
-  async function handleBlock() {
+  function handleHoldDone() {
     const d = directedRef.current;
-    if (!d || loadingRef.current) return;
-    setLoading(true);
-    try {
-      const result = await apiFetch<{ blockedLocation: string; newReservationId: number; newDirectedLocation: string }>(
-        `/api/puts/${d.reservationId}/block`,
-        token!,
-        { method: 'POST' },
-      );
-      playAlert('info');
-      setMessage({ type: 'warning', text: `Hold Both placed on ${result.blockedLocation} — now directed to ${result.newDirectedLocation}` });
-      setDirected({ ...d, reservationId: result.newReservationId, directedLocation: result.newDirectedLocation });
-      setHistory(h => [
-        { reservationId: result.newReservationId, palletId: d.pallet.id, directedLocation: result.newDirectedLocation, outcome: 'ASSIGNED' as const, timestamp: new Date() },
-        ...h.map(e => e.reservationId === d.reservationId ? { ...e, outcome: 'BLOCKED' as const } : e),
-      ]);
-      startPolling(result.newReservationId);
-      resetLocationField();
-    } catch (err) {
-      const code = err instanceof Error ? err.message : '';
-      if (code === 'NO_LOCATIONS') {
-        playAlert('error');
-        setMessage({ type: 'error', text: `Hold Both placed — no further locations available in aisle ${aisleFields.field.value}` });
-        stopPolling();
-        resetToEntry(true);
-      } else if (code === 'NOT_FOUND') {
-        playAlert('warning');
-        setMessage({ type: 'warning', text: `Reservation expired — location ${d.directedLocation} released` });
-        stopPolling();
-        resetToEntry(true);
-      } else if (code === 'MISSING_SIZE') {
-        // Same underlying condition as directedPut's own MISSING_SIZE (see that handler's
-        // comment) — re-reached here since blockPut re-derives the same effective criteria.
-        playAlert('error');
-        setMessage({ type: 'error', text: 'This pallet has no Size set — enter a Size override to continue' });
-        stopPolling();
-        resetToEntry(true);
-      } else {
-        setMessage({ type: 'error', text: 'Block failed — please try again' });
-      }
-    } finally {
-      setLoading(false);
+    stopPolling();
+    if (d) {
+      setHistory(h => h.map(e => e.reservationId === d.reservationId ? { ...e, outcome: 'HELD' as const } : e));
     }
+    resetToEntry();
+  }
+
+  /** "Exists elsewhere" (Hand Put) successfully redirected the put — mirrors
+   *  `handleLocationConfirm`'s own success handling for history/messaging/reset. */
+  function handleRedirected(newLocation: string, wasMove: boolean) {
+    const d = directedRef.current;
+    stopPolling();
+    if (d) {
+      setHistory(h => h.map(e =>
+        e.reservationId === d.reservationId ? { ...e, outcome: wasMove ? 'MOVE' as const : 'PUT' as const, finalLocation: newLocation } : e
+      ));
+    }
+    resetToEntry();
+  }
+
+  /** "Exists elsewhere" released the original reservation but then failed to complete the
+   *  redirect — nothing left to retry against, so just reset (the modal itself already
+   *  showed the worker an error message before calling this). */
+  function handleReservationLost() {
+    stopPolling();
+    resetToEntry(true);
   }
 
   /**
@@ -869,49 +824,19 @@ export function SDPPage() {
           invalid={palletInvalid}
         />
 
-        {/* Directed state — data + confirm */}
+        {/* Directed state — Verify-Put Modal (GitHub #151) */}
         {screenState === 'directed' && directed && (
-          <>
-            {/* Screen-locked banner */}
-            <div className="flex items-center gap-3 px-4 py-2 rounded-[10px] bg-[#CC0000]/10 border border-[#CC0000]/30">
-              <span className="font-ui text-[15px] font-semibold text-[#CC0000] flex-1">Screen locked — active reservation</span>
-            </div>
-
-            <div className="flex flex-col mt-1">
-              <DataRow label="Item">{directed.pallet.descShort}</DataRow>
-              <div className="flex items-center gap-2 py-2 border-b border-[#1A1A1A]">
-                <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-                  DPCI
-                </span>
-                <div className="flex-1"><LiveId type="dpci" id={directed.pallet.dpci} className="!text-[22px]" /></div>
-                <span className="font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">
-                  Qty
-                </span>
-                <div className="font-data text-[22px] text-white">
-                  {directed.pallet.quantity.pallets}P / {directed.pallet.quantity.cartons}C / {directed.pallet.quantity.ssps}S
-                </div>
-              </div>
-              {directed.pallet.currentLocation && (
-                <DataRow label="Move from">
-                  <LiveId type="location" id={directed.pallet.currentLocation} />
-                </DataRow>
-              )}
-            </div>
-
-            {/* Unassign/Blocked Put moved beside Confirm Location (rather than below it)
-                so the panel has room to run "large" — items-end bottom-aligns the button
-                row (no label above it) with the boxes' own bottom edge (label above them). */}
-            <div className="flex items-end gap-4">
-              <div className="flex flex-col gap-1">
-                <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Confirm Location</span>
-                <LocationEntryFields key={locationEntryKey} onResolved={handleLocationConfirm} onActiveChange={setLocationActive} size="large" />
-              </div>
-              <div className="flex gap-3">
-                <ActionBtn label="Unassign"    variant="warning" onClick={handleUnassign} disabled={loading} />
-                <ActionBtn label="Blocked Put" variant="danger"  onClick={() => setConfirmBlock(true)} disabled={loading} />
-              </div>
-            </div>
-          </>
+          <SDPVerifyPutModal
+            directed={directed}
+            loading={loading}
+            locationEntryKey={locationEntryKey}
+            onLocationConfirm={handleLocationConfirm}
+            onLocationActiveChange={setLocationActive}
+            onUnassign={handleUnassign}
+            onHoldDone={handleHoldDone}
+            onRedirected={handleRedirected}
+            onReservationLost={handleReservationLost}
+          />
         )}
 
         {loading && (
@@ -932,7 +857,7 @@ export function SDPPage() {
             entry.outcome === 'MOVE'     ? 'text-[#0066CC]' :
             entry.outcome === 'ASSIGNED' ? 'text-[#AA8800]' :
             entry.outcome === 'RELEASED' ? 'text-[#555555]' :
-                                           'text-[#CC4400]'; // BLOCKED
+                                           'text-[#CC4400]'; // HELD
           const displayLoc = entry.finalLocation ?? entry.directedLocation;
           return (
             <>
@@ -952,18 +877,6 @@ export function SDPPage() {
           );
         }}
       />
-
-      {confirmBlock && directed && (
-        <ConfirmDialog
-          title="Place Hold Both?"
-          message={`This places a Hold Both on ${fmtLocation(directed.directedLocation)} and redirects you to the next available location.`}
-          confirmLabel="Hold Both"
-          variant="danger"
-          onConfirm={() => { setConfirmBlock(false); handleBlock(); }}
-          onCancel={() => setConfirmBlock(false)}
-        />
-      )}
-
     </div>
   );
 }

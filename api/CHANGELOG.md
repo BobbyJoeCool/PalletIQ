@@ -4,10 +4,30 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
 
 ---
+
+## [1.2.0] — 2026-08-02
+
+Backend half of SDP's Verify-Put Modal (floor-app's own `[1.8.6]` entry) — GitHub #151,
+built on this file's own `[1.1.0]` Logic Gate work. Full detail:
+`DevNotes/Logs/V1.8/version-1_8_0.md` §1.2.56.
+
+### 1.2.0 — Added
+
+- `directedPut`'s response gained `directedLocationSize` (the directed location's own
+  Size) — free, already computed for the location search; lets the frontend pick a Rack
+  vs. Hand Put modal body without a second request.
+
+### 1.2.0 — Removed
+
+- **`blockPut` and its route (`POST /puts/:reservationId/block`) removed entirely** — "Blocked
+  Put" is retired in favor of Hold Location, which reuses the existing `PATCH
+  /locations/:id/hold` (unchanged) rather than a dedicated endpoint. Any client still
+  calling this route gets a 404.
 
 ## [1.1.0] — 2026-08-02
 

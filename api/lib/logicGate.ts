@@ -16,7 +16,7 @@ import { NOT_HELD_FILTER } from './zoneLogic.js';
  * **`statusExpiry`/`revertStatus` (#150) are a mirror, not the active enforcer.** SDP's
  * existing `Reservation` table (`createdAt` + `wasStaged`) plus `reservationTimer.ts`'s
  * per-minute cron (atomic `deleteMany`-claim, the "#93" race-safety pattern reused by
- * confirm/unassign/block) remains the sole *active* expiry mechanism for RESERVE_PUT —
+ * confirm/unassign) remains the sole *active* expiry mechanism for RESERVE_PUT —
  * this predates the design doc, which never mentions the Reservation table at all.
  * `reservePut` below still creates a `Reservation` row exactly as before; `statusExpiry`/
  * `revertStatus` are written alongside it for design-doc conformance and future lazy-check
@@ -214,11 +214,13 @@ async function clearLocationTx(
  * `revertStatus` in the same write. `excludePalletId` matters when the pallet being placed
  * elsewhere is itself still (momentarily) pointing at the location being cleared.
  *
- * Reused by: `placePallet`'s old-location clear, SDP's `unassignPut`/`blockPut`, MNP's
+ * Reused by: `placePallet`'s old-location clear, SDP's `unassignPut`, MNP's
  * consolidate-vacate (via `zeroPallet`), STG's per-location restage step, and WLH's
  * hold-placement side effect (`overrideRevert: 'EMPTY'`, per the design doc's "placing a
  * hold also calls the Gate... forcing the reservation to revert to EMPTY regardless of
- * what its stored revert-to value would otherwise have been").
+ * what its stored revert-to value would otherwise have been") — the same side effect
+ * that makes SDP's own Hold Location button (Verify-Put Modal, #151) need no API call
+ * of its own beyond embedding the shared `HoldPanel`.
  *
  * @returns the status the location actually resolved to — a caller like `unassignPut`
  *   reports this back to the worker (e.g. "released to STAGED/EMPTY"); `STORED` is the
@@ -240,8 +242,8 @@ export async function clearLocation(params: {
  * the `Reservation` row exactly as `directedPut` does today, sets `status = 'RESERVED'`,
  * `statusExpiry = now + 5min`, `revertStatus = wasStaged ? 'STAGED' : 'EMPTY'`.
  *
- * Wired to SDP's `directedPut` and `blockPut`'s re-reserve step (`puts.ts`) — both
- * currently build this same Reservation row + status write inline.
+ * Wired to SDP's `directedPut` (`puts.ts`), which builds this same Reservation row +
+ * status write inline.
  *
  * @throws Error('LOCATION_UNAVAILABLE') if denied — caller decides how to surface it
  */

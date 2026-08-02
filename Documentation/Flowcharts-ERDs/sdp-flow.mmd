@@ -38,14 +38,14 @@ flowchart TD
     INFO_MSG --> S2
     WARN_MSG --> S2
 
-    S2[State: directed\nScreen LOCKED — active reservation\ndirectedLocation shown in red\nConfirm Location — full 3-box Aisle/Bin/Level panel\nauto-focuses first box\n5-min server-side timer pushes expiry to screen\nvia polling, not on next scan attempt]
+    S2[State: directed\nSDPVerifyPutModal opens — screen-blocking popup, #151\nbackdrop covers entry-state content behind it\ndirectedLocationSize branches the body:\nRack !== XS — Pallet ID/Item/DPCI/Confirm Location only\nHand === XS — adds Carton Quantity + Exists Elsewhere\n5-min server-side timer pushes expiry to screen\nvia polling, not on next scan attempt]
 
     S2 --> ACTION{Worker action?}
 
     ACTION -->|Confirm Location\n3-box entry or scan\nhandleLocationConfirm| CONF[POST /api/puts/:id/confirm\napi/functions/puts.ts — confirmPut\nvalidate scanned === directed\nplacePallet atomic transaction\ncopies storageCode/size/zone onto pallet\ndelete Reservation\nwriteLog PUT or MOVE_PUT incl. wasStaged + verification]
 
     CONF --> CONF_OK{Result?}
-    CONF_OK -->|LOCATION_MISMATCH| ERR_C1[Error: Wrong location\nfields cleared + re-focused]
+    CONF_OK -->|LOCATION_MISMATCH| ERR_C1[Error: Wrong location\nfields cleared + re-focused\nmodal stays open]
     CONF_OK -->|NOT_FOUND\nreservation expired| EXPIRE_C[Warning: Reservation expired\nfull reset to entry]
     CONF_OK -->|OK, wasStaged true| PUT_SUCCESS_STAGED[Success: Put / Move complete — Staged\ninfo tone\nstopPolling\nhistory outcome → PUT or MOVE]
     CONF_OK -->|OK, wasStaged false| PUT_SUCCESS_EMPTY[Success: Put / Move complete — Empty\nwarning tone, still Info-blue message\nstopPolling\nhistory outcome → PUT or MOVE]
@@ -58,37 +58,56 @@ flowchart TD
     UN_OK -->|NOT_FOUND| EXPIRE_U[Warning: Reservation expired\nfull reset]
     UN_OK -->|OK| UN_SUCCESS[Info: Reservation cleared — Staged/Empty shown\nhistory outcome → RELEASED\nreset to entry — locked overrides kept]
 
-    ACTION -->|Blocked Put button\nhandleBlock| BLOCK[POST /api/puts/:id/block\napi/functions/puts.ts — blockPut\nHold Both on current location\nrestore to STAGED if wasStaged===true, else EMPTY\nre-derive resolveEffectiveCriteria\nfindNextLocation\nnew Reservation carries wasStaged forward\nwriteLog RESERVE]
+    ACTION -->|Hold Location button\n#151 — replaces the old Blocked Put entirely| HOLD_OPEN[Nested modal embeds the shared\nHoldPanel — same component PIP/MNP/WLH use\nlocationId = directedLocation]
 
-    BLOCK --> BLK_OK{Result?}
-    BLK_OK -->|NO_LOCATIONS| ERR_BLK[Error: No further locations\nhold placed\nfull reset to entry]
-    BLK_OK -->|NOT_FOUND| EXPIRE_B[Warning: Reservation expired\nfull reset]
-    BLK_OK -->|OK| BLK_SUCCESS[New reservationId + directedLocation\nupdate directed state\nold entry → BLOCKED\nnew entry → ASSIGNED\nconfirm panel re-focused]
+    HOLD_OPEN --> HOLD_SUBMIT[PATCH /api/locations/:id/hold\napi/functions/locations.ts — placeHold\nLogic Gate CLEAR_LOCATION — override EMPTY\nRESERVED location's Reservation is deleted\nas a side effect of placing the hold, #149]
 
-    BLK_SUCCESS --> S2
+    HOLD_SUBMIT --> HOLD_OK{Result?}
+    HOLD_OK -->|FORBIDDEN| ERR_HOLD[Error: no permission for this hold type\nHold sub-modal stays open]
+    HOLD_OK -->|OK| HOLD_SUCCESS[Success: {Hold Type} placed on {location}\nreservation already gone server-side —\nonHoldDone needs no API call of its own\nhistory outcome → HELD\nfull reset to entry, no auto-continue]
+
+    ERR_HOLD --> HOLD_OPEN
+
+    ACTION -->|"Exists Elsewhere" button\nHand Put only — XS match found via\nGET /api/items/dpci/:dpci/locations, filtered\nto size===XS and locationId !== directedLocation"| EXISTS_OPEN[Popup lists each same-DPCI XS\nmatch — location + current carton count]
+
+    EXISTS_OPEN --> EXISTS_PICK[Worker picks a row]
+    EXISTS_PICK --> EXISTS_UNASSIGN[POST /api/puts/:id/unassign\nsame call Unassign itself uses]
+    EXISTS_UNASSIGN --> EXISTS_UN_OK{Result?}
+    EXISTS_UN_OK -->|Fails| ERR_EXISTS[Error: redirect failed\nnothing lost — reservation still held\npopup stays open for retry]
+    EXISTS_UN_OK -->|OK| EXISTS_CONFIRM[POST /api/puts/manual/confirm\nresolution: consolidate — sent immediately,\nno intermediate confirm popup, since the\npicked row is already a known same-DPCI XS match]
+
+    EXISTS_CONFIRM --> EXISTS_CONF_OK{Result?}
+    EXISTS_CONF_OK -->|Fails| EXISTS_LOST[Error: redirect failed after releasing\nthe original reservation — nothing left to\nretry against, re-enter from Aisle entry\nfull reset to entry]
+    EXISTS_CONF_OK -->|OK| EXISTS_SUCCESS[Success: Redirected — consolidated into {location}\nhistory outcome → PUT or MOVE\nfull reset to entry]
+
+    ERR_EXISTS --> EXISTS_OPEN
 
     PUT_SUCCESS_STAGED --> RESET_N[Partial reset\nclear pallet + confirm\nnon-locked overrides cleared\nfocus → pallet field]
     PUT_SUCCESS_EMPTY --> RESET_N
     RESET_N --> S1
 
     UN_SUCCESS --> S1
+    HOLD_SUCCESS --> S1
+    EXISTS_SUCCESS --> S1
+    EXISTS_LOST --> S1
     EXPIRE_C --> S1_FULL[Full reset — all fields cleared\nfocus → aisle field]
     EXPIRE_U --> S1_FULL
-    EXPIRE_B --> S1_FULL
-    ERR_BLK --> S1_FULL
     S1_FULL --> S1
 
     style START fill:#1a1a1a,stroke:#555,color:#fff
     style PUT_SUCCESS_STAGED fill:#003300,stroke:#006600,color:#fff
     style PUT_SUCCESS_EMPTY fill:#003300,stroke:#006600,color:#fff
     style UN_SUCCESS fill:#003333,stroke:#006666,color:#aaffff
+    style HOLD_SUCCESS fill:#003333,stroke:#006666,color:#aaffff
+    style EXISTS_SUCCESS fill:#003300,stroke:#006600,color:#fff
     style ERR_P1 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_P4 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_P5 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_P2 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_P3 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_C1 fill:#330000,stroke:#660000,color:#ff8080
-    style ERR_BLK fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_HOLD fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_EXISTS fill:#330000,stroke:#660000,color:#ff8080
     style EXPIRE_C fill:#332200,stroke:#664400,color:#ffcc88
     style EXPIRE_U fill:#332200,stroke:#664400,color:#ffcc88
-    style EXPIRE_B fill:#332200,stroke:#664400,color:#ffcc88
+    style EXISTS_LOST fill:#332200,stroke:#664400,color:#ffcc88

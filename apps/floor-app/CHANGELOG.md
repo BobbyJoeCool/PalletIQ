@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.6 — 2026-08-02](#186--2026-08-02)
 - [1.8.5 — 2026-08-01](#185--2026-08-01)
 - [1.8.4 — 2026-07-31](#184--2026-07-31)
 - [1.8.0 — 2026-07-26](#180--2026-07-26)
@@ -177,6 +178,35 @@ See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the spe
 screen(s) each one touches.
 
 ---
+
+## [1.8.6] — 2026-08-02
+
+SDP's Verify-Put Modal — GitHub #151, built on top of API v1.1.0's Logic Gate
+(`api/CHANGELOG.md`'s own `[1.1.0]` entry). Full session-by-session detail:
+`DevNotes/Logs/V1.8/version-1_8_0.md` §1.2.56.
+
+### 1.8.6 — Added
+
+- **Verify-Put Modal:** System Directed Put's reservation step now opens as a real
+  screen-blocking popup instead of locking the page in place inline. Two bodies: **Rack
+  Put** (unchanged Pallet ID/Item/DPCI/Confirm Location) and **Hand Put** (adds a
+  read-only Carton Quantity field and, once a match is found, an **Exists Elsewhere**
+  button).
+- **Exists Elsewhere (Hand Put, Inventory Manager and above):** offers any other same-DPCI
+  Hand Put location already holding stock; picking one releases the original reservation
+  and consolidates this pallet's cartons into the existing one at the picked location, in
+  one step, no second confirmation needed.
+- **Hold Location:** replaces the old "Blocked Put" entirely. Opens the same shared hold
+  panel used on Warehouse Location Hold/Pallet ID Pull/Manual Put, for any hold type the
+  worker is permitted to place. Unlike Blocked Put, it does **not** automatically search
+  for and reserve a replacement location — placing the hold simply releases the
+  reservation and returns to Aisle entry.
+
+### 1.8.6 — Fixed
+
+- **Issue #152:** typing an aisle number with repeated digits (e.g. `99999`) could fail to
+  register correctly on-screen — a shared numpad-input helper was caching whether the
+  on-screen keypad panel existed instead of re-checking on every keystroke.
 
 ## [1.8.5] — 2026-08-01
 

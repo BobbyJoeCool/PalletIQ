@@ -40,8 +40,7 @@ export interface EffectiveCriteria {
  * Size/Storage Code but always resolves to a concrete number, defaulting to 1 — Zone is
  * only ever a *starting preference* for `findNextLocation` (which retries from Zone 1 if
  * nothing eligible exists at or above it), not a hard filter, so it has no failure mode
- * the way Size/Storage Code do. Shared by directedPut (the initial search) and blockPut (a
- * Blocked Put's re-search, which must reapply the exact same effective criteria).
+ * the way Size/Storage Code do. Used by directedPut for its own search.
  *
  * **Size and Storage Code are always hard, exact-match filters — direct instruction: "Both
  * of those should ONLY accept the value that the location has, unless specifically

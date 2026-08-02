@@ -138,8 +138,7 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
   // targetSize/targetStorage/targetZone — confirmPut's log-write reads these to show
   // whether an IM+ override was actually used, so this must stay distinct from the
   // *effective* criteria (which also folds in the pallet's own inherited values — see
-  // `effective` above). blockPut re-derives the same effective criteria itself from these
-  // raw fields plus the pallet's current inherited values.
+  // `effective` above).
   const { reservationId } = await reservePut({
     aisle: loc.aisle, bin: loc.bin, level: loc.level,
     palletId: body.palletId, workerZ: auth.zNumber, targetAisle: body.aisle,
@@ -164,6 +163,12 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
   return {
     reservationId,
     directedLocation: locationString(loc.aisle, loc.bin, loc.level),
+    // The directed location's own Size — `effective.size` is exactly what was passed to
+    // findNextLocation as its exact-match filter a few lines above, so this is free (no
+    // extra query). Lets the frontend pick a Verify-Put modal body: XS is Hand Put,
+    // everything else is Rack Put (see `apps/floor-app/src/lib/sizes.ts`'s own XS
+    // comment and `irpFormat.ts`'s RP/HP labels for this same convention elsewhere).
+    directedLocationSize: effective.size,
     pallet: {
       id:              elig.pallet.pid,
       dpci:            `${String(elig.pallet.dept).padStart(3,'0')}-${String(elig.pallet.class).padStart(2,'0')}-${String(elig.pallet.item).padStart(4,'0')}`,
@@ -186,10 +191,9 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
  * Validates that the scanned location (Aisle+Bin) matches the reserved location, then
  * atomically claims the Reservation (deletes it first, before touching Location/Pallet
  * state — #93) and calls placePallet to complete the store. Claiming first, rather than
- * deleting after placePallet, closes the race against `unassignPut`/`blockPut`/the
- * expiry timer all acting on the same row: whichever of them deletes the row first wins
- * outright, and every loser gets a clean 404 instead of a chance to clobber the winner's
- * write.
+ * deleting after placePallet, closes the race against `unassignPut`/the expiry timer
+ * both acting on the same row: whichever of them deletes the row first wins outright,
+ * and the loser gets a clean 404 instead of a chance to clobber the winner's write.
  *
  * The level from the Reservation record (not the scanned barcode) is used as the
  * destination level, since physical barcodes only encode aisle+bin.
@@ -201,7 +205,7 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
  * "LID" since SDP confirms Aisle+Bin only (see LOCATION_MISMATCH below), unlike PIP's
  * full Aisle+Bin+Level Location match.
  *
- * `wasStaged` (from the Reservation, set back in directedPut/blockPut) is true if the
+ * `wasStaged` (from the Reservation, set back in directedPut) is true if the
  * directed location was already STAGED when selected — the preferred/expected outcome —
  * false if the search fell through to an EMPTY location. The frontend uses this to show
  * Blue Info instead of Green Success, with a note that the location wasn't staged, per
@@ -212,7 +216,7 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
  * @returns `{ location: string; wasMove: boolean; clearedLocation: string | null; wasStaged: boolean }`
  * @throws 400 INVALID_INPUT for non-numeric reservationId, missing body, or LOCATION_MISMATCH;
  *   404 NOT_FOUND if reservation does not exist, or lost the claim race to a concurrent
- *   unassign/block/expiry-timer call on the same reservation
+ *   unassign/expiry-timer call on the same reservation
  */
 async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
   const auth = await requireAuth(req);
@@ -235,7 +239,7 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
   }
 
   // Atomically claim the reservation before touching Location/Pallet state (#93) —
-  // deletes it now, rather than after placePallet, so a concurrent unassign/block/
+  // deletes it now, rather than after placePallet, so a concurrent unassign/
   // expiry-timer call racing on the same row can never win after this point and clobber
   // the location this call is about to store into. deleteMany (not delete) so a lost
   // race returns a count of 0 instead of throwing — something else already claimed it.
@@ -259,7 +263,7 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
   if (reservation.targetZone != null) override.zone = reservation.targetZone;
 
   // Whether the directed location was already STAGED (the preferred/expected outcome —
-  // see findNextLocation) when originally selected back in directedPut/blockPut. Only
+  // see findNextLocation) when originally selected back in directedPut. Only
   // meaningful for pre-1.6.2 reservations is it null; treated as "was staged" (no note)
   // in that case rather than surfacing a false "wasn't staged" for data that predates
   // this tracking.
@@ -324,8 +328,8 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
   if (!reservation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
   // Atomically claim the reservation before touching Location state (#93) — same pattern
-  // as confirmPut: whichever of confirm/unassign/block/the expiry timer deletes this row
-  // first wins; everyone else gets a clean 404 instead of racing a stale read into a write.
+  // as confirmPut: whichever of confirm/unassign/the expiry timer deletes this row first
+  // wins; the other gets a clean 404 instead of racing a stale read into a write.
   const claimed = await prisma.reservation.deleteMany({ where: { id: reservationId } });
   if (claimed.count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
@@ -346,124 +350,6 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
   return {
     location: locationString(reservation.locationAisle, reservation.locationBin, reservation.locationLevel),
     releasedStatus,
-  };
-}
-
-// ── POST /api/puts/:reservationId/block ──────────────────────────────────────
-
-/**
- * Marks the currently directed location as Hold Both ("Blocked Put") and immediately
- * finds the next eligible location to direct the worker to. Used when a worker arrives
- * at the directed location and finds it unusable.
- *
- * Flow: claim (delete) current Reservation → place Hold Both on the current location →
- * find the next empty location → set it to RESERVED → create new Reservation →
- * write two activity log entries (BLOCK_PUT and RESERVE). The claim runs first (#93) so
- * a concurrent confirm/unassign/expiry-timer call on the same reservation can't race in
- * after this location's already been touched.
- *
- * The hold reason code ("Blocked Put") lives only in the activity log per spec;
- * it is not stored as a column on the Location.
- *
- * @param req - HTTP request with URL param `reservationId`
- * @returns `{ blockedLocation: string; newReservationId: number; newDirectedLocation: string }`
- * @throws 400 INVALID_INPUT for non-numeric reservationId;
- *   404 NOT_FOUND if reservation does not exist;
- *   409 MISSING_SIZE if the pallet has no Size and none was given (see
- *   `resolveEffectiveCriteria`'s own doc comment — reachable here too, since this re-derives
- *   the same effective criteria the original directedPut search used);
- *   409 NO_LOCATIONS if no further eligible locations are available in the target aisle
- */
-async function blockPut(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
-  const auth = await requireAuth(req);
-
-  const reservationId = parseInt(req.params.reservationId ?? '', 10);
-  if (isNaN(reservationId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-
-  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
-  if (!reservation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  const blockedLoc = locationString(
-    reservation.locationAisle,
-    reservation.locationBin,
-    reservation.locationLevel,
-  );
-
-  // Atomically claim the reservation before touching Location state (#93) — same pattern
-  // as confirmPut/unassignPut: whichever of confirm/unassign/block/the expiry timer
-  // deletes this row first wins; everyone else gets a clean 404 instead of racing a
-  // stale read into a write.
-  const claimed = await prisma.reservation.deleteMany({ where: { id: reservationId } });
-  if (claimed.count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  // Place Hold Both on the blocked location. The location was RESERVED (never actually
-  // stored), so CLEAR_LOCATION (the Logic Gate — #149) reverts it to EMPTY or STAGED
-  // (whichever findNextLocation actually found it as, mirrored onto revertStatus at
-  // reserve time — see unassignPut's identical comment); holdCategory is written
-  // separately, independent of status (see Location.holdCategory's schema comment) —
-  // Phase 10 fixed this from `status: 'HOLD_BOTH'`, which clobbered operational state.
-  await clearLocation({ aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel });
-
-  await prisma.location.update({
-    where: { LocationID: { aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel } },
-    data: { holdCategory: 'HOLD_BOTH' },
-  });
-
-  await writeLog({
-    userId: auth.zNumber,
-    actionType: 'BLOCK_PUT',
-    palletId: reservation.palletId,
-    locationAisle: reservation.locationAisle,
-    locationBin:   reservation.locationBin,
-    locationLevel: reservation.locationLevel,
-    details: { reservationId, reason: 'Blocked Put' },
-  });
-
-  // Re-resolve the same effective criteria the original directedPut search used — the
-  // pallet's own inherited storageCode/size/zone haven't changed (it's still not
-  // actually STORED anywhere new yet), so re-deriving from the Reservation's raw
-  // targetSize/targetStorage/targetZone plus the pallet's current values reproduces the
-  // exact same result directedPut computed originally.
-  const palletForBlock = await prisma.pallet.findUniqueOrThrow({
-    where: { pid: reservation.palletId },
-    select: { size: true, storageCode: true, zone: true, itemRef: { select: { storageCode: true } } },
-  });
-  const effective = resolveEffectiveCriteria(
-    { size: reservation.targetSize, storageCode: reservation.targetStorage, zone: reservation.targetZone },
-    { ...palletForBlock, itemStorageCode: palletForBlock.itemRef.storageCode },
-  );
-  const nextLoc = await findNextLocation(reservation.targetAisle, effective.zone, {
-    size:          effective.size,
-    storageCode:   effective.storageCode,
-    excludeStaged: reservation.consolidating,
-  });
-
-  if (!nextLoc) {
-    throw Object.assign(new Error('NO_LOCATIONS'), { status: 409 });
-  }
-
-  // Reserve the new location (RESERVE_PUT, via the Logic Gate — #149).
-  const { reservationId: newReservationId } = await reservePut({
-    aisle: nextLoc.aisle, bin: nextLoc.bin, level: nextLoc.level,
-    palletId: reservation.palletId, workerZ: auth.zNumber, targetAisle: reservation.targetAisle,
-    targetSize: reservation.targetSize, targetStorage: reservation.targetStorage, targetZone: reservation.targetZone,
-    consolidating: reservation.consolidating, wasScanned: reservation.pidWasScanned, wasStaged: nextLoc.wasStaged,
-  });
-
-  await writeLog({
-    userId: auth.zNumber,
-    actionType: 'RESERVE',
-    palletId: reservation.palletId,
-    locationAisle: nextLoc.aisle,
-    locationBin:   nextLoc.bin,
-    locationLevel: nextLoc.level,
-    details: { reservationId: newReservationId, afterBlock: blockedLoc },
-  });
-
-  return {
-    blockedLocation:    blockedLoc,
-    newReservationId,
-    newDirectedLocation: locationString(nextLoc.aisle, nextLoc.bin, nextLoc.level),
   };
 }
 
@@ -849,13 +735,6 @@ app.http('unassignPut', {
   authLevel: 'anonymous',
   route: 'puts/{reservationId:int}/unassign',
   handler: withHandler(unassignPut),
-});
-
-app.http('blockPut', {
-  methods: ['POST'],
-  authLevel: 'anonymous',
-  route: 'puts/{reservationId:int}/block',
-  handler: withHandler(blockPut),
 });
 
 app.http('manualScan', {

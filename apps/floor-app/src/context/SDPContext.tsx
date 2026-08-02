@@ -3,6 +3,10 @@ import { createContext, useContext, useState } from 'react';
 export interface SDPDirectedResult {
   reservationId: number;
   directedLocation: string;
+  /** The directed location's own Size — XS means Hand Put, everything else Rack Put (see
+   *  `lib/sizes.ts`'s own XS comment) — the Verify-Put Modal (#151) branches its body on
+   *  this. */
+  directedLocationSize: string;
   pallet: {
     id: number;
     dpci: string;
@@ -32,7 +36,7 @@ const SDPContext = createContext<SDPContextValue | null>(null);
  * `reservationTimer.ts`'s `clearExpiredReservations`) — a persisted-but-now-expired
  * `directed` value isn't specially guarded against here, since SDPPage already has its
  * own existing expiry detection (polling the directed location's status, and a reactive
- * fallback via the 404 a confirm/unassign/block call gets back) that covers this exact
+ * fallback via the 404 a confirm/unassign call gets back) that covers this exact
  * "resumed a now-stale reservation" case, not just the in-session one. State clears
  * naturally on logout, since ProtectedRoute unmounts this provider along with the rest
  * of the authenticated tree when the session token is cleared.

@@ -11,22 +11,21 @@ const TIMEOUT_MINUTES = 5;
  * Scans for Reservation rows that have been open longer than TIMEOUT_MINUTES (5 minutes).
  * For each expired reservation:
  *   1. Atomically claims it (deletes it first, before touching Location state — #93,
- *      same pattern as confirmPut/unassignPut/blockPut) — if a concurrent confirm/
- *      unassign/block call already claimed this same reservation between this
- *      function's own initial `findMany` read and this per-row claim attempt, the claim
- *      loses (count 0) and this reservation is skipped rather than clobbering whatever
- *      that other call already did.
+ *      same pattern as confirmPut/unassignPut) — if a concurrent confirm/unassign call
+ *      already claimed this same reservation between this function's own initial
+ *      `findMany` read and this per-row claim attempt, the claim loses (count 0) and this
+ *      reservation is skipped rather than clobbering whatever that other call already did.
  *   2. Sets the reserved location back to STAGED if that's genuinely how findNextLocation
- *      found it (`wasStaged`, set back in directedPut/blockPut), or EMPTY otherwise — an
+ *      found it (`wasStaged`, set back in directedPut), or EMPTY otherwise — an
  *      expiring reservation shouldn't silently erase a GPMer's staging work (same fix as
- *      unassignPut/blockPut; see unassignPut's comment for why `=== true`, not `!== false`)
+ *      unassignPut; see its own comment for why `=== true`, not `!== false`)
  *   3. Writes a RES_TMOUT activity log entry
  *
  * This runs server-side so reservations are cleaned up even if the client disconnects
  * or the worker closes the app without unassigning. The SDP screen detects expiry two
  * ways: proactively, by polling the directed location's status every 15s and noticing
  * it's no longer RESERVED (see SDPPage.tsx's startPolling); and reactively, as a
- * fallback, via the 404 a confirm/unassign/block call gets back if it happens to land
+ * fallback, via the 404 a confirm/unassign call gets back if it happens to land
  * between polls.
  *
  * @param _timer - Azure Functions timer trigger metadata (unused)
@@ -49,7 +48,7 @@ async function clearExpiredReservations(_timer: Timer, ctx: InvocationContext): 
   for (const res of expired) {
     try {
       const claimed = await prisma.reservation.deleteMany({ where: { id: res.id } });
-      if (claimed.count === 0) continue; // already claimed by confirm/unassign/block (#93)
+      if (claimed.count === 0) continue; // already claimed by confirm/unassign (#93)
 
       // CLEAR_LOCATION (Logic Gate — #149) — also clears the location's own statusExpiry/
       // revertStatus mirror, which a plain status write wouldn't have (this reservation

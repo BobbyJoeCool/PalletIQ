@@ -18,11 +18,20 @@ export const USERS = {
  * happens to equal the next key's label (e.g. typing a repeated digit like "99" — after the
  * first "9", the field button's accessible name is also "9"), causing a strict-mode
  * violation. ZnumPad (login) has no such panel, so it falls back to the whole page.
+ *
+ * Re-checks whether the panel exists on *every* keystroke (issue #152), not once before
+ * the loop — a fresh call landing before the panel has actually mounted (e.g. the very
+ * first action on a just-loaded page, before the target field's own auto-focus effect has
+ * registered it) would otherwise cache the page-wide fallback for the whole sequence, even
+ * once the panel opens moments later from that first keystroke itself. Repeated digits are
+ * exactly what exposes this: '304' never collides regardless of scope (each digit differs
+ * from the field's own current display), but '99999' does, on whichever keystroke first
+ * lands after the panel actually exists but the stale page-wide scope is still in use.
  */
 export async function tapKeys(page: Page, keys: string) {
   const panel = page.locator('[data-testid="numpad-panel"], [data-testid="keyboard-panel"]');
-  const scope = (await panel.count()) > 0 ? panel : page;
   for (const ch of keys) {
+    const scope = (await panel.count()) > 0 ? panel : page;
     // exact: true matches case-sensitively — zNumbers are typed lowercase (e.g. "002p21")
     // but ZnumPad's letter keys render uppercase ("P"/"N"/"X"), so the button name lookup
     // must be uppercased even though the value passed to onChange stays lowercase.
