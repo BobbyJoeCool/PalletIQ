@@ -358,7 +358,13 @@ export function SDPPage() {
       const sizeVal    = sizeOverride;
       const storageVal = storageOverride;
 
-      const result = await apiFetch<SDPDirectedResult>('/api/puts/directed', token!, {
+      // `hasReservation`/`original`/`palletStorageCode` are client-only bookkeeping for the
+      // Exists Elsewhere redirect flow (#151) — the API's own directedPut response has no
+      // concept of any of them, since every fresh directed-put always starts with a live
+      // reservation, no prior redirect, and a target Storage Code that (at this moment,
+      // before any redirect) is also exactly the pallet's own. Merged in here rather than
+      // returned by the API itself.
+      const apiResult = await apiFetch<Omit<SDPDirectedResult, 'hasReservation' | 'original' | 'palletStorageCode'>>('/api/puts/directed', token!, {
         method: 'POST',
         body: JSON.stringify({
           aisle,
@@ -370,6 +376,10 @@ export function SDPPage() {
           wasScanned,
         }),
       });
+      const result: SDPDirectedResult = {
+        ...apiResult, hasReservation: true, original: null,
+        palletStorageCode: apiResult.directedLocationStorageCode,
+      };
 
       setDirected(result);
       setScreenState('directed');
@@ -446,11 +456,111 @@ export function SDPPage() {
    * NOT_FOUND, the reservation has expired — resets to entry with full field clear. On
    * success, updates the history entry outcome and shows a completion message.
    */
+  /** Shared success handling for both confirmPut's and the redirected-flow's
+   *  manual/confirm-'proceed' response — both return the identical
+   *  `{location, wasMove, clearedLocation, wasStaged}` shape (destinationWasStaged renamed
+   *  wasStaged by confirmPut's own response only — see the two call sites below for the
+   *  field-name reconciliation). Tags the history row, plays the tone, sets the message,
+   *  and resets to entry. */
+  function applyConfirmSuccess(
+    reservationId: number,
+    result: { location: string; wasMove: boolean; clearedLocation: string | null; wasStaged: boolean },
+  ) {
+    stopPolling();
+    setHistory(h => h.map(e =>
+      e.reservationId === reservationId
+        ? { ...e, outcome: result.wasMove ? 'MOVE' as const : 'PUT' as const, finalLocation: result.location }
+        : e
+    ));
+    const base = result.wasMove && result.clearedLocation
+      ? `Move complete — ${fmtLocation(result.clearedLocation)} → ${fmtLocation(result.location)}`
+      : `Put complete — ${fmtLocation(result.location)}`;
+    // Landing on an already-STAGED location is the preferred/expected outcome (plain
+    // success — 'info' is this app's established success/informational tone, see
+    // audio.ts's own docstring); falling through to an EMPTY one is worth flagging with
+    // the warning tone, though it keeps the message bar's blue Info color rather than
+    // full amber Warning — per the SDP put hierarchy's rule 4.a, this isn't a problem
+    // the worker needs to act on, just something worth a second look.
+    if (result.wasStaged) {
+      playAlert('info');
+      setMessage({ type: 'success', text: base });
+    } else {
+      playAlert('warning');
+      setMessage({ type: 'info', text: `${base} — location was not staged` });
+    }
+    resetToEntry();
+  }
+
+  /**
+   * Completes the put once the worker confirms the directed location. Two paths,
+   * branching on `d.hasReservation`:
+   * - **Normal** (still has a live reservation): `POST /puts/:id/confirm` — unchanged.
+   * - **Redirected** (Exists Elsewhere released the original reservation at least once,
+   *   #151): no reservation left to confirm against, so this goes through the
+   *   fully self-contained `POST /puts/manual/confirm` instead — same endpoint MNP uses,
+   *   and the same one the redirect itself used to complete before this got split into a
+   *   real two-step "redirect, then confirm" flow. `resolution` is derived from whether
+   *   the worker is confirming at the original location (`'proceed'` — it's back to
+   *   plain EMPTY/STAGED, no consolidation needed) or a redirected-to one (`'consolidate'`
+   *   — always occupied by a same-DPCI pallet, guaranteed by Exists Elsewhere's own fetch
+   *   filter). The match check against `d.directedLocation` that confirmPut normally does
+   *   server-side has to happen client-side here instead, since manual/confirm has no
+   *   reservation to compare against and would otherwise happily put/consolidate at
+   *   *any* location typed in, not just the one the worker was actually directed to.
+   */
   async function handleLocationConfirm(value: string, wasScanned: boolean) {
     const v = value.trim();
     if (!v || loadingRef.current) return;
     const d = directedRef.current;
     if (!d) return;
+
+    if (!d.hasReservation) {
+      // Aisle+Bin only, matching confirmPut's own comparison (Level is never checked —
+      // physical barcodes only encode Aisle+Bin, see Location Barcode Handling).
+      if (v.slice(0, 6) !== d.directedLocation.slice(0, 6)) {
+        playAlert('error');
+        resetLocationField();
+        setMessage({ type: 'error', text: `Wrong location — directed to ${d.directedLocation}` });
+        return;
+      }
+      setLoading(true);
+      try {
+        const isOriginal = d.original != null && d.directedLocation === d.original.location;
+        const level = parseInt(d.directedLocation.slice(6, 8), 10);
+        const result = await apiFetch<
+          | { consolidated: true; location: string }
+          | { location: string; wasMove: boolean; clearedLocation: string | null; destinationWasStaged: boolean }
+        >('/api/puts/manual/confirm', token!, {
+          method: 'POST',
+          body: JSON.stringify({
+            palletId: d.pallet.id, destinationLocation: d.directedLocation, level,
+            resolution: isOriginal ? 'proceed' : 'consolidate',
+          }),
+        });
+        if ('consolidated' in result) {
+          playAlert('info');
+          setMessage({ type: 'success', text: `Redirected — consolidated into ${fmtLocation(result.location)}` });
+          stopPolling();
+          setHistory(h => h.map(e =>
+            e.reservationId === d.reservationId
+              ? { ...e, outcome: d.pallet.currentLocation != null ? 'MOVE' as const : 'PUT' as const, finalLocation: result.location }
+              : e
+          ));
+          resetToEntry();
+        } else {
+          applyConfirmSuccess(d.reservationId, { ...result, wasStaged: result.destinationWasStaged });
+        }
+      } catch {
+        // Nothing was lost — the original reservation was already released back when the
+        // first redirect happened, well before this call, so a failure here is fully
+        // retryable (the pallet's own status is untouched either way).
+        playAlert('error');
+        setMessage({ type: 'error', text: 'Confirm failed — please try again' });
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
 
     setLoading(true);
     try {
@@ -459,29 +569,7 @@ export function SDPPage() {
         token!,
         { method: 'POST', body: JSON.stringify({ scannedLocation: v, wasScanned }) },
       );
-      stopPolling();
-      setHistory(h => h.map(e =>
-        e.reservationId === d.reservationId
-          ? { ...e, outcome: result.wasMove ? 'MOVE' as const : 'PUT' as const, finalLocation: result.location }
-          : e
-      ));
-      const base = result.wasMove && result.clearedLocation
-        ? `Move complete — ${fmtLocation(result.clearedLocation)} → ${fmtLocation(result.location)}`
-        : `Put complete — ${fmtLocation(result.location)}`;
-      // Landing on an already-STAGED location is the preferred/expected outcome (plain
-      // success — 'info' is this app's established success/informational tone, see
-      // audio.ts's own docstring); falling through to an EMPTY one is worth flagging with
-      // the warning tone, though it keeps the message bar's blue Info color rather than
-      // full amber Warning — per the SDP put hierarchy's rule 4.a, this isn't a problem
-      // the worker needs to act on, just something worth a second look.
-      if (result.wasStaged) {
-        playAlert('info');
-        setMessage({ type: 'success', text: base });
-      } else {
-        playAlert('warning');
-        setMessage({ type: 'info', text: `${base} — location was not staged` });
-      }
-      resetToEntry();
+      applyConfirmSuccess(d.reservationId, result);
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       resetLocationField();
@@ -511,7 +599,8 @@ export function SDPPage() {
    * Escape-hatch: voluntarily releases the current reservation without placing the pallet.
    * Calls POST /api/puts/{id}/unassign, which clears the location to EMPTY and deletes the
    * Reservation row atomically. Returns to entry state; pallet and confirm fields are cleared,
-   * non-locked overrides are also cleared so the next put can start fresh.
+   * non-locked overrides are also cleared so the next put can start fresh. Only offered
+   * while `d.hasReservation` — see `handleCancelRedirect` for its no-reservation sibling.
    */
   async function handleUnassign() {
     const d = directedRef.current;
@@ -561,25 +650,50 @@ export function SDPPage() {
     resetToEntry();
   }
 
-  /** "Exists elsewhere" (Hand Put) successfully redirected the put — mirrors
-   *  `handleLocationConfirm`'s own success handling for history/messaging/reset. */
-  function handleRedirected(newLocation: string, wasMove: boolean) {
-    const d = directedRef.current;
-    stopPolling();
-    if (d) {
-      setHistory(h => h.map(e =>
-        e.reservationId === d.reservationId ? { ...e, outcome: wasMove ? 'MOVE' as const : 'PUT' as const, finalLocation: newLocation } : e
-      ));
-    }
-    resetToEntry();
+  /**
+   * "Exists elsewhere" (Hand Put + IM+) points the put at a different, already-occupied
+   * same-DPCI location — picking a candidate no longer completes the put by itself (#151
+   * follow-up); it just retargets `directed` and, the *first* time this fires for a given
+   * reservation, snapshots the pre-redirect location/Storage Code into `original` so the
+   * worker can return to it later. `hasReservation` flips to false here (the modal itself
+   * already released the underlying Reservation row before calling this, if one was still
+   * live) — from this point on, `handleLocationConfirm` completes the put through
+   * `manual/confirm` instead of `confirmPut`. Picking a second, third, etc. candidate after
+   * the first just re-calls this — `original` is only ever set once, from whatever
+   * `directed` looked like the moment `hasReservation` was still true.
+   */
+  function handleRedirect(newLocation: string, newStorageCode: string) {
+    setDirected(d => {
+      if (!d) return d;
+      const original = d.original ?? { location: d.directedLocation, storageCode: d.directedLocationStorageCode };
+      return { ...d, directedLocation: newLocation, directedLocationStorageCode: newStorageCode, hasReservation: false, original };
+    });
+    setLocationEntryKey(k => k + 1);
+    playAlert('info');
+    setMessage({ type: 'info', text: `Redirected to ${fmtLocation(newLocation)} — confirm the new location to complete` });
   }
 
-  /** "Exists elsewhere" released the original reservation but then failed to complete the
-   *  redirect — nothing left to retry against, so just reset (the modal itself already
-   *  showed the worker an error message before calling this). */
-  function handleReservationLost() {
+  /** Return-to-Original button (#151 follow-up) — only shown once a redirect has moved
+   *  the target away from `original`. Pure client-side state swap, same as picking any
+   *  other Exists Elsewhere candidate (see `handleRedirect`) — the original location was
+   *  only ever released, never reassigned to anyone else in the meantime. */
+  function handleReturnToOriginal() {
+    setDirected(d => (d?.original ? { ...d, directedLocation: d.original.location, directedLocationStorageCode: d.original.storageCode } : d));
+    setLocationEntryKey(k => k + 1);
+  }
+
+  /** Cancel button (#151 follow-up) — the redirected-flow's sibling to Unassign, for once
+   *  `hasReservation` is already false and there's nothing left to release: no API call,
+   *  just resets to entry. Tags the history row RELEASED, same outcome Unassign itself
+   *  would show, since that's genuinely what happened to the original reservation even
+   *  though it happened earlier (at the first redirect), not at this exact tap. */
+  function handleCancelRedirect() {
+    const d = directedRef.current;
+    if (d) {
+      setHistory(h => h.map(e => e.reservationId === d.reservationId ? { ...e, outcome: 'RELEASED' as const } : e));
+    }
     stopPolling();
-    resetToEntry(true);
+    resetToEntry();
   }
 
   /**
@@ -834,8 +948,9 @@ export function SDPPage() {
             onLocationActiveChange={setLocationActive}
             onUnassign={handleUnassign}
             onHoldDone={handleHoldDone}
-            onRedirected={handleRedirected}
-            onReservationLost={handleReservationLost}
+            onRedirect={handleRedirect}
+            onReturnToOriginal={handleReturnToOriginal}
+            onCancelRedirect={handleCancelRedirect}
           />
         )}
 

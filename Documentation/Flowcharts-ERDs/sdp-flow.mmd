@@ -38,11 +38,11 @@ flowchart TD
     INFO_MSG --> S2
     WARN_MSG --> S2
 
-    S2[State: directed\nSDPVerifyPutModal opens — screen-blocking popup, #151\nbackdrop covers entry-state content behind it\ndirectedLocationSize branches the body:\nRack !== XS — Pallet ID/Item/DPCI/Confirm Location only\nHand === XS — adds Carton Quantity + Exists Elsewhere\n5-min server-side timer pushes expiry to screen\nvia polling, not on next scan attempt]
+    S2[State: directed\nSDPVerifyPutModal opens — screen-blocking popup, #151\nbackdrop covers entry-state content behind it\nshows directed-to location + Storage Code/Size badges\ndirectedLocationSize branches the body:\nRack !== XS — Pallet ID/Item/DPCI/Confirm Location only\nHand === XS — adds Carton Quantity + Exists Elsewhere\nhasReservation = true\n5-min server-side timer pushes expiry to screen\nvia polling, not on next scan attempt]
 
     S2 --> ACTION{Worker action?}
 
-    ACTION -->|Confirm Location\n3-box entry or scan\nhandleLocationConfirm| CONF[POST /api/puts/:id/confirm\napi/functions/puts.ts — confirmPut\nvalidate scanned === directed\nplacePallet atomic transaction\ncopies storageCode/size/zone onto pallet\ndelete Reservation\nwriteLog PUT or MOVE_PUT incl. wasStaged + verification]
+    ACTION -->|Confirm Location\n3-box entry or scan\nhandleLocationConfirm, hasReservation| CONF[POST /api/puts/:id/confirm\napi/functions/puts.ts — confirmPut\nvalidate scanned === directed\nplacePallet atomic transaction\ncopies storageCode/size/zone onto pallet\ndelete Reservation\nwriteLog PUT or MOVE_PUT incl. wasStaged + verification]
 
     CONF --> CONF_OK{Result?}
     CONF_OK -->|LOCATION_MISMATCH| ERR_C1[Error: Wrong location\nfields cleared + re-focused\nmodal stays open]
@@ -52,35 +52,48 @@ flowchart TD
 
     ERR_C1 --> S2
 
-    ACTION -->|Unassign button\nhandleUnassign| UNASSIGN[POST /api/puts/:id/unassign\napi/functions/puts.ts — unassignPut\nrestore location to STAGED if wasStaged===true, else EMPTY\ndelete Reservation atomic]
+    ACTION -->|Unassign button\nhandleUnassign, hasReservation only| UNASSIGN[POST /api/puts/:id/unassign\napi/functions/puts.ts — unassignPut\nrestore location to STAGED if wasStaged===true, else EMPTY\ndelete Reservation atomic]
 
     UNASSIGN --> UN_OK{Result?}
     UN_OK -->|NOT_FOUND| EXPIRE_U[Warning: Reservation expired\nfull reset]
     UN_OK -->|OK| UN_SUCCESS[Info: Reservation cleared — Staged/Empty shown\nhistory outcome → RELEASED\nreset to entry — locked overrides kept]
 
-    ACTION -->|Hold Location button\n#151 — replaces the old Blocked Put entirely| HOLD_OPEN[Nested modal embeds the shared\nHoldPanel — same component PIP/MNP/WLH use\nlocationId = directedLocation]
+    ACTION -->|Hold Location button\nhasReservation only\n#151 — replaces the old Blocked Put entirely| HOLD_OPEN[Nested modal embeds the shared\nHoldPanel — same component PIP/MNP/WLH use\nlocationId = directedLocation]
 
     HOLD_OPEN --> HOLD_SUBMIT[PATCH /api/locations/:id/hold\napi/functions/locations.ts — placeHold\nLogic Gate CLEAR_LOCATION — override EMPTY\nRESERVED location's Reservation is deleted\nas a side effect of placing the hold, #149]
 
     HOLD_SUBMIT --> HOLD_OK{Result?}
     HOLD_OK -->|FORBIDDEN| ERR_HOLD[Error: no permission for this hold type\nHold sub-modal stays open]
-    HOLD_OK -->|OK| HOLD_SUCCESS[Success: {Hold Type} placed on {location}\nreservation already gone server-side —\nonHoldDone needs no API call of its own\nhistory outcome → HELD\nfull reset to entry, no auto-continue]
+    HOLD_OK -->|OK| HOLD_SUCCESS[Success: hold type placed on location\nreservation already gone server-side —\nonHoldDone needs no API call of its own\nhistory outcome → HELD\nfull reset to entry, no auto-continue]
 
     ERR_HOLD --> HOLD_OPEN
 
-    ACTION -->|"Exists Elsewhere" button\nHand Put only — XS match found via\nGET /api/items/dpci/:dpci/locations, filtered\nto size===XS and locationId !== directedLocation"| EXISTS_OPEN[Popup lists each same-DPCI XS\nmatch — location + current carton count]
+    ACTION -->|Exists Elsewhere button\nHand Put + IM+ only, either hasReservation state —\nXS match found via GET /api/items/dpci/:dpci/locations,\nfiltered to size===XS and currentCartons>0 at fetch time,\nnot-the-current-target at render time on every toggle| EXISTS_OPEN[Popup lists each same-DPCI XS\nmatch — location + Storage Code badge\n+ current carton count, scrollable]
 
-    EXISTS_OPEN --> EXISTS_PICK[Worker picks a row]
-    EXISTS_PICK --> EXISTS_UNASSIGN[POST /api/puts/:id/unassign\nsame call Unassign itself uses]
+    EXISTS_OPEN --> EXISTS_PICK{Worker picks a row —\nnever completes the put by itself}
+    EXISTS_PICK -->|hasReservation still true\nfirst redirect for this pallet| EXISTS_UNASSIGN[POST /api/puts/:id/unassign\nsame call Unassign itself uses]
     EXISTS_UNASSIGN --> EXISTS_UN_OK{Result?}
-    EXISTS_UN_OK -->|Fails| ERR_EXISTS[Error: redirect failed\nnothing lost — reservation still held\npopup stays open for retry]
-    EXISTS_UN_OK -->|OK| EXISTS_CONFIRM[POST /api/puts/manual/confirm\nresolution: consolidate — sent immediately,\nno intermediate confirm popup, since the\npicked row is already a known same-DPCI XS match]
+    EXISTS_UN_OK -->|Fails| ERR_EXISTS[Error: nothing lost\nreservation still held\npopup stays open for retry] --> EXISTS_OPEN
+    EXISTS_UN_OK -->|OK| EXISTS_RETARGET
+    EXISTS_PICK -->|hasReservation already false\nsubsequent pick — no API call| EXISTS_RETARGET
 
-    EXISTS_CONFIRM --> EXISTS_CONF_OK{Result?}
-    EXISTS_CONF_OK -->|Fails| EXISTS_LOST[Error: redirect failed after releasing\nthe original reservation — nothing left to\nretry against, re-enter from Aisle entry\nfull reset to entry]
-    EXISTS_CONF_OK -->|OK| EXISTS_SUCCESS[Success: Redirected — consolidated into {location}\nhistory outcome → PUT or MOVE\nfull reset to entry]
+    EXISTS_RETARGET[Retarget directed at picked row\ndirectedLocation/directedLocationStorageCode updated\nhasReservation → false\noriginal snapshot captured on the FIRST redirect only\nmodal stays open — Unassign/Hold Location replaced by\nCancel, plus Return to Original once away from it]
 
-    ERR_EXISTS --> EXISTS_OPEN
+    EXISTS_RETARGET --> ACTION
+
+    ACTION -->|Confirm Location\n3-box entry or scan\nhandleLocationConfirm, not hasReservation| CONF2{Scanned Aisle+Bin\nmatches current target?}
+    CONF2 -->|No| ERR_C1
+    CONF2 -->|Yes, target is original| CONF_ORIG[POST /api/puts/manual/confirm\nresolution: proceed — plain EMPTY/STAGED,\nsame shape MNP's own plain put/move uses]
+    CONF2 -->|Yes, target is a picked candidate| CONF_PICK[POST /api/puts/manual/confirm\nresolution: consolidate]
+
+    CONF_ORIG -->|Fails| ERR_REDIR[Error: Confirm failed — please try again\nfully retryable, nothing lost — the original\nreservation was released at the FIRST redirect,\nwell before this attempt] --> S2
+    CONF_ORIG -->|OK| PUT_SUCCESS_STAGED
+    CONF_PICK -->|Fails| ERR_REDIR
+    CONF_PICK -->|OK| EXISTS_SUCCESS[Success: Redirected — consolidated into location\nwriteLog CONSOLID\nhistory outcome → PUT or MOVE\nfull reset to entry]
+
+    ACTION -->|Cancel button\nnot hasReservation| CANCEL[No API call — nothing left to release\nhistory outcome → RELEASED\nreset to entry]
+
+    ACTION -->|Return to Original button\nnot hasReservation, away from original| RETURN_ORIG[Retarget directed back at original\nlocation + Storage Code — no API call] --> ACTION
 
     PUT_SUCCESS_STAGED --> RESET_N[Partial reset\nclear pallet + confirm\nnon-locked overrides cleared\nfocus → pallet field]
     PUT_SUCCESS_EMPTY --> RESET_N
@@ -89,7 +102,7 @@ flowchart TD
     UN_SUCCESS --> S1
     HOLD_SUCCESS --> S1
     EXISTS_SUCCESS --> S1
-    EXISTS_LOST --> S1
+    CANCEL --> S1
     EXPIRE_C --> S1_FULL[Full reset — all fields cleared\nfocus → aisle field]
     EXPIRE_U --> S1_FULL
     S1_FULL --> S1
@@ -100,6 +113,7 @@ flowchart TD
     style UN_SUCCESS fill:#003333,stroke:#006666,color:#aaffff
     style HOLD_SUCCESS fill:#003333,stroke:#006666,color:#aaffff
     style EXISTS_SUCCESS fill:#003300,stroke:#006600,color:#fff
+    style CANCEL fill:#003333,stroke:#006666,color:#aaffff
     style ERR_P1 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_P4 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_P5 fill:#330000,stroke:#660000,color:#ff8080
@@ -108,6 +122,6 @@ flowchart TD
     style ERR_C1 fill:#330000,stroke:#660000,color:#ff8080
     style ERR_HOLD fill:#330000,stroke:#660000,color:#ff8080
     style ERR_EXISTS fill:#330000,stroke:#660000,color:#ff8080
+    style ERR_REDIR fill:#330000,stroke:#660000,color:#ff8080
     style EXPIRE_C fill:#332200,stroke:#664400,color:#ffcc88
     style EXPIRE_U fill:#332200,stroke:#664400,color:#ffcc88
-    style EXISTS_LOST fill:#332200,stroke:#664400,color:#ffcc88

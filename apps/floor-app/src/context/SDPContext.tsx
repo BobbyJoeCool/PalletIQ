@@ -1,12 +1,40 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useState, type Dispatch, type SetStateAction } from 'react';
 
 export interface SDPDirectedResult {
   reservationId: number;
+  /** False once Exists Elsewhere has redirected the put at least once — the underlying
+   *  `Reservation` row is gone server-side at that point (released as part of the
+   *  redirect), so Confirm goes through `manual/confirm` instead of `confirmPut`, and
+   *  Unassign/Hold Location are no longer offered (nothing left to unassign/hold against
+   *  this transaction) in favor of Cancel and, once away from `original`, Return to
+   *  Original. See `SDPVerifyPutModal.tsx`'s own doc comment for the full flow. */
+  hasReservation: boolean;
+  /** The pallet's originally-directed location (and its own Storage Code, which a
+   *  redirected-to candidate can differ from), captured the moment a redirect first moves
+   *  away from it. Null until then. Lets the worker toggle back after picking an Exists
+   *  Elsewhere candidate, without needing a second server round-trip — the original
+   *  location was only ever released, never reassigned to anyone else in the meantime, so
+   *  returning to it is a pure client-side state swap, same as picking any other candidate. */
+  original: { location: string; storageCode: string } | null;
   directedLocation: string;
   /** The directed location's own Size — XS means Hand Put, everything else Rack Put (see
    *  `lib/sizes.ts`'s own XS comment) — the Verify-Put Modal (#151) branches its body on
-   *  this. */
+   *  this. Unchanged by an Exists Elsewhere redirect (every candidate is guaranteed XS by
+   *  its own fetch filter — see the modal). */
   directedLocationSize: string;
+  /** The current target location's own Storage Code — drives the Verify-Put Modal's
+   *  location badge (#151 UI follow-up). Unlike `palletStorageCode` below, this DOES
+   *  change across a redirect — Exists Elsewhere's candidates aren't filtered by Storage
+   *  Code, only by DPCI/Size, so a redirected-to location can legitimately carry a
+   *  different Storage Code than the one originally directed to. */
+  directedLocationStorageCode: string;
+  /** The pallet/item's own Storage Code, as resolved by the *original* directedPut call
+   *  — drives the Verify-Put Modal's DPCI badge. Frozen at that first resolution and
+   *  never touched by a redirect (unlike `directedLocationStorageCode`), since it
+   *  describes the pallet itself, not whichever location currently happens to be
+   *  targeted. Equal to `directedLocationStorageCode` until the first redirect (Storage
+   *  Code was an exact-match filter for that original search), then may diverge. */
+  palletStorageCode: string;
   pallet: {
     id: number;
     dpci: string;
@@ -21,7 +49,7 @@ interface SDPContextValue {
   /** The most recently directed pallet (with its live Reservation), or null if none has
    *  been loaded this session yet. */
   directed: SDPDirectedResult | null;
-  setDirected: (d: SDPDirectedResult | null) => void;
+  setDirected: Dispatch<SetStateAction<SDPDirectedResult | null>>;
 }
 
 const SDPContext = createContext<SDPContextValue | null>(null);

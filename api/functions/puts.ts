@@ -169,6 +169,11 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
     // everything else is Rack Put (see `apps/floor-app/src/lib/sizes.ts`'s own XS
     // comment and `irpFormat.ts`'s RP/HP labels for this same convention elsewhere).
     directedLocationSize: effective.size,
+    // Same reasoning as directedLocationSize — `effective.storageCode` was also an
+    // exact-match filter passed to findNextLocation, so the directed location's own
+    // Storage Code is guaranteed to equal it. Drives the Verify-Put Modal's Storage
+    // Code(+Size)/Storage Code badges (#151 UI follow-up).
+    directedLocationStorageCode: effective.storageCode,
     pallet: {
       id:              elig.pallet.pid,
       dpci:            `${String(elig.pallet.dept).padStart(3,'0')}-${String(elig.pallet.class).padStart(2,'0')}-${String(elig.pallet.item).padStart(4,'0')}`,
