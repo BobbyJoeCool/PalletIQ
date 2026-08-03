@@ -242,11 +242,11 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     // is itself a button whose accessible name is also "9", making an unscoped page-wide
     // lookup ambiguous (see tapKeys's own doc comment).
     await tapKeys(page, '999');
-    await page.getByRole('button', { name: 'OK', exact: true }).click();
+    await page.getByRole('button', { name: 'Enter', exact: true }).click();
     // Bin's own auto-advance moves to Level; complete it with an equally-implausible value
     // so the combination reaches the server as a whole-value mismatch, not a locked one.
     await tapKeys(page, '99');
-    await page.getByRole('button', { name: 'OK', exact: true }).click();
+    await page.getByRole('button', { name: 'Enter', exact: true }).click();
 
     await expect(page.getByText('Invalid Location')).toBeVisible();
     // Issue #185 — Bin's own entered value stays visible (washed, not cleared).

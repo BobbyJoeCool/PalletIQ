@@ -10,7 +10,7 @@ import { useELA } from '../context/ELAContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
-import { useAisleField } from '../lib/useAisleField';
+import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useStorageCodes } from '../lib/useStorageCodes';
 import { useWorkstations, type Workstation } from '../lib/useWorkstations';
 
@@ -145,11 +145,11 @@ export function ELAPage() {
   // legitimately matching zero results isn't an error the way a single specific-aisle
   // field's bad value is; `invalid` only drives a visual hint, not a block.
   const aisleStartFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { setAisleStart(v); setSelected(null); hidePanel(); }, [setAisleStart, setSelected, hidePanel]),
   });
   const aisleEndFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { setAisleEnd(v); setSelected(null); hidePanel(); }, [setAisleEnd, setSelected, hidePanel]),
   });
   useEffect(() => { aisleStartFields.field.set(aisleStart); }, [aisleStart]); // eslint-disable-line react-hooks/exhaustive-deps

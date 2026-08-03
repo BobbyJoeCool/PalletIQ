@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.7 — 2026-08-03](#187--2026-08-03)
 - [1.8.6 — 2026-08-02](#186--2026-08-02)
 - [1.8.5 — 2026-08-01](#185--2026-08-01)
 - [1.8.4 — 2026-07-31](#184--2026-07-31)
@@ -162,7 +163,6 @@ No issues currently open in this category.
 
 ### Needs Triage
 
-- [#100](https://github.com/BobbyJoeCool/PalletIQ/issues/100) — Numpad: add a 4th column (Backspace/Tab/Back Tab/Enter), a Clear button, and rename OK to Enter
 - [#99](https://github.com/BobbyJoeCool/PalletIQ/issues/99) — STG: per-pallet override of master control values (size/aisle/storage code)
 - [#96](https://github.com/BobbyJoeCool/PalletIQ/issues/96) — Add a generic status-timer/expiration mechanism for status-bearing tables, with an overdue-records report
 - [#94](https://github.com/BobbyJoeCool/PalletIQ/issues/94) — Harden Pallet CA_PULL_PEND/FP_PULL_PEND status coupling before a real label-creation endpoint ships
@@ -178,6 +178,37 @@ See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the spe
 screen(s) each one touches.
 
 ---
+
+## [1.8.7] — 2026-08-03
+
+Four queued GitHub Issues (#100, #166, #169, #190) plus one added mid-session (#189) — Numpad/
+Keyboard redesign, aisle-wide freight breakdown + SDP badges, MNP field persistence, MNP
+Storage Code badges. Full session detail: `DevNotes/Logs/V1.8/version-1_8_6.md` §§1.9–1.13.
+
+### 1.8.7 — Added
+
+- **Numpad** (#100): 4th column (⌫/Tab/Back Tab), a Clear button, OK renamed to Enter.
+  **Keyboard**: Tab/Back Tab keys added to its action row, OK renamed to Enter. Tab/Back Tab
+  are inert for now — no field-navigation mechanism exists yet anywhere in the app; see
+  GitHub #199 for the follow-up design work.
+- **SDP** (#169): a compact row of freight-type badges (Storage Code-Size, open(staged)
+  count) now renders beneath the Aisle field once it resolves — aisle-wide totals, sourced
+  from `GET /api/locations/aisle-exists`'s new breakdown data (#166), available to every
+  Aisle field in the app via the shared `useAisleField` hook.
+- **MNP** (#189): DPCI now shows the item's Storage Code badge; the "Move from" location (when
+  the pallet is already stored) now shows its own Storage Code+Size badge.
+
+### 1.8.7 — Changed
+
+- **MNP**: the manual "Clear" button renamed to **Cancel Put** and recolored to the same amber
+  SDP's Unassign button uses, after the new Numpad Clear button (above) collided with it by
+  name.
+
+### 1.8.7 — Fixed
+
+- **Issue #190:** MNP's Pallet ID and destination fields cleared on any error instead of
+  persisting the entered value — they now wash red and keep what was entered, resetting to
+  blank only on a confirmed put or Cancel Put.
 
 ## [1.8.6] — 2026-08-02
 

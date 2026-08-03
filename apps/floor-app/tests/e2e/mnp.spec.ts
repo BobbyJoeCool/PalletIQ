@@ -86,16 +86,16 @@ test.describe('MNP — Manual Put flow', () => {
   test('an unknown destination location shows an error and stays in pallet_scanned', async ({ page }) => {
     await scanPallet(page, 'put');
     await tapKeys(page, '999999');
-    await page.getByRole('button', { name: 'OK', exact: true }).click();
+    await page.getByRole('button', { name: 'Enter', exact: true }).click();
 
     await expect(page.getByText('Location not found')).toBeVisible();
     await expect(page.getByText('Destination Location', { exact: true })).toBeVisible(); // still pallet_scanned
   });
 
-  // Node CLR {Worker taps Clear} -> back to ready
-  test('the Clear button resets to ready', async ({ page }) => {
+  // Node CLR {Worker taps Cancel Put} -> back to ready
+  test('the Cancel Put button resets to ready', async ({ page }) => {
     await scanPallet(page, 'put');
-    await page.getByRole('button', { name: 'Clear' }).click();
+    await page.getByRole('button', { name: 'Cancel Put' }).click();
 
     await expect(page.getByText('Destination Location', { exact: true })).not.toBeVisible();
     const palletField = page
@@ -112,7 +112,7 @@ test.describe('MNP — Manual Put flow', () => {
     await expect(page.getByRole('heading', { name: 'What level was the pallet placed at?' })).toBeVisible();
     // The pallet_scanned screen's own controls are gone — the modal is the only interaction surface.
     await expect(page.getByText('Destination Location', { exact: true })).not.toBeVisible();
-    await expect(page.getByRole('button', { name: 'Clear' })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Cancel Put' })).not.toBeVisible();
   });
 
   // Node CONF_OK {Result?} -> OK, destination was empty

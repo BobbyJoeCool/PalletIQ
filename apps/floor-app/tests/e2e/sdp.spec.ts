@@ -44,7 +44,7 @@ async function pickDemoFilter(page: Page, label: string, optionLabel: string) {
  */
 async function directPallet(page: Page, aisle: string, mode: 'put' | 'move'): Promise<DirectedResult> {
   await tapKeys(page, aisle);
-  await page.getByRole('button', { name: 'OK', exact: true }).click();
+  await page.getByRole('button', { name: 'Enter', exact: true }).click();
   await page.getByRole('button', { name: 'Pallet ID by Status' }).click();
   if (mode === 'move') await pickDemoFilter(page, 'Status', 'Stored');
   await pickDemoFilter(page, 'Storage Code', 'Conveyable Reserve');
@@ -73,7 +73,7 @@ async function directPallet(page: Page, aisle: string, mode: 'put' | 'move'): Pr
  */
 async function directPalletHand(page: Page, aisle: string): Promise<DirectedResult> {
   await tapKeys(page, aisle);
-  await page.getByRole('button', { name: 'OK', exact: true }).click();
+  await page.getByRole('button', { name: 'Enter', exact: true }).click();
   await pickCode(page, 'Size', 'XS');
   await page.getByRole('button', { name: 'Pallet ID by Status' }).click();
   await pickDemoFilter(page, 'Storage Code', 'Security');
@@ -133,7 +133,7 @@ test.describe('SDP — System Directed Put flow', () => {
   // Node DIR_OK {Result?} -> PALLET_NOT_FOUND
   test('an unknown pallet ID shows an error', async ({ page }) => {
     await tapKeys(page, LIVE_AISLE);
-    await page.getByRole('button', { name: 'OK', exact: true }).click();
+    await page.getByRole('button', { name: 'Enter', exact: true }).click();
     await page.getByRole('button', { name: '✗ Invalid Pallet ID' }).click();
 
     await expect(page.getByText('Pallet ID not found')).toBeVisible();

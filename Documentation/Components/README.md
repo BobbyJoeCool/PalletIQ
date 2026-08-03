@@ -69,3 +69,6 @@ Sibling components/hooks (e.g. a chrome wrapper's underlying behavior hook).
 - [`LocationDemoScannerBar`](LocationDemoScannerBar.md) — Feature 9 Phase 2's generalized Location ID demo/test scanner (WLH/LII/MNP/PAR)
 - [`ContainerDemoScannerBar`](ContainerDemoScannerBar.md) — Feature 9's CID phase generalized Container ID (Label) demo/test scanner (PIP)
 - [`ItemDemoScannerBar`](ItemDemoScannerBar.md) — Feature 9's DPCI/UPC phase generalized Item demo/test scanner (IID/ISI/PAR)
+- [`NumpadContext`](NumpadContext.md) — shell-level key-routing context behind every numeric/text field (issue #100)
+- [`Numpad`](Numpad.md) — the shared on-screen numeric keypad panel (issue #100)
+- [`Keyboard`](Keyboard.md) — the shared on-screen QWERTY keyboard panel (issue #100)

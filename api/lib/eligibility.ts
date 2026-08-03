@@ -11,7 +11,9 @@ export const TERMINAL_CONTAINER_STATUSES = ['PULLED', 'DIVERTED', 'CANCELED', 'P
 export interface EligibilityResult {
   eligible: true;
   alreadyStored: boolean;
-  currentLocation: { aisle: number; bin: number; level: number } | null;
+  // storageCode/size are the current location's own values (issue #189) — not the
+  // pallet's own storageCode/size above, which can lag behind on a move-in-progress.
+  currentLocation: { aisle: number; bin: number; level: number; storageCode: string; size: string } | null;
   pallet: {
     pid: number;
     dept: number;
@@ -56,7 +58,10 @@ export interface EligibilityResult {
 export async function checkPalletEligibility(palletId: number): Promise<EligibilityResult> {
   const pallet = await prisma.pallet.findUnique({
     where: { pid: palletId },
-    include: { itemRef: { select: { descShort: true, storageCode: true } } },
+    include: {
+      itemRef: { select: { descShort: true, storageCode: true } },
+      location: { select: { storageCode: true, size: true } },
+    },
   });
 
   if (!pallet) {
@@ -80,7 +85,7 @@ export async function checkPalletEligibility(palletId: number): Promise<Eligibil
 
   const currentLocation =
     pallet.locationAisle != null
-      ? { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel! }
+      ? { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel!, storageCode: pallet.location!.storageCode, size: pallet.location!.size }
       : null;
 
   return {

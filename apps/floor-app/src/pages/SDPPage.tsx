@@ -5,6 +5,7 @@ import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/Pa
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
+import { ZoneCodeBadge } from '../components/shared/ZoneCodeBadge';
 import { ZoneField } from '../components/shared/ZoneField';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
@@ -16,7 +17,8 @@ import { type SDPDirectedResult, useSDP } from '../context/SDPContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
-import { useAisleField } from '../lib/useAisleField';
+import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
+import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 import { SDPVerifyPutModal } from './SDPVerifyPutModal';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -193,7 +195,7 @@ export function SDPPage() {
   // behavior — Aisle is never washed here, matching PIP/PID's "clear rather than wash"
   // convention, see the comment further down at handlePalletScan's own error path).
   const aisleFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onResolved: useCallback(() => {
       clearMessage();
       setTimeout(() => palletFieldRef.current?.focus(), 50);
@@ -777,7 +779,7 @@ export function SDPPage() {
             evenly with Size/Storage/Zone — those now stretch (flex-1 each, via width="w-full")
             to dynamically fill whatever's left up to the Put History sidebar. */}
         <div className="flex gap-10">
-          <div className="w-[280px] shrink-0">
+          <div className="w-[280px] shrink-0 flex flex-col gap-2">
             <FieldDisplay
               label="Aisle"
               value={aisleFields.field.value}
@@ -786,6 +788,21 @@ export function SDPPage() {
               locked={locked}
               size="large"
             />
+            {/* Freight-type badges for the resolved aisle (issue #169) — aisle-wide totals,
+                not broken out by zone (SDP has no zone concept of its own), same column-by-
+                Storage-Code layout ELZ/STG's Zone Summary panels use, compact size to fit
+                this narrow island. */}
+            {aisleFields.breakdown.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {groupBreakdownByStorageCode(aisleFields.breakdown).map((col) => (
+                  <div key={col.storageCode} className="flex flex-col gap-1">
+                    {col.entries.map((b) => (
+                      <ZoneCodeBadge key={`${b.storageCode}-${b.size}`} storageCode={b.storageCode} size={b.size} empty={b.empty} staged={b.staged} badgeSize="compact" />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           {/* Size is the one override every authenticated role can use (product decision);
               Storage Code/Zone stay IM+ only. Worker gets no lock button on Size — locking

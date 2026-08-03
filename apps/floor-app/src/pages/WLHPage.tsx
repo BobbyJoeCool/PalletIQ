@@ -14,7 +14,7 @@ import { useWLH } from '../context/WLHContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
-import { useAisleField } from '../lib/useAisleField';
+import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useLocationRangeFields } from '../lib/useLocationRangeFields';
 import { useNumpadField } from '../lib/useNumpadField';
 
@@ -119,7 +119,7 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
   // `canReview` below, it doesn't block the worker from continuing to type the rest of
   // the range.
   const aisleFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { if (v.length === 3) rangeFields.focusStartBin(); }, [rangeFields.focusStartBin]),
   });
   const {

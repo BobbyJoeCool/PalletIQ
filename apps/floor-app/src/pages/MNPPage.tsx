@@ -4,6 +4,7 @@ import { HoldPanel } from '../components/shared/HoldPanel';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { StorageCodeBadge } from '../components/shared/StorageCodeBadge';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveId } from '../components/ui/LiveId';
 import { ModalOverlay } from '../components/ui/ModalOverlay';
@@ -199,7 +200,8 @@ type ScreenState = 'ready' | 'pallet_scanned' | 'level_modal';
  *   (LocationEntryFields, levelOptional) — Aisle+Bin alone is enough to advance; Level is
  *   confirmed separately next. GET /api/locations/:id validates the Aisle+Bin exists. If
  *   valid, transitions to level_modal (pre-filled if a full barcode scan already supplied a
- *   level). If not found, clears the destination boxes and shows an error.
+ *   level). If not found, the boxes wash red and keep their entered value instead of
+ *   clearing (issue #190) — the worker fixes them in place rather than re-typing blind.
  *
  * level_modal: LevelModal collects the rack level the pallet was physically placed at.
  *   On confirm, POST /api/puts/manual/confirm runs a sequence of gates before it actually
@@ -207,7 +209,9 @@ type ScreenState = 'ready' | 'pallet_scanned' | 'level_modal';
  *   occupied/staged check that can offer to combine two same-DPCI pallets. Each gate can
  *   raise a blocking popup requiring the worker to resolve it before the put proceeds.
  *   Declining any popup returns to pallet_scanned with the pallet ID still scanned and the
- *   destination boxes cleared, per product decision. On success, returns to ready.
+ *   destination boxes cleared, per product decision — a deliberate choice distinct from
+ *   issue #190's fix above: a declined gate is a valid location the worker chose not to use,
+ *   not an invalid entry, so it stays out of scope for that fix.
  *
  * A right-column history log tracks all scanned pallets with final placement or "in progress".
  * Demo buttons change with screen state (pallet scan / location scan).
@@ -271,6 +275,11 @@ export function MNPPage() {
 
   const palletFieldRef = useRef<PalletIdFieldHandle>(null);
   const [palletIdValue, setPalletIdValue] = useState('');
+  // Invalid-wash flags (issue #190) — set on a failed scan/resolve, cleared on success or a
+  // full reset. Fields persist their entered value through an error instead of clearing (the
+  // prior behavior); wash is the visual cue that replaces "it's gone, so it must be wrong."
+  const [palletIdInvalid, setPalletIdInvalid] = useState(false);
+  const [locationInvalid, setLocationInvalid] = useState(false);
 
   // ── Focus management ─────────────────────────────────────────────────────────
 
@@ -311,6 +320,7 @@ export function MNPPage() {
       pendingEntryKeyRef.current = entryKey;
       setHistory(h => [{ key: entryKey, palletId: result.pallet.id, outcome: 'SCANNED', timestamp: new Date() }, ...h]);
       setScannedPallet(result.pallet);
+      setPalletIdInvalid(false);
       setScreenState('pallet_scanned');
       if (result.pallet.currentLocation) {
         playAlert('info');
@@ -323,7 +333,12 @@ export function MNPPage() {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       playAlert('error');
-      setPalletIdValue('');
+      // Persists the entered value and washes it red instead of clearing (issue #190) — the
+      // worker can see exactly what they scanned rather than having to re-scan blind.
+      // screenState never advances past 'ready' here, so there's no PIP-style (#188) trap of
+      // a stale-but-still-usable prior value: the next attempt must itself succeed to proceed.
+      setPalletIdInvalid(true);
+      focusPalletField();
       if (code === 'PALLET_NOT_FOUND') {
         setMessage({ type: 'error', text: 'Pallet not found' });
       } else if (code === 'NO_CARTONS') {
@@ -342,6 +357,7 @@ export function MNPPage() {
    */
   const resetLocationField = useCallback(() => {
     setLocationEntryKey(k => k + 1);
+    setLocationInvalid(false);
   }, []);
 
   /**
@@ -363,11 +379,15 @@ export function MNPPage() {
       await apiFetch(`/api/locations/${encodeURIComponent(locationId)}`, token!);
       setPendingLocation(locationId);
       setLevelHint(locationId.length === 8 ? parseInt(locationId.slice(6, 8), 10) : demoLevel ?? null);
+      setLocationInvalid(false);
       setScreenState('level_modal');
       clearMessage();
     } catch {
       playAlert('error');
-      resetLocationField();
+      // Persists the entered boxes and washes them red instead of clearing (issue #190) —
+      // same rationale as handlePalletScan's catch above. screenState stays pallet_scanned,
+      // so the worker must fix the boxes and get a successful resolve before advancing.
+      setLocationInvalid(true);
       setMessage({ type: 'error', text: 'Location not found' });
     } finally {
       setLoading(false);
@@ -587,14 +607,14 @@ export function MNPPage() {
 
   /**
    * Best-effort log of an abandoned MNP scan — a pallet was scanned but the put was never
-   * confirmed, either because the worker hit Clear, navigated away from MNP entirely, or
+   * confirmed, either because the worker hit Cancel Put, navigated away from MNP entirely, or
    * an idle timeout forced a logout mid-scan. Fires POST /api/puts/manual/cancel (not
    * awaited — nothing further to do here if it fails, and the unmount path can't await
    * anyway). MNP has no server-side reservation row the way SDP's Reserved-location flow
    * does, so there's nothing for a background job to discover and expire; this is the
    * client-triggered substitute. `mountedUpdate` is false from the unmount cleanup below
    * (the component is being destroyed — no local state left to usefully update) and true
-   * from the Clear button (still mounted — updates the history entry so it reads Canceled
+   * from the Cancel Put button (still mounted — updates the history entry so it reads Canceled
    * instead of sitting at "in progress" for the rest of the session).
    */
   function cancelScan(mountedUpdate: boolean) {
@@ -642,6 +662,8 @@ export function MNPPage() {
     acknowledgeHoldRef.current = false;
     setScreenState('ready');
     setPalletIdValue('');
+    setPalletIdInvalid(false);
+    setLocationInvalid(false);
   }
 
   // Demo buttons (Feature 9) — Pallet ID's own demo buttons (Put/Move/Bad PID) are owned
@@ -668,6 +690,7 @@ export function MNPPage() {
           valueClass="text-[32px] font-medium tracking-[0.04em]"
           caretClass="w-[3px] h-[38px]"
           disabled={screenState !== 'ready'}
+          invalid={palletIdInvalid}
         />
 
         {screenState !== 'ready' && scannedPallet && (
@@ -677,7 +700,12 @@ export function MNPPage() {
                 <LiveId type="pallet" id={String(scannedPallet.id)} />
               </DataRow>
               <DataRow label="Item">{scannedPallet.descShort}</DataRow>
-              <DataRow label="DPCI"><LiveId type="dpci" id={scannedPallet.dpci} /></DataRow>
+              <DataRow label="DPCI">
+                <div className="flex items-center gap-2">
+                  <LiveId type="dpci" id={scannedPallet.dpci} />
+                  <StorageCodeBadge storageCode={scannedPallet.itemStorageCode} />
+                </div>
+              </DataRow>
               <DataRow label="Qty on pallet">
                 {scannedPallet.quantity.pallets}P / {scannedPallet.quantity.cartons}C / {scannedPallet.quantity.ssps}S
               </DataRow>
@@ -685,6 +713,9 @@ export function MNPPage() {
                 <DataRow label="Move from">
                   <div className="flex items-center gap-3">
                     <LiveId type="location" id={scannedPallet.currentLocation} />
+                    {scannedPallet.currentLocationStorageCode && scannedPallet.currentLocationSize && (
+                      <StorageCodeBadge storageCode={scannedPallet.currentLocationStorageCode} size={scannedPallet.currentLocationSize} />
+                    )}
                     <button
                       type="button"
                       onClick={() => setHoldOpen(true)}
@@ -710,14 +741,15 @@ export function MNPPage() {
                     onResolved={handleDestinationResolved}
                     demoScanner
                     demoScannedPalletId={scannedPallet.id}
+                    groupInvalid={locationInvalid}
                   />
                 </div>
                 <button
                   type="button"
                   onClick={() => { cancelScan(true); resetToReady(); }}
-                  className="self-start h-[48px] px-5 rounded-[10px] border border-[#3A3A3A] text-[#9A9A9A] font-ui text-[16px] hover:border-[#555] hover:text-[#CFCFCF] transition-colors"
+                  className="self-start h-[48px] px-5 rounded-[10px] font-ui text-[16px] font-semibold text-white bg-[#554400] hover:bg-[#665500] transition-colors"
                 >
-                  Clear
+                  Cancel Put
                 </button>
               </>
             )}

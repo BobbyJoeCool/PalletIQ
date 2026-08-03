@@ -44,7 +44,7 @@ function stackField(page: Page, boxLabel: 'Staging' | 'Next' | 'On Deck', fieldL
  *  real kiosk usage. */
 async function tapAndCommit(page: Page, keys: string) {
   await tapKeys(page, keys);
-  const ok = page.getByRole('button', { name: 'OK', exact: true });
+  const ok = page.getByRole('button', { name: 'Enter', exact: true });
   try {
     await ok.waitFor({ state: 'visible', timeout: 500 });
     await ok.click();

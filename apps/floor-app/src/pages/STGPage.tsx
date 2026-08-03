@@ -21,7 +21,7 @@ import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
 import { INVALID_WASH } from '../lib/invalidWash';
 import { SIZE_NAMES } from '../lib/sizes';
 import { effectiveStack } from '../lib/stagingHelpers';
-import { useAisleField } from '../lib/useAisleField';
+import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
 import { useCodePickerField } from '../lib/useCodePickerField';
 import { useNumpadField } from '../lib/useNumpadField';
@@ -457,7 +457,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   // not one of the generic shared field components — see its own doc comment) is kept
   // exactly as-is; only the data/validation source changes here.
   const aisleFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { hidePanel(); updateStack(index, { aisle: v }); }, [hidePanel, index, updateStack]),
     onResolved: useCallback(() => { clearMessage(); }, [clearMessage]),
     onNotFound: useCallback(() => {
@@ -1619,7 +1619,7 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
   // washes the box and drives the message bar; `InfoPanel` already shows its own "no data"
   // state for a bad aisle independently of this field's own wash.
   const aisleFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
+    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { setMaster({ aisle: v }); hidePanel(); }, [setMaster, hidePanel]),
     onNotFound: useCallback(() => {
       playAlert('error');

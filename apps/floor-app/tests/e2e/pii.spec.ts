@@ -137,7 +137,7 @@ test.describe('PII — Worker role gating', () => {
       .getByRole('button');
     await palletField.click();
     await tapKeys(page, '1');
-    await page.getByRole('button', { name: 'OK', exact: true }).click();
+    await page.getByRole('button', { name: 'Enter', exact: true }).click();
     await expect(page.getByText('Pallet not found')).toBeVisible();
   });
 });

@@ -367,7 +367,8 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
  * than Directed Put, so every scan attempt is recorded even when eligibility fails.
  *
  * @param req - HTTP request with body `{ palletId: number | string }`
- * @returns `{ pallet: { id, dpci, descShort, quantity, currentLocation }; eligible: true }`
+ * @returns `{ pallet: { id, dpci, descShort, quantity, currentLocation, itemStorageCode,
+ *   currentLocationStorageCode, currentLocationSize }; eligible: true }`
  * @throws 400 INVALID_INPUT for non-numeric palletId;
  *   404 PALLET_NOT_FOUND if pallet does not exist;
  *   409 NO_CARTONS if the pallet has no stored cartons
@@ -413,6 +414,15 @@ async function manualScan(req: HttpRequest, _ctx: InvocationContext): Promise<un
         ssps:    elig.pallet.currentSSPs,
       },
       currentLocation,
+      // Drives MNP's DPCI/Move-from badges (issue #189). itemStorageCode is the Item's own
+      // intrinsic Storage Code — always set, unlike the pallet's own possibly-null one, and
+      // the right pairing for DPCI (which identifies the item, not a specific placement).
+      // currentLocationStorageCode/Size are the *location's* own values (only present when
+      // alreadyStored) — the actual physical placement being moved from, not the item's
+      // classification.
+      itemStorageCode: elig.pallet.itemStorageCode,
+      currentLocationStorageCode: elig.currentLocation?.storageCode ?? null,
+      currentLocationSize: elig.currentLocation?.size ?? null,
     },
     eligible: true,
   };

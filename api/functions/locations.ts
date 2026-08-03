@@ -870,8 +870,16 @@ async function removeHold(req: HttpRequest): Promise<unknown> {
  * alone have any locations at all," which a 3-digit-only value can't express as either of
  * those formats.
  *
+ * Also returns an aisle-wide freight-type/size breakdown (issue #166) — the same
+ * EMPTY/STAGED-by-StorageCode-Size shape `getLocationsEmptyByZone` computes per-zone, here
+ * aggregated across every zone in the aisle instead, using the identical eligibility filter
+ * (excludes contraction, excludes any hold but `HOLD_OUT`, counts only `EMPTY`/`STAGED` —
+ * see that function's own doc comment for why). Every current caller's `fetch` contract
+ * (`useAisleField`) already passes this straight through; a caller with no use for it (ELA,
+ * WLH) simply ignores the extra field — no separate lean/rich endpoint variant needed.
+ *
  * @param req - HTTP request with query param `aisle` (1+ digits)
- * @returns `{ exists: boolean }`
+ * @returns `{ exists: boolean, breakdown: [{storageCode, size, empty, staged}] }`
  * @throws 400 INVALID_INPUT if `aisle` is missing or not numeric
  */
 async function checkAisleExists(req: HttpRequest): Promise<unknown> {
@@ -880,8 +888,25 @@ async function checkAisleExists(req: HttpRequest): Promise<unknown> {
   const aisleParam = new URL(req.url).searchParams.get('aisle');
   if (!aisleParam || !/^\d+$/.test(aisleParam)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const count = await prisma.location.count({ where: { aisle: Number(aisleParam) } });
-  return { exists: count > 0 };
+  const locations = await prisma.location.findMany({ where: { aisle: Number(aisleParam) } });
+
+  interface Breakdown { storageCode: string; size: string; empty: number; staged: number }
+  const breakdownMap = new Map<string, Breakdown>();
+  for (const loc of locations) {
+    if (loc.contraction) continue;
+    if (loc.holdCategory != null && loc.holdCategory !== 'HOLD_OUT') continue;
+    if (loc.status !== 'EMPTY' && loc.status !== 'STAGED') continue;
+    const bdKey = `${loc.storageCode}-${loc.size}`;
+    if (!breakdownMap.has(bdKey)) {
+      breakdownMap.set(bdKey, { storageCode: loc.storageCode, size: loc.size, empty: 0, staged: 0 });
+    }
+    const entry = breakdownMap.get(bdKey)!;
+    if (loc.status === 'EMPTY') entry.empty++;
+    else entry.staged++;
+  }
+  const breakdown = [...breakdownMap.values()].sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size));
+
+  return { exists: locations.length > 0, breakdown };
 }
 
 app.http('getLocation', {

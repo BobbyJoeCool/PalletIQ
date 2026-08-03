@@ -11,7 +11,7 @@
    - 2a. Pallet not found (`404`) or has no stored cartons (`409`) → error; the `MNP_SCAN` entry was already written regardless.
    - 2b. On success: eligibility passed (non-blocking otherwise — see note below); pallet data displays; screen advances to **pallet_scanned**. If the pallet is already stored somewhere, an info message notes it's proceeding as a move.
 3. Worker enters a destination via the shared 3-box Aisle/Bin/Level entry (`levelOptional` — Aisle+Bin alone is enough to advance; a full 8-digit scan still resolves the whole location, including level, at once). `GET /api/locations/:id` validates the Aisle+Bin exists.
-   - 3a. Not found → error; destination boxes clear and refocus.
+   - 3a. Not found → error; destination boxes wash red and keep their entered value (issue #190) instead of clearing.
    - 3b. Found → advances to **level_modal**, pre-filled with a known level if a full barcode (or a demo button, which always knows the exact level) already supplied one.
 4. The **Level Modal** (blocking, no dismiss) collects the rack level the pallet was physically placed at. On Enter, `POST /api/puts/manual/confirm` runs four ordered gates before the put actually commits:
    - 4a. **Contraction** — if the destination is flagged Contraction: a Worker is hard-blocked outright (`403 CONTRACTED`, no override). An IM+ instead sees a confirmation popup ("This location is on contraction, do you want to complete the put?") and may proceed after accepting (`acknowledgeContraction: true` on resubmit).
@@ -22,16 +22,16 @@
    - 4d. **Consolidate** (`resolution: 'consolidate'`, IM+ only, reachable only from 4c's Combine choice) — merges the incoming pallet's current quantities onto the STORED occupant of the same DPCI, then zeroes the incoming pallet's own quantity, clears its location fields, and marks its status `CONSOLIDATED` instead of moving it. If the incoming pallet had its own prior location, that location is freed to `EMPTY`, same as a normal move.
    - Declining any of the four gate popups returns to **pallet_scanned** with the pallet still scanned and the destination boxes cleared (product decision) — it does not restart the whole put.
 5. On a normal (non-consolidate) completion: the pallet is stored at the destination (old location cleared atomically if this was a move), an entry is recorded in the session's Put History, and the screen resets to **ready**.
-6. **Clear** (available in `pallet_scanned`): cancels the current pallet and returns to `ready` without confirming — no API call for the state reset itself, but `POST /api/puts/manual/cancel` fires (best-effort, not awaited) to record the abandonment as a visible `MNP_CANCEL` activity-log entry, and the local Put History entry updates to read Canceled.
+6. **Cancel Put** (available in `pallet_scanned`; renamed from "Clear" and recolored to the same amber SDP's Unassign button uses — 2026-08-03, avoids a name collision with the on-screen Numpad's own new Clear key, issue #100): cancels the current pallet and returns to `ready` without confirming — no API call for the state reset itself, but `POST /api/puts/manual/cancel` fires (best-effort, not awaited) to record the abandonment as a visible `MNP_CANCEL` activity-log entry, and the local Put History entry updates to read Canceled.
 7. **Abandonment via navigation-away or idle-timeout logout:** if the component unmounts while a pallet is scanned but not yet confirmed, the same `POST /api/puts/manual/cancel` best-effort call fires from an unmount-cleanup effect (using a ref-held token, since `AuthContext`'s idle-timeout logout can null the real token before this effect runs) — MNP has no server-side reservation row the way SDP does, so this client-triggered call is the only way an abandoned scan gets a visible, non-perpetually-"in-progress" outcome in the activity log.
 8. A **Hold** quick-action button (visible whenever the scanned pallet has a current location) opens the shared `HoldPanel` inline for the pallet's existing location, without leaving MNP.
 
 ### Mis-scan / error handling
 
-- Pallet not found (`404 PALLET_NOT_FOUND`) → error, `"Pallet not found"`, field clears.
-- Pallet has no stored cartons (`409 NO_CARTONS`) → error, `"Pallet {ID} has no stored cartons — cannot put"`, field clears.
-- Destination Aisle+Bin not found (`404`) → error, `"Location not found"`, destination boxes clear and refocus.
-- **App-wide red-wash audit (v1.7.0):** unlike PIP/SDP/PII/IID/ISI, no field on this screen picked up the red-wash treatment (`DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) — every failure above clears its field atomically before the next render (`palletField.clear()` / `resetLocationField()`), so there's never a moment where a bad value sits visibly in a box to wash. Audited and intentionally skipped, not overlooked.
+- Pallet not found (`404 PALLET_NOT_FOUND`) → error, `"Pallet not found"`, field washes red and keeps its entered value (issue #190).
+- Pallet has no stored cartons (`409 NO_CARTONS`) → error, `"Pallet {ID} has no stored cartons — cannot put"`, field washes red and keeps its entered value (issue #190).
+- Destination Aisle+Bin not found (`404`) → error, `"Location not found"`, destination boxes wash red as a group and keep their entered values (issue #190).
+- **App-wide red-wash audit (v1.7.0), superseded by issue #190:** the original audit found no field on this screen picking up the red-wash treatment (`DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`), since every failure cleared its field atomically before the next render — never a moment for a bad value to sit visibly in a box to wash. Issue #190 reversed that: Pallet ID and destination boxes now persist their entered value through an error instead of clearing, and both now use the standard wash (`invalid` on Pallet ID, `groupInvalid` on the destination's 3-box entry — a single combined existence check with no way to attribute it to one box, same category as WLH's whole-location lookup). Fields still reset to blank only on a confirmed put, a declined gate popup, or the Cancel Put button — never on the error path itself.
 - Contraction, non-IM (`403 CONTRACTED`) → error, `"This location is on contraction — put not allowed"`; returns to `pallet_scanned` with destination cleared.
 - Contraction, IM+, not yet acknowledged (`409 CONTRACTION_CONFIRM_REQUIRED`) → opens the contraction confirm dialog rather than an error message.
 - Hold In/Both, non-IM (`403 DESTINATION_ON_HOLD`) → error, `"This location is on hold — put not allowed"`; returns to `pallet_scanned` with destination cleared.
@@ -65,11 +65,11 @@
 │  (once scanned:)                                              │  │ 030105-08 Lvl 3 10:44a│ │
 │  Pallet ID  [ 88213 ]                                         │  └────────────────────┘  │
 │  Item       Widget, Blue, 12ct                                │  ┌────────────────────┐  │
-│  DPCI       012-34-5678                                       │  │ ...                 │  │
+│  DPCI       012-34-5678 (CR)  ← Storage Code badge (#189)      │  │ ...                 │  │
 │  Qty on pallet   2P / 5C / 0S                                 │  └────────────────────┘  │
-│  Move from [ 030102-04 ]  [Hold]   (only if already stored)     │                          │
-│                                                              │                          │
-│  Destination Location [Aisle][Bin][Lvl]        [Clear]         │                          │
+│  Move from [ 030102-04 ] (CR-L) [Hold]  ← +Size badge, #189    │                          │
+│              (only if already stored)                          │                          │
+│  Destination Location [Aisle][Bin][Lvl]     [Cancel Put]        │                          │
 ├───────────────────────────────────────────────────────────┴──────────────────────────┤
 │ Footer (54px): [Numpad/Keyboard toggle]  [state-aware demo buttons]  [date/time]       │
 └──────────────────────────────────────────────────────────────────────────────────────┘
@@ -99,7 +99,7 @@
 - `Pallet` (occupant lookup, at confirm time) — a fresh, never-client-trusted lookup of whichever pallet is `STORED` at the exact destination (excluding the incoming pallet's own pid), to determine `matchesDpci` for the Combine gate.
 
 **Writes:**
-- `ActivityLog` — `MNP_SCAN` unconditionally on every scan (success or failure); `PUT` on a normal completion (`wasMove`, `clearedLocation`, `destinationWasOccupied`, `destinationWasStaged`, `method: 'MNP'`, `wasContracted`); `CONSOLID` on a consolidate completion; `MNP_CANCEL` on an abandoned scan (Clear, navigation-away, or idle-timeout).
+- `ActivityLog` — `MNP_SCAN` unconditionally on every scan (success or failure); `PUT` on a normal completion (`wasMove`, `clearedLocation`, `destinationWasOccupied`, `destinationWasStaged`, `method: 'MNP'`, `wasContracted`); `CONSOLID` on a consolidate completion; `MNP_CANCEL` on an abandoned scan (Cancel Put, navigation-away, or idle-timeout).
 - `Pallet.locationAisle`/`locationBin`/`locationLevel`, `storageCode`/`size`/`zone` (inherited from the destination), `status`, `putByZ`/`putAt` — set via `placePallet` on a normal completion.
 - On **consolidate**: the occupant `Pallet`'s quantities increase by the incoming pallet's; the incoming `Pallet`'s quantities zero out, its location fields null out, and its `status` becomes `CONSOLIDATED`; its own prior location (if any) is freed to `EMPTY`.
 - `Location.status` → `STORED` at the destination (old location, if a move, → `EMPTY` in the same transaction); `holdCategory` → `HOLD_BOTH` if the worker chose "Place Hold Both (Empty Location)".
@@ -145,7 +145,7 @@ flowchart TD
     J -->|OK| L[CONSOLID: unlock, history entry] --> A
     J -->|CONSOLIDATE_MISMATCH| H
 
-    A -->|Clear / navigate away / idle logout while scanned| M[POST /manual/cancel best-effort, MNP_CANCEL] --> A
+    A -->|Cancel Put / navigate away / idle logout while scanned| M[POST /manual/cancel best-effort, MNP_CANCEL] --> A
 ```
 
 ## Behind the Scenes
@@ -158,7 +158,7 @@ flowchart TD
 
 **Consolidate's asymmetric write.** Unlike a normal move, consolidate never calls `placePallet` — it directly updates both pallets' rows and, separately, frees the incoming pallet's own prior location (if any) in the same transaction. The destination location's own `status` is untouched by consolidate (the occupant is still `STORED` there, unchanged); only the two `Pallet` rows and the *source* pallet's old location move.
 
-**No server-side reservation means client-side cancellation is best-effort.** `cancelScan`'s `POST /api/puts/manual/cancel` call is fired-and-forgotten (`.catch()` swallows failures) from both the Clear button and the component's unmount-cleanup effect. The unmount path specifically reads a `tokenRef` (not `useAuth().token` directly) because an idle-timeout logout nulls the real token via a route swap before MNPPage gets another render — by the time cleanup runs, the ref still holds the last-known-valid token even though the live auth state no longer does.
+**No server-side reservation means client-side cancellation is best-effort.** `cancelScan`'s `POST /api/puts/manual/cancel` call is fired-and-forgotten (`.catch()` swallows failures) from both the Cancel Put button and the component's unmount-cleanup effect. The unmount path specifically reads a `tokenRef` (not `useAuth().token` directly) because an idle-timeout logout nulls the real token via a route swap before MNPPage gets another render — by the time cleanup runs, the ref still holds the last-known-valid token even though the live auth state no longer does.
 
 **Session persistence via `MNPContext`.** The scanned pallet (`scannedPallet`, typed `MNPScannedPallet`) lives in `MNPProvider` (mounted in `App.tsx`, alongside all 12 sibling per-screen providers — `StagingProvider`/`PIIProvider`/`ISIProvider`/`LIIProvider`/`PIPProvider`/`SDPProvider`/`IIDProvider`/`PARProvider`/`WLHProvider`/`SARProvider`/`ELAProvider`/`ELZProvider`, all 13 now mounted together wrapping `AppShell`), not local component state, so navigating away from MNP and back restores the last-scanned pallet instead of resetting to the empty ready state. Unlike SDP, MNP has no server-side reservation/timeout tied to a scanned pallet, so there's no expiry to reconcile on resume. Only the scanned pallet persists — the destination Aisle/Bin/Level entry boxes' in-progress typing, the Level Modal's own state, and the session-local Put History panel (client-side only, resets on navigation away per the Data section above) are never part of this state.
 
@@ -173,9 +173,12 @@ flowchart TD
 
 | Date | Change |
 |---|---|
+| 2026-08-03 ([#189](https://github.com/BobbyJoeCool/PalletIQ/issues/189)) | DPCI now shows a Storage Code badge (the Item's own intrinsic Storage Code); "Move from" now shows a Storage Code+Size badge (the location's own values) whenever the pallet is already stored — both via the existing shared `StorageCodeBadge` component. `manualScan`'s response gained `itemStorageCode`/`currentLocationStorageCode`/`currentLocationSize`; `checkPalletEligibility` (shared with SDP) now includes the current location's own Storage Code/Size on `currentLocation`. |
+| 2026-08-03 (direct instruction, #100 follow-up) | The manual "Clear" button renamed to **Cancel Put** and recolored to the same amber SDP's Unassign button uses — a Playwright regression surfaced that it collided by accessible name with the on-screen Numpad's own new Clear key (issue #100), so it needed a distinct name regardless of the color change. |
+| 2026-08-03 ([#190](https://github.com/BobbyJoeCool/PalletIQ/issues/190)) | Pallet ID and destination fields now persist their entered value through an error (washed red via `invalid`/`groupInvalid`) instead of clearing — see Mis-scan / error handling above. Fields still reset to blank only on a confirmed put, a declined gate popup, or the Cancel Put button. |
 | 2026-07-29 (Feature 9, Phase 2) | `pallet_scanned`-state footer buttons (`demoEmptyLoc`/`demoOccupiedLoc`/`demoContractedLoc`/`demoConsolidateLoc`) and the `demoLevelHintRef` side channel removed, replaced by `LocationEntryFields`' new `demoScanner`/`demoScannedPalletId` opt-in and the shared Location ID Demo Scanner — see Input handling above. `handleDestinationResolved` now reads the picked level via a third `demoLevel` argument on `onResolved` instead of a ref. |
 | 2026-07-29 (Feature 9, Phase 1) | `ready`-state footer buttons (`demoPut`/`demoMove`/`demoBadPid`) removed, replaced by `PalletIdField`'s new `demoScanner` opt-in and the shared Pallet ID Demo Scanner — see Input handling above. Genuinely generic handlers (no screen-state tie-in), unlike PIP's own PID demo buttons, which stayed screen-owned for exactly that reason (see `DevNotes/DesignPrompts/Feature-9-AppWide-Demo-Scanner.md`'s Implementation-detail resolutions). `pallet_scanned`-state demo buttons (Empty/Occupied/Contraction/Consolidate) are unaffected. |
-| 2026-07-27 (Feature 10 / #158) | Internal-only: the Pallet ID box (local `FieldDisplay`/`NumpadFieldBox`) replaced with the shared `PalletIdField` component, matching its existing 72px box size via override props. `handlePalletScan`'s own submit logic and clear-on-error (no wash) behavior are unchanged. |
+| 2026-07-27 (Feature 10 / #158) | Internal-only: the Pallet ID box (local `FieldDisplay`/`NumpadFieldBox`) replaced with the shared `PalletIdField` component, matching its existing 72px box size via override props. `handlePalletScan`'s own submit logic was otherwise unchanged at the time (its clear-on-error behavior was later reversed by [#190](https://github.com/BobbyJoeCool/PalletIQ/issues/190) above). |
 | 2026-07-27 | Fixed [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) — `placePallet` (and `manualConfirm`'s consolidate branch) now check whether a second pallet still occupies a vacated location before clearing it, falling back to `STORED` instead of `EMPTY` if so. |
 | 2026-07-27 | Fixed [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — `manualScan` no longer includes a nonexistent scanned pallet id in its unconditional `MNP_SCAN` log write (was violating `ActivityLog.palletId`'s FK and 500ing instead of surfacing `404 PALLET_NOT_FOUND`); logs `palletId: null` with the invalid id kept in `details.scannedId` instead. |
 | 2026-07-27 | Added the Hold gate ([#92](https://github.com/BobbyJoeCool/PalletIQ/issues/92)) as step 4b of `manualConfirm`'s gate sequence — `HOLD_IN`/`HOLD_BOTH` use the same IM+-overridable pattern as Contraction; `HOLD_PERM` is a harder no-override block for every role; `HOLD_OUT` never blocks. |

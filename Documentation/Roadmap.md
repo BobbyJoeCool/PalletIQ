@@ -8,6 +8,16 @@ several turned out to disagree with each other (see Verification Notes at the en
 before relying on any "currently open" list below if this doc is being read a while after
 that date; issue state moves faster than this file will be updated.
 
+## Process note — shipping verification (2026-08-03)
+
+Per direct instruction: the Playwright e2e suite is no longer run automatically as a ship
+gate before a version bump. Going forward, the developer does a manual visual smoke test of
+the built app instead — `npm run test:e2e` is still available and useful for isolated
+debugging, but its full-suite run is no longer part of the standard end-of-version
+checklist. (This session's own run, right before the policy changed, confirmed the
+suite's existing ~21-failure baseline is unchanged/pre-existing — see
+`DevNotes/Logs/V1.8/version-1_8_6.md` §1.12 for the detail.)
+
 ## Where things stand
 
 - floor-app is at **v1.8.6** (`apps/floor-app/package.json`). api is at **v1.2.0**
@@ -51,45 +61,44 @@ this drift turned out to be a real, not hypothetical, problem).
 
 ### 1. v1.8.x (current) — finish bug fixing and open issues
 
-**This step's issue list needed a full rewrite during adoption.** The source outline (and
-`apps/floor-app/CHANGELOG.md`'s own "Unreleased — Reported Issues" section) both list
-#92, #86, #85, #84, #83, #95, #93, #91, #100, #99, #96, #94, #89, #90, #88, #29 as the
-current open backlog. Checked live: **#83, #85, #86, #88, #91, #92, #93, #94, #95, #96, #99
-are already closed.** The CHANGELOG's list was not kept in sync with actual issue closures. There's also a
-second gap the other direction — a number of open issues filed more recently aren't reflected
-in that CHANGELOG section at all.
+**This step's issue list needed a full rewrite during adoption**, then a second pass after a
+2026-08-02 triage round closed/relabeled/consolidated several of these. Current state below
+is post-triage.
 
 **Currently open, general (non-major-feature) backlog, verified live:**
 
 | # | Severity | Issue |
 | --- | --- | --- |
-| [#175](https://github.com/BobbyJoeCool/PalletIQ/issues/175) | major | PIP: Pull Function dropdown renders stuck open on fresh page load, blocking all clicks |
-| [#177](https://github.com/BobbyJoeCool/PalletIQ/issues/177) | major | SDP: Worker role currently sees Size/Storage/Zone/Consolidating override fields (should be IM+ only) |
-| [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) | major | Reason codes should be a database table with per-department/role restrictions — needs a product conversation; the new CII five-type work (#196) introduces a first real `ReasonCode` table scoped narrowly to its own four actions, which doesn't resolve this issue's broader per-department/role ask on its own |
+| [#198](https://github.com/BobbyJoeCool/PalletIQ/issues/198) | blocker | New — SDP: consolidating an XS put sets a 5-second expiration timer instead of 5 minutes (should extend to 15 min on consolidate); "Unassign" button should stay "Unassign," not switch to "Cancel" |
+| [#175](https://github.com/BobbyJoeCool/PalletIQ/issues/175) | major | PIP: Pull Function dropdown renders stuck open on fresh page load, blocking all clicks — reporter unable to reproduce; more repro info requested, left open |
+| [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) | major | Reason codes should be a database table with per-department/role restrictions — design doc written (`DevNotes/DesignPrompts/ReasonCode-design.md`); 6 open decisions flagged (department-letter mapping, multi-department user support, domain-shared vs. domain-scoped codes, relationship to #196's flat `ReasonCode` proposal, `HoldType` migration, no code-management UI yet) |
 | [#133](https://github.com/BobbyJoeCool/PalletIQ/issues/133) | major | IRP: add a consolidated totals row at the bottom of the report |
-| [#165](https://github.com/BobbyJoeCool/PalletIQ/issues/165) | major | VCP/SSP entry + SSPs-per-Carton display should be a shared component |
-| [#166](https://github.com/BobbyJoeCool/PalletIQ/issues/166) | major | Aisle field should also verify + return what freight type/size is stored there |
-| [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) | blocker | PII Edit Mode will need per-pallet-vs-partial quantity editing once Bulk Pull ships — held for v1.10.0, not this wave |
-| [#152](https://github.com/BobbyJoeCool/PalletIQ/issues/152) | minor | SDP e2e: "an aisle with no eligible locations" test hits a strict-mode violation typing an all-same-digit aisle |
-| [#153](https://github.com/BobbyJoeCool/PalletIQ/issues/153) | minor | SDP e2e: "Applying summary" test uses `selectOption` on Zone, which is now a custom button widget |
-| [#155](https://github.com/BobbyJoeCool/PalletIQ/issues/155) | minor | PAR e2e: 4 tests reference demo buttons ("✓ Create", "✗ Bad DPCI", etc.) that no longer exist |
-| [#157](https://github.com/BobbyJoeCool/PalletIQ/issues/157) | minor | WLH e2e suite: 6 tests broken — `selectOption()` against a non-native Reason Code picker |
-| [#167](https://github.com/BobbyJoeCool/PalletIQ/issues/167) | minor | Partial/loose SSPs should be a shared component (validates against SSPs-per-carton) |
-| [#168](https://github.com/BobbyJoeCool/PalletIQ/issues/168) | minor | Printer should be a shared component, backed by a real Printer table |
-| [#176](https://github.com/BobbyJoeCool/PalletIQ/issues/176) | minor | SDP: Zone override field is a custom button, not a native `<select>` |
-| [#179](https://github.com/BobbyJoeCool/PalletIQ/issues/179) | minor | ReasonCodeField: ambiguous aria-label breaks `getByLabel('Reason Code')` in WLH tests |
-| [#180](https://github.com/BobbyJoeCool/PalletIQ/issues/180) | minor | LII: ambiguous "Hold" text breaks `getByText` exact-match test assertion |
-| [#181](https://github.com/BobbyJoeCool/PalletIQ/issues/181) | minor | `par.spec.ts`: describe block predates v1.6.11 redesign, references buttons that no longer exist |
+| [#165](https://github.com/BobbyJoeCool/PalletIQ/issues/165) | major | VCP/SSP entry + SSPs-per-Carton display should be a shared component — investigated, confirmed no such component exists today; build together with #167, they are coupled |
+| [#197](https://github.com/BobbyJoeCool/PalletIQ/issues/197) | major | New — e2e: rewrite affected suites (SDP/PAR/WLH) to test every Pick-by-Status combination against expected results; supersedes #152/#153/#154/#155/#157 (closed) |
+| [#167](https://github.com/BobbyJoeCool/PalletIQ/issues/167) | minor | Partial/loose SSPs should be a shared component (validates against SSPs-per-carton) — build together with #165, they are coupled |
+| [#168](https://github.com/BobbyJoeCool/PalletIQ/issues/168) | nice-to-have | Printer should be a shared component, backed by a real Printer table — relabeled minor → nice-to-have; needs a real Printer table first, punted down the road |
+| [#179](https://github.com/BobbyJoeCool/PalletIQ/issues/179) | minor | ReasonCodeField: ambiguous aria-label breaks `getByLabel('Reason Code')` in WLH tests — under review, not yet folded into #197 |
+| [#180](https://github.com/BobbyJoeCool/PalletIQ/issues/180) | minor | LII: ambiguous "Hold" text breaks `getByText` exact-match test assertion — under review, not yet folded into #197 |
+| [#181](https://github.com/BobbyJoeCool/PalletIQ/issues/181) | minor | `par.spec.ts`: describe block predates v1.6.11 redesign, references buttons that no longer exist — under review, not yet folded into #197 |
 | [#184](https://github.com/BobbyJoeCool/PalletIQ/issues/184) | minor | Home/Back buttons unresponsive on IID/PAR/ISI until the DPCI field has attempted a lookup |
-| [#189](https://github.com/BobbyJoeCool/PalletIQ/issues/189) | minor | MNP: add Storage Code/Size badges after DPCI and Pallet ID displays |
-| [#190](https://github.com/BobbyJoeCool/PalletIQ/issues/190) | minor | MNP: Pallet ID/Location fields should persist through errors, clear only on confirmed put |
-| [#193](https://github.com/BobbyJoeCool/PalletIQ/issues/193) | minor | STG: Master Control Storage Code rejects any value if Aisle isn't set yet |
-| [#100](https://github.com/BobbyJoeCool/PalletIQ/issues/100) | nice-to-have | Numpad: add a 4th column (Backspace/Tab/Back Tab/Enter), a Clear button, and rename OK to Enter |
-| [#169](https://github.com/BobbyJoeCool/PalletIQ/issues/169) | nice-to-have | SDP — show freight-type badges with open/staged counts under the Aisle field |
+| [#193](https://github.com/BobbyJoeCool/PalletIQ/issues/193) | minor | STG: Master Control Storage Code rejects any value if Aisle isn't set yet — resolution confirmed: accept any valid Storage Code regardless of aisle availability; surface the mismatch as an error in the Zone Summary instead of an invalid box state |
 | [#118](https://github.com/BobbyJoeCool/PalletIQ/issues/118) | nice-to-have | Refactor: "random sample row" query pattern repeated ~14x |
-| [#154](https://github.com/BobbyJoeCool/PalletIQ/issues/154) | needs-triage | SDP e2e: "Worker does not see IM+ override fields" test fails — 14 unrelated "Size" text matches |
-| [#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90) | needs-triage | Add per-record audit trail to PII, LII, and a future Container ID screen — not milestone-assigned |
-| [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) | distant-future | Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus |
+
+**Closed this pass (2026-08-03):** issue #190 (MNP field persistence, floor-app v1.8.7),
+issue #166 (Aisle field freight breakdown, api v1.2.1), issue #169 (SDP freight-type badges,
+floor-app v1.8.7), issue #100 (Numpad/Keyboard redesign, floor-app v1.8.7 — UI portion;
+remaining Tab/Back Tab navigation work split off to new issue
+[#199](https://github.com/BobbyJoeCool/PalletIQ/issues/199)), and issue #189 (MNP
+DPCI/Move-from Storage Code badges, floor-app v1.8.7 + api v1.2.1 — shipped with one scope
+difference from its filed text, see the issue's own closing comment; its "Hold button red
+when a hold is active" scope addition was **not** implemented and isn't tracked anywhere
+else — worth a fresh issue if still wanted). See `DevNotes/Logs/V1.8/version-1_8_6.md`
+§§1.9–1.13 for full detail.
+
+**Closed this pass (2026-08-02, second triage round):** #177 (could not reproduce — Worker
+role only ever saw Size), #176 (verified Zone override works), #29 (closed per direction),
+the five e2e issues #152, #153, #154, #155, and #157 (superseded by #197, e2e rewrite), and
+finally #89 (folded into #137 — see Step 4).
 
 ### 2. v1.9.0 — PRQ + CII, plus the open-issue cleanup wave
 
@@ -108,6 +117,9 @@ doc.
   decision on whether #136 stays open as the umbrella issue with #194/#195/#196 as its
   breakdown, or gets closed in favor of them, rather than leaving both trails open
   indefinitely.
+- [#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90) — Add per-record audit trail to
+  PII, LII, and a future Container ID screen. **Retargeted here 2026-08-02** (was general
+  v1.8.x backlog) — confirmed as a major feature (already labeled `major`/`feature-change`).
 - Most of Step 1's general backlog above is also implicitly in scope for this "cleanup wave,"
   per the CHANGELOG's own framing — not re-listed here to avoid a third copy of the same
   table.
@@ -127,11 +139,13 @@ outstanding blocker: a Consolidation Guard audit against the current `manualConf
 **Currently open issues for this step:**
 
 - [#137](https://github.com/BobbyJoeCool/PalletIQ/issues/137) — Major Feature: Bulk Pull —
-  multi-pallet/partial location occupancy.
+  multi-pallet/partial location occupancy. **Now explicitly includes #89's ask** (PII
+  Edit Mode per-pallet-vs-partial quantity editing) — #89 closed 2026-08-02, folded in here
+  per direction rather than left as a separately-tracked, merely-related issue.
 - [#171](https://github.com/BobbyJoeCool/PalletIQ/issues/171) — Major Feature: OCC —
   Overpack Carton Create.
-- [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) — PII Edit Mode per-pallet-vs-
-  partial quantity editing, explicitly held for this version.
+- ~~#89~~ — PII Edit Mode per-pallet-vs-partial quantity editing. **Closed 2026-08-02**,
+  folded into #137 (see above).
 - ~~#149~~ — Shared Infrastructure: Logic Gate. **Closed 2026-08-02** — confirmed shipped in
   API v1.1.0 (commit `69bc750`); no longer open work.
 - ~~#150~~ — Shared Infrastructure: statusExpiry. **Closed 2026-08-02** — same commit as
@@ -220,6 +234,15 @@ Same as Step 3 — no issues pre-assigned.
 
 ## Open questions before this roadmap is final
 
+- **#84**: the instruction "Create a design doc for Claude Mobile for this" is not clear
+  enough to act on — "Claude Mobile" does not match anything in this repo or this project's
+  conventions (no product, screen, or doc by that name). Possible readings: (a) a dictation
+  artifact for something else entirely, (b) a request to write the design doc as a
+  `DevNotes/DesignPrompts/` doc the way this project normally settles a feature before
+  filing/building it, per the Design Session Workflow this project already uses. Holding off
+  on writing anything for #84 until this is clarified, rather than guessing and producing a
+  doc that has to be redone.
+
 - Do you want **LRP** (#173) and **Display Field Consolidation** (#172) assigned to a
   specific version now, or left as floating backlog until they naturally attach to other
   work?
@@ -270,3 +293,32 @@ instruction, milestone-tied items with their specific target version, and unassi
 (#172, #173) flagged as not-yet-assigned candidates rather than given a fabricated version.
 No issue content beyond version expectations was edited, and no issue was closed except the
 three confirmed-shipped ones above.
+
+## Second triage round (2026-08-02)
+
+Direct, item-by-item triage of the Step 1 backlog table above, applied live:
+
+- **Closed** (9): #177, #176, #29 (verified/decided directly), plus #152/#153/#154/#155/#157
+  (consolidated into new issue #197) and #89 (folded into #137).
+- **New issues filed** (2): [#197](https://github.com/BobbyJoeCool/PalletIQ/issues/197) —
+  rewrite the SDP/PAR/WLH e2e suites to test every `DemoScannerBar` Pick-by-Status
+  combination against expected results, superseding the five e2e issues closed above.
+  [#198](https://github.com/BobbyJoeCool/PalletIQ/issues/198) — new bug, labeled
+  `bug`/`blocker`: SDP's consolidation-put expiration timer fires in 5 seconds instead of 5
+  minutes, and should extend to 15 minutes on a consolidation; the "Unassign" button should
+  not switch to "Cancel" during one.
+- **Relabeled**: #168 `minor` → `nice-to-have` (needs a not-yet-built Printer table first;
+  punted).
+- **Retargeted**: #90 moved from Step 1's general v1.8.x backlog to Step 2 (v1.9.0),
+  confirmed as a major feature.
+- **Scope added via comment** (issue stays open, no status change): #165/#167 (confirmed
+  coupled, build together — no existing VCP/SSP component found), #166 (SDP per-aisle
+  storage-code/size badge row), #189 (Hold button turns red when a location has an active
+  hold), #193 (Storage Code should accept any valid value regardless of aisle availability;
+  surface the mismatch in the Zone Summary instead of an invalid box state).
+- **Left open, no change** (explicitly "Open" with no new information, or explicitly
+  "Unsure"): #175 (comment requesting repro info), #133, #179, #180, #181, #184, #190, #100,
+  #169, #118.
+- **Not yet actioned:** #84 — see Open Questions below; the instruction to "create a design
+  doc for Claude Mobile for this" was not clear enough to act on without guessing, so no
+  design doc was written and #84 was left as-is (no comment posted).

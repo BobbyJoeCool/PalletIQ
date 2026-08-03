@@ -4,11 +4,32 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.2.1 — 2026-08-03](#121--2026-08-03)
 - [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
 
 ---
+
+## [1.2.1] — 2026-08-03
+
+Backend half of floor-app's `[1.8.7]` entry — GitHub #166/#189/#190. Full detail:
+`DevNotes/Logs/V1.8/version-1_8_6.md` §§1.9, 1.13.
+
+### 1.2.1 — Added
+
+- `GET /api/locations/aisle-exists` (issue #166) now also returns an aisle-wide freight-
+  type/size breakdown (`{storageCode, size, empty, staged}[]`, aggregated across every zone
+  in the aisle) alongside `exists`, using the identical eligibility filter
+  `getLocationsEmptyByZone` already applies per-zone. Every current caller either uses it
+  (SDP, via the frontend's `useAisleField` hook) or ignores it at no extra cost (ELA, WLH,
+  STG's two Aisle fields).
+- `checkPalletEligibility` (shared by SDP's `directedPut` and MNP's `manualScan`) now also
+  returns the current location's own `storageCode`/`size` on `currentLocation` (issue #189)
+  — one extra `include` on the existing query, no second round-trip.
+- `manualScan`'s response gained `pallet.itemStorageCode`, `pallet.currentLocationStorageCode`,
+  `pallet.currentLocationSize` (issue #189) — drives MNP's new DPCI/Move-from Storage Code
+  badges.
 
 ## [1.2.0] — 2026-08-02
 

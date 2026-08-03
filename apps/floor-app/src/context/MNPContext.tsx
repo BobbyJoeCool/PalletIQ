@@ -8,6 +8,12 @@ export interface MNPScannedPallet {
   descShort: string;
   quantity: MNPQty;
   currentLocation: string | null;
+  // Drives the DPCI/Move-from Storage Code badges (issue #189) — see manualScan's own doc
+  // comment in api/functions/puts.ts for why these are separate from the pallet's own
+  // (possibly-null/possibly-stale) storageCode/size fields.
+  itemStorageCode: string;
+  currentLocationStorageCode: string | null;
+  currentLocationSize: string | null;
 }
 
 interface MNPContextValue {

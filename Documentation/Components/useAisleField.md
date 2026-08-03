@@ -34,6 +34,18 @@ typing can produce (same reasoning as `LocationEntryFields`' own 8-digit full-ba
 override). Previously only SDP defended against this explicitly; every consumer gets it
 uniformly now.
 
+**Also returns an aisle-wide freight-type/size breakdown (issue #166).** `aisle-exists` no
+longer answers only "does this aisle exist" — it now also returns what's stored there: an
+`AisleBreakdownEntry[]` (`{storageCode, size, empty, staged}`), aggregated across every zone
+in the aisle, using the identical eligibility filter `getLocationsEmptyByZone` already
+applies per-zone (excludes contraction, excludes any hold but `HOLD_OUT`, counts only
+`EMPTY`/`STAGED`). This hook exposes it as a new `breakdown` output, populated on a
+successful resolve and reset to `[]` on not-found/empty/`clear()`. A caller with no use for
+it (ELA, WLH, STG's own two Aisle fields) simply never reads it — extending the single
+shared `aisle-exists` response was chosen over a second opt-in endpoint/param specifically so
+those callers pay no extra network cost either way. SDP is the first real consumer — see
+Consumers below.
+
 **`onConfirm` always fires, even for an intentional empty confirm** (backspace-to-empty +
 an explicit OK) — found while migrating STG's per-stack override, whose own pre-existing
 behavior commits an emptied override back to Master Control's value on confirm. An earlier
@@ -49,15 +61,16 @@ Called as `useAisleField(opts)`:
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| `fetch` | `(aisle: string) => Promise<{ exists: boolean }>` | yes | Checks aisle existence — every current caller wires `GET /api/locations/aisle-exists` |
+| `fetch` | `(aisle: string) => Promise<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>` | yes | Checks aisle existence and freight breakdown — every current caller wires `GET /api/locations/aisle-exists` |
 | `onResolved` | `(aisle: string) => void` | no | Fires once the confirmed value is a real aisle |
 | `onNotFound` | `(aisle: string) => void` | no | Fires once the confirmed value is NOT a real aisle (or the check itself failed) |
 | `onConfirm` | `(aisle: string) => void` | no | Fires the instant a box confirms, before the async check settles — for a caller that advances focus regardless of validity (WLH's pre-existing "length drives advance" convention) or commits the raw value unconditionally (ELA, STG's per-stack override) |
 
 ## Output
 
-Returns `{ field, invalid, loading, focusField, loadAisle, clear }` — same shape as
-`useUpcField`'s equivalent members.
+Returns `{ field, invalid, loading, breakdown, focusField, loadAisle, clear }` —
+`breakdown: AisleBreakdownEntry[]` is new (issue #166); the rest mirrors `useUpcField`'s
+equivalent members.
 
 ## Data flow
 
@@ -82,7 +95,10 @@ highlight."
 - `WLHPage.tsx` — Range mode's Aisle field; also previously unvalidated, also gates the
   "Review Hold" action now (`canReview`)
 - `SDPPage.tsx` — the entry-state Aisle field; switched from `empty-by-zone` to
-  `aisle-exists`
+  `aisle-exists`; also the first consumer of `breakdown` (issue #169) — renders a compact,
+  flat (non-zone-grouped) `ZoneCodeBadge` row beneath the Aisle field via
+  `groupBreakdownByStorageCode`, the same column-by-Storage-Code layout ELZ/STG's Zone
+  Summary panels use
 - `STGPage.tsx` — Master Control's Aisle field (previously had **no** existence check at
   all, an inconsistency with the per-stack override's own check — fixed as part of this
   migration) and each stack's per-stack Aisle override (switched from `empty-by-zone` to
@@ -99,3 +115,5 @@ highlight."
   shape for PAR's own Aisle/Bin progressive check
 - [`NumpadFieldBox`](NumpadFieldBox.md) — the shared box primitive most consumers render
   through directly or via a thin local wrapper
+- [`ZoneCodeBadge`](ZoneCodeBadge.md) — renders each `breakdown` entry; SDP's usage
+  (issue #169) is its first consumer outside ELZ/STG's own per-zone Zone Summary panels

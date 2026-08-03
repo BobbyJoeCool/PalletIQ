@@ -10,8 +10,15 @@ const QWERTY_ROWS = [
 
 /**
  * Full-width on-screen keyboard panel. Renders as an overlay spanning the full bottom
- * of the content slot. Contains a number row, three QWERTY rows, and a Clear/Space/OK
- * action row. Each button tap dispatches the key string to NumpadContext.handleKey.
+ * of the content slot. Contains a number row, three QWERTY rows, and a Tab/Back Tab/
+ * Clear/Space/Enter action row (Enter renamed from OK, issue #100). Each button tap
+ * dispatches the key string to NumpadContext.handleKey — `useNumpadField` already treats
+ * `'Enter'`/`'OK'`/`'Blur'` as equivalent submit triggers, so the rename is label-only.
+ *
+ * Tab/Back Tab (issue #100) dispatch their own key strings but have no handler yet — see
+ * `Numpad.tsx`'s own doc comment and `Documentation/Components/Keyboard.md` for why (no
+ * field-navigation mechanism exists anywhere in the app today; building one generically
+ * was scoped out to a dedicated follow-up issue). Tapping either is a silent no-op today.
  *
  * Used for free-text entry fields (Size and Storage Code overrides on SDP) where
  * alphanumeric input is needed rather than digits only.
@@ -58,8 +65,22 @@ export function Keyboard() {
           </div>
         ))}
 
-        {/* Action row: Clear / Space / OK */}
+        {/* Action row: Tab / Back Tab / Clear / Space / Enter */}
         <div className="flex gap-1.5 mt-0.5">
+          <button
+            type="button"
+            onClick={() => handleKey('Tab')}
+            className="flex-1 flex items-center justify-center h-[60px] rounded-[9px] bg-[#1A1A1A] font-ui text-[18px] font-medium text-[#9A9A9A] select-none hover:bg-[#262626] active:bg-[#333] transition-colors"
+          >
+            Tab
+          </button>
+          <button
+            type="button"
+            onClick={() => handleKey('Back Tab')}
+            className="flex-1 flex items-center justify-center h-[60px] rounded-[9px] bg-[#1A1A1A] font-ui text-[15px] font-medium text-[#9A9A9A] select-none hover:bg-[#262626] active:bg-[#333] transition-colors"
+          >
+            Back Tab
+          </button>
           <button
             type="button"
             onClick={() => handleKey('CLEAR')}
@@ -70,16 +91,16 @@ export function Keyboard() {
           <button
             type="button"
             onClick={() => handleKey(' ')}
-            className="flex-[5] flex items-center justify-center h-[60px] rounded-[9px] bg-[#1A1A1A] font-ui text-[20px] text-[#555555] select-none hover:bg-[#262626] active:bg-[#333] transition-colors"
+            className="flex-[4] flex items-center justify-center h-[60px] rounded-[9px] bg-[#1A1A1A] font-ui text-[20px] text-[#555555] select-none hover:bg-[#262626] active:bg-[#333] transition-colors"
           >
             space
           </button>
           <button
             type="button"
-            onClick={() => handleKey('OK')}
+            onClick={() => handleKey('Enter')}
             className="flex-[2] flex items-center justify-center h-[60px] rounded-[9px] bg-[#CC0000] font-ui text-[22px] font-semibold text-white select-none hover:bg-[#AA0000] active:bg-[#990000] transition-colors"
           >
-            OK
+            Enter
           </button>
         </div>
       </div>
