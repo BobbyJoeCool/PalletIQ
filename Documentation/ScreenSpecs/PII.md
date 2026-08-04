@@ -20,7 +20,7 @@
    - 7a. Edit-mode fields (DPCI, VCP, SSP, Total Cartons, SSPs on Pallet, Full Pallets, Expiration Date, Reason Code) are seeded from the currently-loaded pallet's values.
    - 7b. Worker changes one or more fields. The Save button stays disabled until at least one field's *parsed* value actually differs from what was loaded (a re-typed but numerically identical value does not enable Save).
    - 7c. Worker picks or types a Reason Code — required the moment any field differs; Save blocked client-side with a message-bar error if omitted at Save time.
-   - 7d. Worker presses **Save** → `PATCH /api/pallets/:id` with only the changed fields plus `reasonCode`.
+   - 7d. Worker presses **Save** → `PATCH /api/pallets/:id` with only the changed fields plus `reasonPrefix`/`reasonNumber` (issue #84 — was one `reasonCode` string, now validated server-side against the caller's own department/role access).
      - 7d-i. **Success:** returns to Loaded state (re-fetches the pallet); message bar `success` — `"Pallet {pid} updated"`.
      - 7d-ii. **`EXPIRATION_NEEDS_CONFIRM` (409):** not treated as an error — opens the in-app "Expiration date is coming up soon" confirm popup. Confirming resubmits the identical body with `confirmNearExpiration: true`; Cancel dismisses the popup and leaves Edit mode's fields untouched.
      - 7d-iii. **`EXPIRATION_TOO_SOON` (400):** message-bar error, `"Expiration Date must be at least 1 month out"`; stays in Edit mode.
@@ -84,7 +84,7 @@
 │  SSPs on Pallet [3]              Current: 3                                   │
 │  Full Pallets [1]                Current: 1                                   │
 │  Expiration Date [2026-11-02]  Current: 2026-10-15 (Required, if flagged/empty)│
-│  Reason Code  [E01______] [▾]    ← type 3 chars or tap ▾ (same as Storage Code)│
+│  Reason Code  [I][▾] [05][▾]   ← prefix + number, resolved desc shown below   │
 │  [ Cancel ]   [ Save ]                                                        │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ [123 Keypad] [ABC Keyboard]  ✓ Scan PID  Find by Status  ✗ Bad PID  BD 26198 7/17 3:41 PM │  54px Footer
@@ -100,7 +100,7 @@
 - **(v1.6.7)** Every Edit-mode box now shows a "Current: {value}" indicator to its right — the pallet's pre-edit value, so the worker can see what they're changing without having to remember or scroll back to the read-only view. VCP/SSP show one combined "Current: {vcp}/{ssp}" per their own merged box row.
 - **(v1.6.7)** VCP, SSP, and SSPs on Pallet each re-run a client-side mirror of `PATCH`'s own VCP/SSP checks (`vcpSspWarning` in `PIIPage.tsx`) immediately when that box commits (numpad Enter/OK, or the synthetic Blur `useNumpadField` fires when focus moves to another field) — a warning-tone `MessageBar` message if invalid, but editing is never blocked; only pressing Save actually enforces it (the server's own check, unchanged from before this round). **(v1.7.0)** VCP/SSP also picks up the app-wide red-wash treatment (see `DevNotes/DesignPrompts/Feature-8-AppWide-Invalid-Field-Wash.md`) as a group — a `vcpSspInvalid` flag set alongside the warning, washing both boxes together the same way PAR's own VCP/SSP pair does (a cross-validated rule needing both values at once, not attributable to either field alone).
 - **(v1.7.0)** Expiration Date: rebuilt as the same numpad-driven Month/Day/Year chain PAR uses (direct instruction — "exact same format that is on PAR"), replacing the previous native `<input type="date">`. Each box auto-advances on a 2-digit (Month/Day, zero-padded) or 4-digit (Year) commit; Month validates its 1-12 range and Day validates it exists in the entered month, each washing its own box individually on failure (`monthInvalid`/`dayInvalid`) — mirroring PAR's identical per-box checks. PAR's additional whole-date "expiration too soon" group wash was *not* carried over — that's a business-rule check, not a format one, and this screen already surfaces the equivalent case differently, via the server's `EXPIRATION_NEEDS_CONFIRM`/`EXPIRATION_TOO_SOON` responses (see 7d-ii/7d-iii above), not a wash. Still gets the same "Current: {value}" treatment as everything else.
-- **(v1.6.7)** Reason Code: the shared `ReasonCodeField`, redesigned this round onto the same entry-with-dropdown-helper pattern as Storage Code/Size (`CodePickerField`) — type a known 3-character code (auto-commits and dismisses the keyboard, `closeOnAutoSubmit`) or tap the chevron for a popup of `{code} — {desc}` options. Replaces the previous native `<select>` + conditional "Type a code…" custom-field design; this is a shared-component change, so WLH's hold panel and STG's reject/hold popup get the identical new UX too, not just PII.
+- **(v1.6.7, redesigned 2026-08-03 #84)** Reason Code: the shared `ReasonCodeField` — a department/role prefix letter plus a 2-digit reason number, each its own `CodePickerField`-based entry-with-dropdown-helper, fetched live per-user from `GET /api/reason-codes` (domain `PALLET_ADJUST`) instead of the old hardcoded `editReasonCodes.ts` list. `strict` now rejects an unrecognized value instead of silently accepting it. Shared-component change — WLH's hold panel and STG's reject/hold popup get the identical new UX too, not just PII.
 - All buttons meet the 72px+ min touch target convention (Edit/Save/Cancel/Go to Location ID are 56px tall but wide, at the lower bound the app uses for secondary action rows).
 - Scanning a barcode while the Pallet ID field is not focused still lands correctly — the header-level hardware scanner buffer (`AppShell`) delivers to whichever field is currently registered.
 
@@ -116,10 +116,10 @@
 - `Pallet.vcp`, `Pallet.ssp` — **(v1.6.7)** re-validated together on every save (not just when either changes): SSP must evenly divide VCP (`vcp % ssp === 0`), rejected otherwise
 - `Pallet.currentPallets`, `Pallet.currentCartons`, `Pallet.currentSSPs` — floor-checked against cartons/SSPs already committed to open pull Containers; **(v1.6.7)** `currentSSPs` is also capped below one full carton's worth (`vcp/ssp`), rejected if at or above it
 - `Pallet.expirationDate` — nullable; 1-month floor / 3-month confirm gate (see Behind the Scenes)
-- `ActivityLog` — one `EDIT_PAL` entry per successful save carrying `{ old, new, reasonCode }` for every field that actually changed, plus the pallet's location (if any) — written only if at least one field changed
+- `ActivityLog` — one `EDIT_PAL` entry per successful save, real `reasonPrefix`/`reasonNumber` columns (issue #84) plus `{ old, new }` in `details` for every field that actually changed, plus the pallet's location (if any) — written only if at least one field changed
 
 **Not written:**
-- The reason code itself is never stored as a column anywhere — only inside `ActivityLog.details` (same convention as Location Hold reason codes)
+- **(Issue #84, 2026-08-03)** The reason code is now a real `ActivityLog.reasonPrefix`/`reasonNumber` column pair, not just `details` JSON — same change applied to Location Hold reason codes
 - Current location is never editable from this screen (use MNP to move a pallet) — no location write path exists here
 - `poNumber`/`apptNumber` are read-only from every screen including this one's own Edit mode — set once, only by simulated receiving/PAR
 
@@ -172,7 +172,7 @@ flowchart TD
 
 **Quantity floor check reuses `receivedCartons` as a cartons-per-pallet proxy.** `totalCartons = newPallets * pallet.receivedCartons + newCartons` is compared against cartons already committed to open Labels — a known simplification (the code comment flags it as "production would use a dedicated field") rather than a true independent cartons-per-pallet column.
 
-**Reason code is logged, never a column.** `writeLog()` is the single choke point for all ActivityLog writes app-wide; PII's call only fires when `Object.keys(oldVals).length > 0` — i.e., a log entry is written if and only if the save actually changed something, even though the request may have carried a reason code regardless.
+**Reason code is logged as real columns (issue #84).** `writeLog()` is the single choke point for all ActivityLog writes app-wide; PII's call only fires when `Object.keys(oldVals).length > 0` — i.e., a log entry is written if and only if the save actually changed something, even though the request may have carried a reason code regardless.
 
 **VCP/SSP semantics (v1.6.7).** Both are item-quantities, not counts of units-of-units: VCP = items per carton, SSP = items per store-ship unit (equal to VCP for a full case, smaller for a partial carton — see `Documentation/outline.md`'s field descriptions). `vcp / ssp` is therefore the number of SSP-units inside one carton ("SSPs per Carton"), which is why SSP is required to evenly divide VCP — a non-integer result wouldn't correspond to a real physical carton count. This was confirmed by reading `seed.ts`'s own `ssp` generation (always either equal to `vcp` or exactly `vcp/2`) rather than trusting the fix notes' wording alone, since two of them read as contradictory in isolation.
 
@@ -190,13 +190,13 @@ flowchart TD
 - All five items previously listed here (`DevNotes/Fixes/PII/01`–`05`: Pallet ID field clearing on a failed scan, VCP/SSP divisibility, SSPs-per-carton cap, the VCP/SSP display merge, and cross-navigation persistence) are fixed as of v1.6.7 — see the Change Log below.
 - PII#05's "last-viewed-record persists across navigation" pattern has since been generalized to every other screen in the app (LII, ISI, and 9 more — see each screen's own spec) — `PIIContext` was the first of what's now 13 sibling per-screen providers mounted together in `App.tsx`, not a PII-only special case anymore.
 - No GitHub issue currently open specifically against PII (see CHANGELOG's "Unreleased — Reported Issues" section as of this writing) — the items above lived in `DevNotes/Fixes/PII/`, not as filed GitHub issues.
-- Issue #29 (Warehousing/Inbound menu restructure, distant-future/unscheduled) would let Edit Reason Codes be gated by module/role instead of the current flat, ungated `EDIT_REASON_CODES` list — explicitly deferred until that lands.
-- Issue #84 (open, Major) — reason codes generally (including PII's Edit Reason Codes) should eventually become a database table with per-department/role restrictions, rather than the current hardcoded `editReasonCodes.ts` list; needs a product conversation first.
+- Issue #29 (Warehousing/Inbound menu restructure, distant-future/unscheduled) would extend department/role gating to Inbound/Outbound menus themselves — reason codes already gained that gating under issue #84 (2026-08-03); #29 is a separate, broader screen-gating ask.
 
 ## Change Log
 
 | Date | Change |
 |---|---|
+| 2026-08-03 ([#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84)) | Edit mode's Reason Code redesigned onto the new database-backed system — a department/role prefix letter plus a 2-digit reason number, both fetched live per-user from `GET /api/reason-codes` (domain `PALLET_ADJUST`), replacing the flat hardcoded `editReasonCodes.ts` list (now deleted). `strict` closes the old free-text bypass. Submits `reasonPrefix`/`reasonNumber` instead of one `reasonCode` string; both are now real `ActivityLog` columns, validated server-side against the caller's own access on every save. Made once in the shared `ReasonCodeField` component — WLH/STG/PIP/SDP/MNP's hold-placement reason codes all picked up the equivalent redesign in the same change. |
 | 2026-07-29 (Feature 9, Phase 1) | Pallet ID field migrated from the render-only `PalletIdField` component onto the new self-validating `usePalletIdField` hook — `loadPallet`/`handlePalletIdChange`/`pidValue`/`palletInvalid`/`palletFieldRef` all replaced by the hook's own owned state. The old `Find by Status` `DemoPicker` button, `STATUS_PICKER_OPTIONS`, and the ✓ Scan PID/✗ Bad PID buttons are all replaced by the generalized Pallet ID Demo Scanner (see Input handling above), which the hook now registers internally rather than the screen building its own footer content. |
 | 2026-07-27 (Feature 10 / #159) | **Behavior change, direct instruction:** Edit mode's DPCI (Dept/Class/Item) fields replaced with the shared `useDpciFields` hook — the same one PAR/IID/ISI use. Previously this screen had no client-side DPCI validation at all, relying entirely on the server rejecting an invalid combination at Save time; now an invalid in-progress edit washes red and shows "DPCI not found" immediately, matching PAR/IID/ISI's own UX. Save's own gating is unchanged (still gated only on whether any field actually changed, not on DPCI validity). |
 | 2026-07-27 (Feature 10 / #158) | Internal-only: the hand-rolled Pallet ID box replaced with the shared `PalletIdField` component (box/markup only — `loadPallet`'s own lookup, error handling, and not-found wash all unchanged). |

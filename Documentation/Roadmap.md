@@ -71,7 +71,7 @@ is post-triage.
 | --- | --- | --- |
 | [#198](https://github.com/BobbyJoeCool/PalletIQ/issues/198) | blocker | New — SDP: consolidating an XS put sets a 5-second expiration timer instead of 5 minutes (should extend to 15 min on consolidate); "Unassign" button should stay "Unassign," not switch to "Cancel" |
 | [#175](https://github.com/BobbyJoeCool/PalletIQ/issues/175) | major | PIP: Pull Function dropdown renders stuck open on fresh page load, blocking all clicks — reporter unable to reproduce; more repro info requested, left open |
-| [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) | major | Reason codes should be a database table with per-department/role restrictions — design doc written (`DevNotes/DesignPrompts/ReasonCode-design.md`); 6 open decisions flagged (department-letter mapping, multi-department user support, domain-shared vs. domain-scoped codes, relationship to #196's flat `ReasonCode` proposal, `HoldType` migration, no code-management UI yet) |
+| [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) | major | Reason codes should be a database table with per-department/role restrictions — **built 2026-08-03, pending ship** (design: `DevNotes/DesignPrompts/ReasonCode-Design-Doc.md` + companion `ReasonCode-Session-Log.md`). New `ReasonCodePrefix`/`ReasonCode`/`ReasonCodePrefixAllowance`/`ReasonCodeDomain`/`UserDepartment` tables; `HoldType`/`Location.holdTypeCode` dropped; `GET /api/reason-codes` derives a user's accessible prefixes live (no JWT change — a fresh DB lookup per request); `placeHold`/`placeRangeHold`/`editPallet` now validate and store `reasonPrefix`/`reasonNumber` as real `ActivityLog` columns instead of an unvalidated string. `ReasonCodeField` fully redesigned (session-sticky prefix, `strict` closes the old free-text bypass) — `holdReasonCodes.ts`/`editReasonCodes.ts` deleted. Touches `HoldPanel` (WLH/PIP/SDP/MNP), STG's reject dialog, MNP's occupied-location Hold-Both path (was a hardcoded non-editable `W04` send, now an editable pre-filled step), and PII's Edit Mode. Two of the four smaller follow-ups resolved during the build (component kept the name `ReasonCodeField`; MNP/STG defaults set to `W01`/`W70`; `editReasonCodes.ts`'s two unmatched reasons folded into `05`) — remaining: #196's now-superseded flat `ReasonCode` proposal still needs removal from `schema-additions.prisma`, deferred to whichever of #84/#196 ships second per the design doc's own framing. |
 | [#133](https://github.com/BobbyJoeCool/PalletIQ/issues/133) | major | IRP: add a consolidated totals row at the bottom of the report |
 | [#165](https://github.com/BobbyJoeCool/PalletIQ/issues/165) | major | VCP/SSP entry + SSPs-per-Carton display should be a shared component — investigated, confirmed no such component exists today; build together with #167, they are coupled |
 | [#197](https://github.com/BobbyJoeCool/PalletIQ/issues/197) | major | New — e2e: rewrite affected suites (SDP/PAR/WLH) to test every Pick-by-Status combination against expected results; supersedes #152/#153/#154/#155/#157 (closed) |
@@ -233,15 +233,6 @@ Desktop's progress.
 Same as Step 3 — no issues pre-assigned.
 
 ## Open questions before this roadmap is final
-
-- **#84**: the instruction "Create a design doc for Claude Mobile for this" is not clear
-  enough to act on — "Claude Mobile" does not match anything in this repo or this project's
-  conventions (no product, screen, or doc by that name). Possible readings: (a) a dictation
-  artifact for something else entirely, (b) a request to write the design doc as a
-  `DevNotes/DesignPrompts/` doc the way this project normally settles a feature before
-  filing/building it, per the Design Session Workflow this project already uses. Holding off
-  on writing anything for #84 until this is clarified, rather than guessing and producing a
-  doc that has to be redone.
 
 - Do you want **LRP** (#173) and **Display Field Consolidation** (#172) assigned to a
   specific version now, or left as floating backlog until they naturally attach to other

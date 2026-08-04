@@ -72,3 +72,4 @@ Sibling components/hooks (e.g. a chrome wrapper's underlying behavior hook).
 - [`NumpadContext`](NumpadContext.md) — shell-level key-routing context behind every numeric/text field (issue #100)
 - [`Numpad`](Numpad.md) — the shared on-screen numeric keypad panel (issue #100)
 - [`Keyboard`](Keyboard.md) — the shared on-screen QWERTY keyboard panel (issue #100)
+- [`ReasonCodeField`](ReasonCodeField.md) — database-backed department/role reason-code entry (issue #84; WLH/PIP/SDP/MNP/STG/PII)

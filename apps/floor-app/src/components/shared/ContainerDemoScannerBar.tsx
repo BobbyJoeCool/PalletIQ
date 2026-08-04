@@ -94,7 +94,9 @@ export function ContainerDemoScannerBar({ onFill, fn }: ContainerDemoScannerBarP
       </button>
 
       {popupOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        // z-[65] (2026-08-03) — above Numpad/Keyboard's z-[60], same fix as
+        // LocationDemoScannerBar's identical popup; see its own comment for why.
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[65]">
           <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-6 w-[420px] shadow-2xl flex flex-col gap-4">
             <h2 className="font-ui text-[19px] font-semibold text-white text-center">Find a Label</h2>
 

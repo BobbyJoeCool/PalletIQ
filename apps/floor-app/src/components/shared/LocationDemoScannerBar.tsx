@@ -162,7 +162,16 @@ export function LocationDemoScannerBar({ onFill, itemStorageCode, scannedPalletI
       </button>
 
       {popupOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        // z-[65] (2026-08-03, direct instruction, MNP "Find a Location" dismissing on
+        // background click) — this session's earlier z-[60] fix on Numpad/Keyboard put
+        // those panels above this popup's old z-50, so a click meant for the popup's own
+        // backdrop could land on Numpad/Keyboard instead (still visible underneath, since
+        // the field that opened this popup stays "active" the whole time) and drive its
+        // active field's key handler, indirectly clearing `isActive` and unmounting this
+        // popup along with the rest of the demo bar. Same fix applied to every
+        // *DemoScannerBar popup (Item/Container/generic), not just this one — all four
+        // share the identical pattern.
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[65]">
           <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-6 w-[460px] shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
             <h2 className="font-ui text-[19px] font-semibold text-white text-center">Find a Location</h2>
 

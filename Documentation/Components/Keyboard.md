@@ -8,8 +8,9 @@
 The shared full-width QWERTY keyboard panel — a shell-level overlay (rendered by
 `AppShell`, not any individual screen) spanning the full bottom of the content slot,
 used for free-text entry fields where alphanumeric input is needed rather than digits
-only (currently: Size and Storage Code overrides on SDP). Sibling of `Numpad` — same
-`NumpadContext.handleKey` dispatch pattern, just a different physical panel and key set.
+only (Size and Storage Code overrides on SDP; `ReasonCodeField`'s own prefix-letter
+entry, issue #84). Sibling of `Numpad` — same `NumpadContext.handleKey` dispatch pattern,
+just a different physical panel and key set.
 
 No doc existed for this component prior to issue #100 — filled in as part of that issue's
 own work, same as `Numpad.md`.
@@ -22,6 +23,10 @@ renamed the old `OK` button to `Enter`; Clear and space already existed).
 "What it is" section for the full explanation (no field-navigation mechanism exists
 anywhere in the app yet; building one was scoped to
 [#199](https://github.com/BobbyJoeCool/PalletIQ/issues/199) rather than guessed at here).
+
+**Renders at `z-[60]`** — see `Numpad.md`'s own doc comment (issue #84 fix, 2026-08-03):
+every full-screen dialog tops out at `z-50`, which otherwise sits on top of this panel and
+blocks it entirely.
 
 ## Props / Hook API
 

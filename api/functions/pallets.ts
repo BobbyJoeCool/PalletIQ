@@ -1,5 +1,5 @@
-import { app } from '@azure/functions';
-import type { HttpRequest, InvocationContext } from '@azure/functions';
+import { app } from '../lib/functionsRuntime.js';
+import type { HttpRequest, InvocationContext } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth, requireRole } from '../lib/permissions.js';
@@ -9,6 +9,7 @@ import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParse
 import { TERMINAL_CONTAINER_STATUSES } from '../lib/eligibility.js';
 import { parseDpci } from '../lib/dpci.js';
 import { storeLocationForCreate } from '../lib/logicGate.js';
+import { validateReasonCode } from '../lib/reasonCodes.js';
 
 /**
  * Retrieves all fields of a pallet, including item UPC/description, current location,
@@ -100,13 +101,13 @@ async function getPallet(req: HttpRequest, _ctx: InvocationContext): Promise<unk
  *
  * @param req - HTTP request with URL param `id` and optional body fields:
  *   `dpci`, `vcp`, `ssp`, `currentPallets`, `currentCartons`, `currentSSPs`, `expirationDate`
- *   (ISO date string, or `null` to clear), `confirmNearExpiration`, `reasonCode`
- *   (`reasonCode` is required whenever at least one editable field actually changes value;
- *   like hold reason codes, it is never stored as a column — only logged, per the
- *   ActivityLog's flexible details field)
+ *   (ISO date string, or `null` to clear), `confirmNearExpiration`, `reasonPrefix`,
+ *   `reasonNumber` (both required whenever at least one editable field actually changes
+ *   value — issue #84: validated against this user's own access, domain `PALLET_ADJUST`,
+ *   and stored as real `ActivityLog.reasonPrefix`/`reasonNumber` columns)
  * @returns `{ pid }` confirming the updated pallet ID
  * @throws 400 INVALID_INPUT for non-numeric id, negative quantities, an unparseable
- *   `expirationDate`, or a missing reason code when a field actually changed;
+ *   `expirationDate`, or a missing/invalid reason code when a field actually changed;
  *   400 EXPIRATION_TOO_SOON if the new expiration date is less than 1 month out;
  *   400 INVALID_VCP_SSP_RATIO if SSP doesn't evenly divide VCP;
  *   400 SSPS_EXCEED_CARTON if currentSSPs is at or above one full carton's worth (vcp/ssp);
@@ -136,7 +137,8 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
     // warning window (see validation below) — the frontend re-sends the same request with
     // this set to true after the worker confirms the warning popup.
     confirmNearExpiration?: boolean;
-    reasonCode?: string;
+    reasonPrefix?: string;
+    reasonNumber?: string;
   };
 
   const pallet = await prisma.pallet.findUnique({ where: { pid } });
@@ -240,7 +242,8 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   const expirationChanging = newExpirationTime !== undefined && newExpirationTime !== oldExpirationTime;
 
   // A reason code is required whenever the edit actually changes something — same rule as
-  // location holds (WLH.md); never stored as a column, only logged (see writeLog call below).
+  // location holds. Issue #84: now a real reasonPrefix/reasonNumber column pair, validated
+  // against this user's own access (domain PALLET_ADJUST), not just an unvalidated string.
   const hasAnyChange =
     dpciChanging ||
     (body.vcp            != null && body.vcp            !== pallet.vcp) ||
@@ -249,9 +252,11 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
     (body.currentCartons != null && body.currentCartons !== pallet.currentCartons) ||
     (body.currentSSPs    != null && body.currentSSPs    !== pallet.currentSSPs) ||
     expirationChanging;
-  const reasonCode = typeof body.reasonCode === 'string' ? body.reasonCode.trim() : '';
-  if (hasAnyChange && !reasonCode) {
+  if (hasAnyChange && (!body.reasonPrefix || !body.reasonNumber)) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  }
+  if (hasAnyChange) {
+    await validateReasonCode(auth.zNumber, auth.role, 'PALLET_ADJUST', body.reasonPrefix!, body.reasonNumber!);
   }
 
   // Build the update payload from only the fields that were provided.
@@ -316,7 +321,9 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
       locationAisle: pallet.locationAisle ?? undefined,
       locationBin:   pallet.locationBin ?? undefined,
       locationLevel: pallet.locationLevel ?? undefined,
-      details: { old: oldVals, new: newVals, reasonCode },
+      reasonPrefix: body.reasonPrefix,
+      reasonNumber: body.reasonNumber,
+      details: { old: oldVals, new: newVals },
     });
   }
 

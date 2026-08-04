@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { hasMinRole, type Role } from '@shared/index';
 import { DataRow } from '../components/shared/DataRow';
-import { HoldPanel } from '../components/shared/HoldPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { LockedHoldConfirmDialog } from '../components/shared/LockedHoldConfirmDialog';
 import { StorageCodeBadge } from '../components/shared/StorageCodeBadge';
 import { LiveId } from '../components/ui/LiveId';
 import { ModalOverlay } from '../components/ui/ModalOverlay';
@@ -12,6 +12,7 @@ import { type SDPDirectedResult } from '../context/SDPContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
+import { splitReasonCode } from '../lib/reasonCode';
 
 /** A same-DPCI XS location — populates the "Exists elsewhere" popup. Only the fields
  *  that popup actually shows/needs (location + Storage Code + carton count), not the
@@ -29,7 +30,7 @@ interface SDPVerifyPutModalProps {
   onLocationConfirm: (value: string, wasScanned: boolean) => void;
   onLocationActiveChange: (active: boolean) => void;
   onUnassign: () => void;
-  /** Hold Location's own placement (`HoldPanel`, embedded below) already clears the
+  /** Hold Location's own placement (`handleConfirmHold`, below) already clears the
    *  reservation server-side as a side effect of placing the hold (Logic Gate — #149,
    *  `placeHold`'s new `CLEAR_LOCATION` call) — this callback fires once that's done and
    *  only needs to reset local screen state, no API call of its own. */
@@ -54,10 +55,16 @@ interface SDPVerifyPutModalProps {
  *
  * Confirm/Unassign are unchanged existing SDP actions, passed down as callbacks
  * (`onLocationConfirm`/`onUnassign` — both already fully implemented in `SDPPage.tsx`,
- * this component only renders their UI). Hold Location embeds the shared `HoldPanel`
- * (same component PIP/MNP/WLH already use) and, per direct instruction, **replaces** the
- * old "Blocked Put" button entirely (hardcoded Hold Both + auto-continue to a new
- * location) — it stops once the hold is placed, no auto-continue.
+ * this component only renders their UI). Hold Location is always **Hold Both**, reason
+ * `70` (Blocked Location) — no Hold Type grid to choose from, since the type is implied by
+ * the situation, same shape as MNP's occupied-location gate (2026-08-03, direct
+ * instruction: "similar to the one used by MNP") — rendered via the shared
+ * `LockedHoldConfirmDialog` rather than the full `HoldPanel` PIP/MNP/WLH use for their own
+ * general-purpose hold actions. Per direct instruction, this **replaces** the old
+ * "Blocked Put" button entirely (hardcoded Hold Both + auto-continue to a new location) —
+ * it stops once the hold is placed, no auto-continue. Its own Back/Cancel button (unlike
+ * `HoldPanel`'s Close) never calls `onHoldDone` — closing without confirming returns to
+ * this modal untouched, since no hold was actually placed.
  *
  * **Exists Elsewhere (Hand Put + IM+) is a redirect, not a shortcut confirm.** Picking a
  * candidate releases the original reservation (only on the *first* pick — see
@@ -86,6 +93,8 @@ export function SDPVerifyPutModal({
   const isIM = hasMinRole((user?.role ?? 'WORKER') as Role, 'IM');
 
   const [holdOpen, setHoldOpen] = useState(false);
+  const [holdReasonCode, setHoldReasonCode] = useState('');
+  const [holdSubmitting, setHoldSubmitting] = useState(false);
   const [existsOpen, setExistsOpen] = useState(false);
   const [existsElsewhere, setExistsElsewhere] = useState<ExistsElsewhereEntry[]>([]);
   const [redirecting, setRedirecting] = useState(false);
@@ -163,8 +172,37 @@ export function SDPVerifyPutModal({
     }
   }
 
+  /**
+   * Hold Location's Confirm — always `HOLD_BOTH`, no type picker (see this file's own
+   * top-of-file doc comment). Calls `PATCH /api/locations/:id/hold` directly (matching what
+   * `HoldPanel` itself already does internally) — the Logic Gate's `CLEAR_LOCATION` call
+   * clears the reservation server-side as a side effect, so `onHoldDone` only needs to
+   * reset local screen state, same as before this dialog swap.
+   */
+  async function handleConfirmHold() {
+    if (!holdReasonCode || holdSubmitting) return;
+    setHoldSubmitting(true);
+    try {
+      const { prefix: reasonPrefix, number: reasonNumber } = splitReasonCode(holdReasonCode);
+      await apiFetch(`/api/locations/${directed.directedLocation}/hold`, token!, {
+        method: 'PATCH',
+        body: JSON.stringify({ holdType: 'HOLD_BOTH', reasonPrefix, reasonNumber }),
+      });
+      playAlert('info');
+      setMessage({ type: 'success', text: `Hold Both placed on ${fmtLocation(directed.directedLocation)}` });
+      setHoldOpen(false);
+      onHoldDone();
+    } catch (err) {
+      playAlert('error');
+      const code = err instanceof Error ? err.message : '';
+      setMessage({ type: 'error', text: code === 'FORBIDDEN' ? 'You do not have permission to place Hold Both holds' : 'Hold placement failed — please try again' });
+    } finally {
+      setHoldSubmitting(false);
+    }
+  }
+
   return (
-    <ModalOverlay width="w-[820px]" testId="sdp-verify-put-modal">
+    <ModalOverlay width="w-[820px]" position="left" testId="sdp-verify-put-modal">
       <div className="flex flex-col gap-3">
         <DataRow label="Pallet ID"><LiveId type="pallet" id={String(directed.pallet.id)} /></DataRow>
         <DataRow label="Item">{directed.pallet.descShort}</DataRow>
@@ -216,7 +254,7 @@ export function SDPVerifyPutModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setHoldOpen(true)}
+                  onClick={() => { setHoldReasonCode(''); setHoldOpen(true); }}
                   disabled={loading}
                   className="h-[72px] px-6 rounded-[12px] font-ui text-[20px] font-semibold transition-colors disabled:opacity-40 bg-[#660000] hover:bg-[#770000] text-white"
                 >
@@ -268,13 +306,17 @@ export function SDPVerifyPutModal({
       </div>
 
       {holdOpen && (
-        <ModalOverlay backdropClassName="p-8" padding="p-6" cardClassName="max-h-full overflow-y-auto" shadow={false}>
-          <HoldPanel
-            locationId={directed.directedLocation}
-            showClose
-            onDone={() => { setHoldOpen(false); onHoldDone(); }}
-          />
-        </ModalOverlay>
+        <LockedHoldConfirmDialog
+          title="Place Hold Both — Blocked Location"
+          value={holdReasonCode}
+          onChange={setHoldReasonCode}
+          defaultNumber="70"
+          onBack={() => setHoldOpen(false)}
+          onConfirm={() => void handleConfirmHold()}
+          confirmDisabled={!holdReasonCode || holdSubmitting}
+          backLabel="Close"
+          position="top-left"
+        />
       )}
 
       {existsOpen && (

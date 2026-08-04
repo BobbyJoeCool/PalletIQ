@@ -1,5 +1,5 @@
-import { app } from '@azure/functions';
-import type { Timer, InvocationContext } from '@azure/functions';
+import { app } from '../lib/functionsRuntime.js';
+import type { Timer, InvocationContext } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { writeLog } from '../lib/activityLog.js';
 import { clearLocation } from '../lib/logicGate.js';

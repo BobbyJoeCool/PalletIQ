@@ -1,4 +1,4 @@
-import type { HttpResponseInit } from '@azure/functions';
+import type { HttpResponseInit } from './functionsRuntime.js';
 
 /**
  * Wraps a value in an Azure Functions HTTP response with JSON Content-Type.
@@ -30,8 +30,8 @@ export function json(body: unknown, status = 200): HttpResponseInit {
  * @returns An Azure Functions HttpHandler that catches and formats thrown errors
  */
 export function withHandler(
-  fn: (req: import('@azure/functions').HttpRequest, ctx: import('@azure/functions').InvocationContext) => Promise<unknown>,
-): import('@azure/functions').HttpHandler {
+  fn: (req: import('./functionsRuntime.js').HttpRequest, ctx: import('./functionsRuntime.js').InvocationContext) => Promise<unknown>,
+): import('./functionsRuntime.js').HttpHandler {
   return async (req, ctx) => {
     try {
       const result = await fn(req, ctx);

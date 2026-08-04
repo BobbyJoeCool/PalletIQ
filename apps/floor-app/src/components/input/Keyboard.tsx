@@ -22,12 +22,16 @@ const QWERTY_ROWS = [
  *
  * Used for free-text entry fields (Size and Storage Code overrides on SDP) where
  * alphanumeric input is needed rather than digits only.
+ *
+ * `z-[60]` — see `Numpad.tsx`'s own doc comment (issue #84 fix, 2026-08-03): every
+ * full-screen dialog tops out at `z-50`, which otherwise sits on top of this panel and
+ * blocks it entirely.
  */
 export function Keyboard() {
   const { handleKey } = useNumpad();
 
   return (
-    <div data-testid="keyboard-panel" className="absolute bottom-0 left-0 right-0 h-[354px] flex flex-col bg-[#0A0A0A] border border-b-0 border-[#2A2A2A] rounded-t-[16px] shadow-[0px_-14px_44px_0px_rgba(0,0,0,0.55)] select-none">
+    <div data-testid="keyboard-panel" className="absolute bottom-0 left-0 right-0 z-[60] h-[354px] flex flex-col bg-[#0A0A0A] border border-b-0 border-[#2A2A2A] rounded-t-[16px] shadow-[0px_-14px_44px_0px_rgba(0,0,0,0.55)] select-none">
       {/* Keys */}
       <div className="flex-1 flex flex-col gap-1.5 px-4 pb-2">
         {/* Number row */}

@@ -9,6 +9,7 @@ import { MNPProvider } from './context/MNPContext';
 import { PARProvider } from './context/PARContext';
 import { PIIProvider } from './context/PIIContext';
 import { PIPProvider } from './context/PIPContext';
+import { ReasonCodeSessionProvider } from './context/ReasonCodeSessionContext';
 import { SARProvider } from './context/SARContext';
 import { SDPProvider } from './context/SDPContext';
 import { StagingProvider } from './context/StagingContext';
@@ -71,9 +72,9 @@ export default function App() {
         <Route element={
           <StagingProvider><PIIProvider><ISIProvider><LIIProvider>
             <PIPProvider><SDPProvider><MNPProvider><IIDProvider><PARProvider>
-              <WLHProvider><SARProvider><ELAProvider><ELZProvider>
+              <WLHProvider><SARProvider><ELAProvider><ELZProvider><ReasonCodeSessionProvider>
                 <AppShell />
-              </ELZProvider></ELAProvider></SARProvider></WLHProvider>
+              </ReasonCodeSessionProvider></ELZProvider></ELAProvider></SARProvider></WLHProvider>
             </PARProvider></IIDProvider></MNPProvider></SDPProvider></PIPProvider>
           </LIIProvider></ISIProvider></PIIProvider></StagingProvider>
         }>

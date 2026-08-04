@@ -17,7 +17,7 @@ import { useStaging } from '../context/StagingContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
-import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
+import { splitReasonCode } from '../lib/reasonCode';
 import { INVALID_WASH } from '../lib/invalidWash';
 import { SIZE_NAMES } from '../lib/sizes';
 import { effectiveStack } from '../lib/stagingHelpers';
@@ -354,8 +354,9 @@ function PalletCodePicker({
 // ── Location suggestion reject/hold dialog ────────────────────────────────────
 
 /** Default reason code offered when rejecting a suggested location (issue #77) — editable
- *  via the dropdown before confirming. */
-const DEFAULT_REJECT_REASON = 'B05'; // "Blocked" — see holdReasonCodes.ts
+ *  via the dropdown before confirming. Warehouse / Blocked Location under issue #84's
+ *  reason-code redesign (was 'B05' under the old hardcoded list). */
+const DEFAULT_REJECT_REASON = 'W70';
 
 /**
  * Confirmation popup for rejecting the front stack's currently suggested location (issue
@@ -377,9 +378,10 @@ function RejectHoldDialog({ locationId, onClose, onHeld }: { locationId: string;
     if (!reasonCode || submitting) return;
     setSubmitting(true);
     try {
+      const { prefix: reasonPrefix, number: reasonNumber } = splitReasonCode(reasonCode);
       await apiFetch(`/api/locations/${locationId}/hold`, token!, {
         method: 'PATCH',
-        body: JSON.stringify({ holdType: 'HOLD_BOTH', reasonCode }),
+        body: JSON.stringify({ holdType: 'HOLD_BOTH', reasonPrefix, reasonNumber }),
       });
       playAlert('info');
       setMessage({ type: 'success', text: `${fmtLocation(locationId)} held — suggesting a new location` });
@@ -400,7 +402,7 @@ function RejectHoldDialog({ locationId, onClose, onHeld }: { locationId: string;
           <span className="font-data text-white">{fmtLocation(locationId)}</span> will be put on hold and a new
           location will be suggested. This does not stage anything.
         </p>
-        <ReasonCodeField codes={HOLD_REASON_CODES} value={reasonCode} onChange={setReasonCode} label="Reason" />
+        <ReasonCodeField domain="HOLD" value={reasonCode} onChange={setReasonCode} label="Reason" />
         <div className="flex gap-3 mt-1">
           <button type="button" onClick={onClose} className="flex-1 h-[52px] rounded-[10px] border border-[#3A3A3A] font-ui text-[15px] text-white">
             Cancel

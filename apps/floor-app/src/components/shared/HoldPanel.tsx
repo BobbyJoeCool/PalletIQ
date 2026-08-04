@@ -5,7 +5,7 @@ import { useMessageBar } from '../../context/MessageBarContext';
 import { apiFetch } from '../../lib/api';
 import { playAlert } from '../../lib/audio';
 import { fmtLocation } from '../../lib/fmt';
-import { HOLD_REASON_CODES } from '../../lib/holdReasonCodes';
+import { splitReasonCode } from '../../lib/reasonCode';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ReasonCodeField } from './ReasonCodeField';
 
@@ -60,6 +60,17 @@ interface HoldPanelProps {
    *  Location flow feeds this into its session Log panel (v1.6.10); other callers (PIP/SDP/
    *  MNP's inline quick-hold panels) leave it unset and get no log entry. */
   onAction?: (summary: string) => void;
+  /** Pre-fills Hold Type and Reason Code with a screen-appropriate default (issue #84
+   *  follow-up, direct instruction) — matches the pattern each caller's own hold-placement
+   *  entry point used to hardcode before #84 (e.g. MNP's old `reasonCode: 'W04'` direct
+   *  send). Both still fully editable before Confirm; omit either/both for a caller with no
+   *  single obvious default — WLH's own general-purpose Hold button, and MNP's own general
+   *  "Hold" quick-action on the scanned pallet's current location, both intentionally pass
+   *  neither. Reason Code's prefix always resolves to the worker's own home/session-sticky
+   *  department regardless of this prop — only the number is caller-supplied (see
+   *  `ReasonCodeField`'s own `defaultNumber` doc). */
+  defaultHoldType?: HoldCategory;
+  defaultReasonNumber?: string;
 }
 
 /**
@@ -69,7 +80,7 @@ interface HoldPanelProps {
  * Fetches the location's current hold state itself given a resolved 8-digit locationId —
  * callers don't need to know or pass hold state.
  */
-export function HoldPanel({ locationId, onDone, showClose = false, onAction }: HoldPanelProps) {
+export function HoldPanel({ locationId, onDone, showClose = false, onAction, defaultHoldType, defaultReasonNumber }: HoldPanelProps) {
   const { token, user } = useAuth();
   const { setMessage } = useMessageBar();
   // AuthUser.role is typed as a loose string (see src/lib/api.ts) — always one of the
@@ -86,6 +97,11 @@ export function HoldPanel({ locationId, onDone, showClose = false, onAction }: H
   const [reasonCode, setReasonCode] = useState('');
   const [confirmReplace, setConfirmReplace] = useState<HoldCategory | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // The resolved department/reason text, lifted out of ReasonCodeField's own layout
+  // (descriptionPosition="none" below) so it can render once, prominently, as its own
+  // two-line block to the right of Current Hold (2026-08-03 follow-up, direct instruction)
+  // — split into two parts rather than one joined string so each renders on its own line.
+  const [resolvedReason, setResolvedReason] = useState<{ department: string; reason: string } | null>(null);
 
   const hasLocation = locationId != null;
 
@@ -118,11 +134,15 @@ export function HoldPanel({ locationId, onDone, showClose = false, onAction }: H
   // to/from null) — this panel can now stay mounted continuously across a whole WLH
   // session (v1.6.10) instead of only mounting once a location was already resolved, so a
   // stale Hold Type/Reason Code selection from a previous location must not silently
-  // carry over into a newly scanned one.
+  // carry over into a newly scanned one. Resets to `defaultHoldType` (issue #84 follow-up)
+  // rather than always `null` — still fully editable, just pre-selected for callers that
+  // supplied one; Reason Code's own default (number only) is handled by ReasonCodeField
+  // itself via `defaultReasonNumber`.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets selection on locationId change, not a derived-render concern
-    setSelectedType(null);
+    setSelectedType(defaultHoldType ?? null);
     setReasonCode('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationId]);
 
   /** Submits the reason code and calls PATCH /api/locations/:id/hold to place/replace the hold. */
@@ -130,9 +150,10 @@ export function HoldPanel({ locationId, onDone, showClose = false, onAction }: H
     if (!locationId || !reasonCode || submitting) return;
     setSubmitting(true);
     try {
+      const { prefix: reasonPrefix, number: reasonNumber } = splitReasonCode(reasonCode);
       await apiFetch(`/api/locations/${locationId}/hold`, token!, {
         method: 'PATCH',
-        body: JSON.stringify({ holdType: type, reasonCode }),
+        body: JSON.stringify({ holdType: type, reasonPrefix, reasonNumber }),
       });
       playAlert('info');
       setMessage({ type: 'success', text: `${HOLD_LABELS[type].name} placed on ${fmtLocation(locationId)}` });
@@ -204,12 +225,27 @@ export function HoldPanel({ locationId, onDone, showClose = false, onAction }: H
   const currentHoldColor = info?.holdCategory ? HOLD_TEXT_COLOR[info.holdCategory] : hasLocation && !loading ? 'text-white' : 'text-[#666]';
 
   return (
-    <div className="flex flex-col gap-4 max-w-[520px]">
-      <div className="flex items-center gap-3">
-        <span className="font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Current Hold</span>
-        <span className={`font-data text-[28px] font-bold ${currentHoldColor} ${loading ? 'animate-pulse' : ''}`}>
-          {currentHoldLabel}
-        </span>
+    <div className="flex flex-col gap-4 max-w-[760px]">
+      {/* Current Hold (left) + Hold Reason (right, 2026-08-03 follow-up, direct
+          instruction) share one row. The Hold Reason block reserves a fixed two-line
+          height up front (min-h, not conditional on resolvedReason existing) so the row's
+          own height — and therefore everything below it — never shifts once a code is
+          picked and the text actually appears. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">Current Hold</span>
+          <span className={`font-data text-[28px] font-bold ${currentHoldColor} ${loading ? 'animate-pulse' : ''}`}>
+            {currentHoldLabel}
+          </span>
+        </div>
+        <div className="flex flex-col justify-center min-h-[48px] text-right">
+          {resolvedReason && (
+            <>
+              <span className="font-ui text-[16px] font-semibold text-white leading-tight">{resolvedReason.department}</span>
+              <span className="font-ui text-[16px] font-semibold text-white leading-tight">{resolvedReason.reason}</span>
+            </>
+          )}
+        </div>
       </div>
 
       {info?.holdCategory && canRemove && (
@@ -223,42 +259,64 @@ export function HoldPanel({ locationId, onDone, showClose = false, onAction }: H
         </button>
       )}
 
-      <div className="flex flex-col gap-2">
-        <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Hold Type</span>
-        <div className="grid grid-cols-2 gap-2">
-          {placeableTypes.map((t) => (
+      {/* Hold Type / Reason Code side by side (2026-08-03, direct instruction — "more
+          horizontal," then "drop the Reason Code to be level with the Hold Type boxes")
+          — both columns start fresh here, below Current Hold/Remove Hold, so they're
+          top-aligned with each other regardless of whether Remove Hold rendered above. */}
+      <div className="flex gap-6">
+        <div className="flex flex-col gap-2 flex-1 min-w-0">
+          <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Hold Type</span>
+          <div className="grid grid-cols-2 gap-2">
+            {placeableTypes.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setSelectedType(t)}
+                disabled={!info || info.holdCategory === t}
+                className={`flex flex-col items-start gap-0.5 px-4 py-3 rounded-[10px] border text-left disabled:opacity-40 transition-colors ${
+                  selectedType === t ? 'border-[#CC0000] bg-[#CC0000]/10' : 'border-[#3A3A3A] hover:border-[#555]'
+                }`}
+              >
+                <span className="font-ui text-[16px] font-semibold text-white">{HOLD_LABELS[t].name}</span>
+                <span className="font-ui text-[13px] text-[#9A9A9A]">{HOLD_LABELS[t].blocks}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2 flex-1 min-w-0">
+          <ReasonCodeField
+            domain="HOLD"
+            value={reasonCode}
+            onChange={setReasonCode}
+            defaultNumber={defaultReasonNumber}
+            label="Reason Code"
+            disabled={!info}
+            descriptionPosition="none"
+            onResolvedDescriptionChange={setResolvedReason}
+          />
+
+          {/* Confirm Hold + Cancel, directly under the Reason Code entry box (2026-08-03
+              follow-up, direct instruction — previously a full-width row spanning both
+              columns) — same height/padding so the pair still reads as a matched set. */}
+          <div className="flex gap-3 mt-2">
             <button
-              key={t}
               type="button"
-              onClick={() => setSelectedType(t)}
-              disabled={!info || info.holdCategory === t}
-              className={`flex flex-col items-start gap-0.5 px-4 py-3 rounded-[10px] border text-left disabled:opacity-40 transition-colors ${
-                selectedType === t ? 'border-[#CC0000] bg-[#CC0000]/10' : 'border-[#3A3A3A] hover:border-[#555]'
-              }`}
+              onClick={handleConfirmClick}
+              disabled={submitting || !info || !selectedType || !reasonCode}
+              className="h-[52px] px-5 rounded-[10px] font-ui text-[15px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40"
             >
-              <span className="font-ui text-[16px] font-semibold text-white">{HOLD_LABELS[t].name}</span>
-              <span className="font-ui text-[13px] text-[#9A9A9A]">{HOLD_LABELS[t].blocks}</span>
+              Confirm Hold
             </button>
-          ))}
+
+            {showClose && (
+              <button type="button" onClick={onDone} className="h-[52px] px-5 rounded-[10px] border border-[#3A3A3A] font-ui text-[15px] text-white">
+                Cancel
+              </button>
+            )}
+          </div>
         </div>
       </div>
-
-      <ReasonCodeField codes={HOLD_REASON_CODES} value={reasonCode} onChange={setReasonCode} label="Reason Code" disabled={!info} />
-
-      <button
-        type="button"
-        onClick={handleConfirmClick}
-        disabled={submitting || !info || !selectedType || !reasonCode}
-        className="h-[52px] px-5 rounded-[10px] font-ui text-[15px] font-semibold bg-[#CC0000] hover:bg-[#DD0000] text-white disabled:opacity-40 self-start"
-      >
-        Confirm Hold
-      </button>
-
-      {showClose && (
-        <button type="button" onClick={onDone} className="h-[48px] px-5 rounded-[10px] border border-[#3A3A3A] font-ui text-[15px] text-white self-start">
-          Close
-        </button>
-      )}
 
       {confirmReplace && locationId && info && (
         <ConfirmDialog

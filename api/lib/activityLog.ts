@@ -20,6 +20,10 @@ export interface LogEntry {
   /** IRP prod-function code (CA/CF/FP/RP/HP/GPM/CON) — only set on the subset of
    *  writeLog() calls that represent one of IRP's countable actions. */
   functionCode?: string;
+  /** Reason code (issue #84), split into its two real columns — set on the subset of
+   *  writeLog() calls whose action carries a reason code (hold placement, pallet edits). */
+  reasonPrefix?: string;
+  reasonNumber?: string;
   /** Explicit entry timestamp — only ever set by demo-reseed.ts, which backdates entries
    *  to simulate a full shift's worth of activity. Every live operational call site omits
    *  this and gets the schema's `@default(now())`. */
@@ -53,6 +57,8 @@ export async function writeLog(entry: LogEntry, client: PrismaOrTxClient = prism
       item: entry.item ?? null,
       details: entry.details ? JSON.stringify(entry.details) : null,
       functionCode: entry.functionCode ?? null,
+      reasonPrefix: entry.reasonPrefix ?? null,
+      reasonNumber: entry.reasonNumber ?? null,
       ...(entry.timestamp && { timestamp: entry.timestamp }),
     },
   });

@@ -232,31 +232,67 @@ const DEPARTMENTS = [
   { id: 'SEC', name: 'Security' },
 ]
 
-const HOLD_PREFIXES = [
-  { letter: 'I', dept: 'Inbound' },
-  { letter: 'W', dept: 'Warehouse' },
-  { letter: 'O', dept: 'Outbound' },
-  { letter: 'P', dept: 'Packing' },
-  { letter: 'Q', dept: 'ICQA' },
-  { letter: 'S', dept: 'Security' },
+// Reason codes (issue #84) — 10 department/role prefixes, 18 numbers shared across all of
+// them, plus the two join tables that restrict specific numbers to specific prefixes
+// (ReasonCodePrefixAllowance) and specific domains (ReasonCodeDomain). See
+// DevNotes/DesignPrompts/ReasonCode-Design-Doc.md for the full design this seed data
+// implements verbatim.
+const REASON_CODE_PREFIXES: { letter: string; desc: string; departmentId?: string; minRole?: string }[] = [
+  { letter: 'N', desc: 'Inbound', departmentId: 'INB' },
+  { letter: 'W', desc: 'Warehouse', departmentId: 'WHS' },
+  { letter: 'O', desc: 'Outbound', departmentId: 'OUT' },
+  { letter: 'B', desc: 'Breakpack', departmentId: 'BKP' },
+  { letter: 'Q', desc: 'ICQA', departmentId: 'IQA' },
+  { letter: 'S', desc: 'Security', departmentId: 'SEC' },
+  { letter: 'I', desc: 'Inventory Manager', minRole: 'IM' },
+  { letter: 'L', desc: 'Lead', minRole: 'LEAD' },
+  { letter: 'M', desc: 'Manager', minRole: 'MANAGER' },
+  { letter: 'A', desc: 'Admin', minRole: 'ADMIN' },
 ]
 
-const HOLD_REASONS: { num: string; desc: string }[] = [
-  { num: '01', desc: 'Quantity Issue' },
-  { num: '02', desc: 'DPCI Issue' },
-  { num: '03', desc: 'VCP/SSP Issue' },
-  { num: '04', desc: 'Location Issue' },
-  { num: '05', desc: 'Damage Issue' },
-  { num: '06', desc: 'Label In Location' },
-  { num: '07', desc: 'Tipped Pallet' },
-  { num: '08', desc: 'Fallen Carton' },
-  { num: '09', desc: 'Object in Empty Loc' },
-  { num: '10', desc: 'Expiration Issue' },
+// Adjust range (01-09) — valid for both HOLD and PALLET_ADJUST (a team member flags
+// something via a Hold; ICQA performs the same-reasoned Pallet Adjust correction).
+const ADJUST_REASON_CODES: { number: string; desc: string }[] = [
+  { number: '01', desc: 'Empty Location' },
+  { number: '02', desc: 'Incorrect Count' },
+  { number: '03', desc: 'VCP/SSP Issue' },
+  { number: '04', desc: 'Expiration Issue' },
+  { number: '05', desc: 'Other Inventory Issue' },
+  { number: '06', desc: 'Damage' },
+  { number: '07', desc: 'Quality Issue' },
+  { number: '08', desc: 'Incorrect DPCI' },
+  { number: '09', desc: 'Multiple DPCIs' },
 ]
 
-const HOLD_TYPES = HOLD_PREFIXES.flatMap(({ letter }) =>
-  HOLD_REASONS.map(({ num, desc }) => ({ code: `${letter}${num}`, desc }))
-)
+// Hold-only range (70+), plus the two role-restricted specials (95/99).
+const HOLD_ONLY_REASON_CODES: { number: string; desc: string }[] = [
+  { number: '70', desc: 'Blocked Location' },
+  { number: '71', desc: 'Tipped Pallet' },
+  { number: '72', desc: 'Beam Out' },
+  { number: '73', desc: 'Safety Concern' },
+  { number: '74', desc: 'Consolidation' },
+  { number: '75', desc: 'Label in Location' },
+  { number: '76', desc: 'Stray Carton' },
+  { number: '95', desc: 'Manager Reason' },
+  { number: '99', desc: 'System Admin' },
+]
+
+const REASON_CODES = [...ADJUST_REASON_CODES, ...HOLD_ONLY_REASON_CODES]
+
+// Only the two restricted reasons get rows; every other number is available under every
+// prefix (zero rows here = unrestricted).
+const REASON_CODE_PREFIX_ALLOWANCES = [
+  { reasonCodeNumber: '95', prefixLetter: 'M' },
+  { reasonCodeNumber: '99', prefixLetter: 'A' },
+]
+
+const REASON_CODE_DOMAINS = [
+  ...ADJUST_REASON_CODES.flatMap(({ number }) => [
+    { reasonCodeNumber: number, domain: 'HOLD' },
+    { reasonCodeNumber: number, domain: 'PALLET_ADJUST' },
+  ]),
+  ...HOLD_ONLY_REASON_CODES.map(({ number }) => ({ reasonCodeNumber: number, domain: 'HOLD' })),
+]
 
 const STORES = [
   { id: 2498, name: 'Cedar Falls' },
@@ -500,7 +536,7 @@ for (const item of ITEMS) {
 
 type LocationRow = {
   aisle: number; bin: number; level: number; zone: number
-  status: string; holdTypeCode: null; storageCode: string; size: string
+  status: string; storageCode: string; size: string
   contraction: boolean
 }
 
@@ -586,7 +622,7 @@ function buildLocationsAndPallets() {
         const stored = Math.random() < 0.9
 
         const contraction = contractionOf(bin, level)
-        locations.push({ aisle, bin, level, zone, status: stored ? 'STORED' : 'EMPTY', holdTypeCode: null, storageCode, size, contraction })
+        locations.push({ aisle, bin, level, zone, status: stored ? 'STORED' : 'EMPTY', storageCode, size, contraction })
 
         if (stored) {
           const itemPool = itemsByStorageCode[storageCode]
@@ -949,10 +985,14 @@ async function main() {
   await prisma.reservation.deleteMany()
   await prisma.pallet.deleteMany()
   await prisma.location.deleteMany()
+  await prisma.userDepartment.deleteMany()
   await prisma.user.deleteMany()
   await prisma.item.deleteMany()
   await prisma.store.deleteMany()
-  await prisma.holdType.deleteMany()
+  await prisma.reasonCodePrefixAllowance.deleteMany()
+  await prisma.reasonCodeDomain.deleteMany()
+  await prisma.reasonCode.deleteMany()
+  await prisma.reasonCodePrefix.deleteMany()
   await prisma.department.deleteMany()
   await prisma.packingZone.deleteMany()
   await prisma.storageCode.deleteMany()
@@ -967,7 +1007,10 @@ async function main() {
   await prisma.storageCode.createMany({ data: STORAGE_CODES })
   await prisma.packingZone.createMany({ data: PACKING_ZONES })
   await prisma.department.createMany({ data: DEPARTMENTS })
-  await prisma.holdType.createMany({ data: HOLD_TYPES })
+  await prisma.reasonCodePrefix.createMany({ data: REASON_CODE_PREFIXES })
+  await prisma.reasonCode.createMany({ data: REASON_CODES })
+  await prisma.reasonCodePrefixAllowance.createMany({ data: REASON_CODE_PREFIX_ALLOWANCES })
+  await prisma.reasonCodeDomain.createMany({ data: REASON_CODE_DOMAINS })
   await prisma.store.createMany({ data: STORES })
   await prisma.prodGoal.createMany({ data: PROD_GOALS })
   await prisma.workstation.createMany({ data: WORKSTATIONS.map(({ id, name }) => ({ id, name })) })

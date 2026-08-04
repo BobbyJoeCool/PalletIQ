@@ -35,14 +35,77 @@ model Department {
   id   String @id @db.VarChar(3)
   name String @db.VarChar(60)
 
-  users User[]
+  users              User[]
+  userDepartments    UserDepartment[]
+  reasonCodePrefixes ReasonCodePrefix[]
 }
 
-model HoldType {
-  code String @id @db.VarChar(3)
-  desc String @db.VarChar(20)
+// ─── ReasonCode (issue #84) ──────────────────────────────────────────────────
 
-  locations Location[]
+// One letter per department or role — exactly one of departmentId/minRole is set, never
+// both, never neither. Role letters inherit downward through permissions.ts's ROLE_RANK
+// (a Manager unlocks M, L, and I, but not A). See ReasonCode-Design-Doc.md's Access model.
+model ReasonCodePrefix {
+  letter       String  @id @db.VarChar(1)
+  desc         String  @db.VarChar(30)
+  departmentId String? @db.VarChar(3)
+  minRole      String? @db.VarChar(10)
+
+  departmentRef Department?                 @relation(fields: [departmentId], references: [id])
+  allowances    ReasonCodePrefixAllowance[]
+  activityLogs  ActivityLog[]
+}
+
+// The 2-digit reason number, independent of prefix — the same 18 reasons apply identically
+// across every prefix, so this is stored once rather than crossed with all 10 prefixes.
+model ReasonCode {
+  number String @id @db.VarChar(2)
+  desc   String @db.VarChar(60)
+
+  allowances   ReasonCodePrefixAllowance[]
+  domains      ReasonCodeDomain[]
+  activityLogs ActivityLog[]
+}
+
+// Restricts a reason code to specific prefixes. Zero rows for a given reasonCodeNumber =
+// available under every prefix (the common case); one or more rows = restricted to exactly
+// those prefixes. Covers 95 (Manager Reason -> M only) / 99 (System Admin -> A only) today,
+// generalizes to future department-specific reasons without special-casing.
+model ReasonCodePrefixAllowance {
+  reasonCodeNumber String @db.VarChar(2)
+  prefixLetter     String @db.VarChar(1)
+
+  reasonCode ReasonCode       @relation(fields: [reasonCodeNumber], references: [number])
+  prefix     ReasonCodePrefix @relation(fields: [prefixLetter], references: [letter])
+
+  @@id([reasonCodeNumber, prefixLetter])
+}
+
+// Which feature(s) a reason code is valid for. A code can serve more than one domain (e.g.
+// "Incorrect Count" applies to both a Hold and a Pallet Adjust) — reason codes are globally
+// unique numbers, never re-used with different meanings per domain.
+model ReasonCodeDomain {
+  reasonCodeNumber String @db.VarChar(2)
+  domain           String @db.VarChar(20) // HOLD, PALLET_ADJUST
+
+  reasonCode ReasonCode @relation(fields: [reasonCodeNumber], references: [number])
+
+  @@id([reasonCodeNumber, domain])
+}
+
+// Additive cross-training support — User.departmentId stays the required single "home"
+// department; this holds any EXTRA departments a user is cross-trained in. No in-app
+// assign/remove UI — seeded/hardcoded directly by whoever manages the data.
+model UserDepartment {
+  id           Int    @id @default(autoincrement())
+  userZ        String @db.VarChar(7)
+  departmentId String @db.VarChar(3)
+
+  user       User       @relation(fields: [userZ], references: [zNumber])
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@unique([userZ, departmentId])
+  @@index([userZ])
 }
 
 model PackingZone {
@@ -118,25 +181,19 @@ model Location {
   bin          Int
   level        Int
   zone         Int
-  status       String  @db.VarChar(15)
-  // holdTypeCode is a reason-code FK (1-letter dept + 2-digit reason, e.g. "B05" — see
-  // HoldType below), not the hold category. Left unpopulated per WLH.md, which states
-  // twice that the reason code is written only to the ActivityLog, not stored as a
-  // column — kept in the schema as inherited, currently-unused infrastructure rather
-  // than removed outright (Phase 10, see phase-10 log).
-  holdTypeCode String? @db.VarChar(3)
-  storageCode  String  @db.VarChar(2)
-  size         String  @db.VarChar(2)
+  status       String    @db.VarChar(15)
+  storageCode  String    @db.VarChar(2)
+  size         String    @db.VarChar(2)
   // Contraction is set at zone-side+level granularity by Lead+ via Aisle Setup (out of
   // scope for this demo — see ELZ.md); stored per-location and expected to be uniform
   // across every location sharing a zone-side/level group. Read-only in this app.
-  contraction  Boolean @default(false)
+  contraction  Boolean   @default(false)
   // The hold *category* (HOLD_IN/HOLD_OUT/HOLD_BOTH/HOLD_PERM), independent of `status`
   // per outline.md's original Location description ("HoldType, nullable, independent of
   // Status"). Added Phase 10 — `status` briefly (Phase 6's blockPut) doubled as the hold
   // indicator, which destroys the location's real operational state (EMPTY vs STORED)
   // the moment a hold is placed; fixed to use this field instead. See phase-10 log.
-  holdCategory String? @db.VarChar(10)
+  holdCategory String?   @db.VarChar(10)
   // Logic Gate-managed (issue #149/#150) — mirrors the expiry/revert-target data the
   // separate `Reservation` table (createdAt + wasStaged) already tracks for SDP's own
   // 5-minute reservation timeout, enforced today by reservationTimer.ts's cron sweep,
@@ -148,7 +205,6 @@ model Location {
   statusExpiry DateTime?
   revertStatus String?   @db.VarChar(15)
 
-  holdType   HoldType?   @relation(fields: [holdTypeCode], references: [code])
   storageRef StorageCode @relation(fields: [storageCode], references: [id])
   sizeRef    Size        @relation(fields: [size], references: [id])
 
@@ -178,6 +234,9 @@ model User {
   // IRP: who was assigned to which prod function, when, and by whom.
   functionAssignmentsAsWorker   FunctionAssignment[] @relation("AssignmentWorker")
   functionAssignmentsAsAssigner FunctionAssignment[] @relation("AssignmentAssignedBy")
+
+  // Cross-training (issue #84) — extra departments beyond the required home one above.
+  userDepartments UserDepartment[]
 }
 
 model Pallet {
@@ -322,13 +381,23 @@ model ActivityLog {
   // pulls.ts/puts.ts/staging.ts). Null for every other actionType (RESERVE,
   // HOLD_PLACE, STAGE_SUM, RESTAGE, etc.) — those aren't IRP-countable events.
   functionCode  String?  @db.VarChar(3)
+  // Reason code (issue #84), split into its two real parts rather than one combined
+  // string — "every entry for reason 02, regardless of department" or "everything logged
+  // under the W prefix" are then plain indexed queries. Both null for any action that
+  // doesn't carry a reason code.
+  reasonPrefix  String?  @db.VarChar(1)
+  reasonNumber  String?  @db.VarChar(2)
 
-  user     User      @relation(fields: [userId], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
-  pallet   Pallet?   @relation(fields: [palletId], references: [pid], onDelete: NoAction, onUpdate: NoAction)
-  location Location? @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
-  itemRef  Item?     @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
+  user            User              @relation(fields: [userId], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  pallet          Pallet?           @relation(fields: [palletId], references: [pid], onDelete: NoAction, onUpdate: NoAction)
+  location        Location?         @relation(fields: [locationAisle, locationBin, locationLevel], references: [aisle, bin, level], onDelete: NoAction, onUpdate: NoAction)
+  itemRef         Item?             @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
+  reasonPrefixRef ReasonCodePrefix? @relation(fields: [reasonPrefix], references: [letter], onDelete: NoAction, onUpdate: NoAction)
+  reasonNumberRef ReasonCode?       @relation(fields: [reasonNumber], references: [number], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([userId, functionCode, timestamp])
+  @@index([reasonPrefix])
+  @@index([reasonNumber])
 }
 
 // IRP hard dependency: who was assigned to which prod function, when, and by whom.

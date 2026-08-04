@@ -1079,8 +1079,14 @@ export function PIPPage() {
       />
 
       {holdOpen && holdLocationId && (
-        <ModalOverlay backdropClassName="p-8" padding="p-6" cardClassName="max-h-full overflow-y-auto" shadow={false}>
-          <HoldPanel locationId={holdLocationId} onDone={() => { setHoldOpen(false); setHoldLocationId(null); }} showClose />
+        <ModalOverlay backdropClassName="p-8" padding="p-6" cardClassName="max-h-full overflow-y-auto" shadow={false} position="top-left">
+          <HoldPanel
+            locationId={holdLocationId}
+            onDone={() => { setHoldOpen(false); setHoldLocationId(null); }}
+            showClose
+            defaultHoldType="HOLD_BOTH"
+            defaultReasonNumber="02"
+          />
         </ModalOverlay>
       )}
 

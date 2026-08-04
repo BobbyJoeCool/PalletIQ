@@ -9,6 +9,10 @@ export interface ActivityEntry {
   locationAisle: number | null;
   location: string | null;
   dpci: string | null;
+  /** Reason code (issue #84), split into its two real parts — set only on actions that
+   *  carry one (hold placement, pallet edits). */
+  reasonPrefix: string | null;
+  reasonNumber: string | null;
   details: Record<string, unknown> | null;
 }
 
@@ -337,7 +341,8 @@ export function detailFor(entry: ActivityEntry): DetailLine[] {
     case 'EDIT_PAL': {
       const oldVals = (d.old ?? {}) as Record<string, unknown>;
       const newVals = (d.new ?? {}) as Record<string, unknown>;
-      const reasonCode = (d.reasonCode as string | undefined) ?? '';
+      // Issue #84: reason code is now two real columns, not `details.reasonCode`.
+      const reasonCode = entry.reasonPrefix && entry.reasonNumber ? `${entry.reasonPrefix}${entry.reasonNumber}` : '';
       const changed = EDIT_FIELD_ORDER.filter((f) => f in oldVals);
 
       const headerLine: DetailLine = loc ? ['Modified Pallet in ', loc] : ['Modified Pallet'];

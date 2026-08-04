@@ -29,6 +29,13 @@ Every button's width still falls out of plain `flex-1` sizing (Enter uses `flex-
 its 2-column span) — no fixed per-button pixel widths, so the panel keeps its existing
 436×494px footprint unchanged.
 
+**Renders at `z-[60]` (issue #84 fix, 2026-08-03)** — every full-screen dialog in the app
+(`ModalOverlay`, `HotJump`) tops out at `z-50`; this panel and `Keyboard` previously had no
+z-index at all, so any `ModalOverlay`-wrapped dialog needing keyboard/numpad input (e.g.
+`HoldPanel`'s Reason Code entry, opened inside a modal on PIP/MNP/SDP) rendered this panel
+fully blocked/unreachable underneath it. Fixed once at the panel level rather than patched
+per-dialog, so it applies to every current and future modal automatically.
+
 **Tab/Back Tab are inert today** — they dispatch their own key strings (`'Tab'`/`'Back
 Tab'`) but nothing consumes them yet. Confirmed while researching #100 that no field-
 navigation mechanism (an ordered field registry, `focusNext`/`focusPrev`) exists anywhere

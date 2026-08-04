@@ -4,6 +4,7 @@ import { HoldPanel } from '../components/shared/HoldPanel';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { LockedHoldConfirmDialog } from '../components/shared/LockedHoldConfirmDialog';
 import { StorageCodeBadge } from '../components/shared/StorageCodeBadge';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveId } from '../components/ui/LiveId';
@@ -16,6 +17,7 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { useDigitInput } from '../lib/useDigitInput';
 import { fmtLocation } from '../lib/fmt';
+import { splitReasonCode } from '../lib/reasonCode';
 import { hasMinRole, type Role } from '@shared/index';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -124,10 +126,26 @@ function LevelModal({
 
 // ── Occupied-location / combine popups ─────────────────────────────────────────
 
+/** Default reason code offered for MNP's "Place Hold Both (Empty Location)" path (issue
+ *  #84) — Warehouse / Empty Location. Was a hardcoded, non-editable 'W04' direct send
+ *  before this issue; now a pre-filled starting value in an editable ReasonCodeField, same
+ *  as every other reason-code entry point in the app. */
+const DEFAULT_EMPTY_LOCATION_REASON = 'W01';
+
 /**
  * Blocking popup for a DPCI-mismatched STORED destination, or a STAGED one — offers
  * Proceed / Place Hold Both (Empty Location) & Cancel / Cancel. All three are open to
  * every role. Proceeding leaves the previous occupant's own Pallet record untouched.
+ *
+ * "Place Hold Both" opens a second step confirming the reason code (issue #84) rather than
+ * submitting immediately — matches every other hold-placement entry point in the app now
+ * that reason codes are a real, validated pair instead of a free string.
+ *
+ * Both steps render at `position="top"` (2026-08-03 follow-up) — the confirmation step's
+ * `ReasonCodeField` opens the on-screen Keyboard for its prefix entry, which docks
+ * full-width at the bottom of the screen; a centered modal would sit underneath it. Applied
+ * to the first step too so the dialog doesn't visibly jump position when "Place Hold Both"
+ * transitions into the confirmation step.
  */
 function OccupiedLocationDialog({
   occupantPalletId,
@@ -141,15 +159,32 @@ function OccupiedLocationDialog({
   occupantDpci: string | null;
   wasStaged: boolean;
   onProceed: () => void;
-  onHoldAndCancel: () => void;
+  onHoldAndCancel: (reasonCode: string) => void;
   onCancel: () => void;
 }) {
+  const [confirmingHold, setConfirmingHold] = useState(false);
+  const [reasonCode, setReasonCode] = useState(DEFAULT_EMPTY_LOCATION_REASON);
+
+  if (confirmingHold) {
+    return (
+      <LockedHoldConfirmDialog
+        title="Place Hold Both — Empty Location"
+        message="Confirm the reason before placing this hold and canceling the put."
+        value={reasonCode}
+        onChange={setReasonCode}
+        onBack={() => setConfirmingHold(false)}
+        onConfirm={() => onHoldAndCancel(reasonCode)}
+        confirmDisabled={!reasonCode}
+      />
+    );
+  }
+
   const message = wasStaged
     ? 'This location is staged for another pallet. Proceed anyway, flag it as empty, or cancel?'
     : `Pallet ${occupantPalletId ?? '—'} (DPCI ${occupantDpci ?? '—'}) is already stored here. Proceed anyway, flag it as empty, or cancel?`;
 
   return (
-    <ModalOverlay width="w-[520px]">
+    <ModalOverlay width="w-[520px]" position="top">
       <h2 className="font-ui text-[24px] font-semibold text-white text-center mb-3">
         Location Already Occupied
       </h2>
@@ -166,7 +201,7 @@ function OccupiedLocationDialog({
         </button>
         <button
           type="button"
-          onClick={onHoldAndCancel}
+          onClick={() => setConfirmingHold(true)}
           className="h-[60px] rounded-[12px] font-ui text-[18px] font-semibold text-white bg-[#554400] hover:bg-[#665500] transition-colors"
         >
           Place Hold Both (Empty Location)
@@ -564,22 +599,25 @@ export function MNPPage() {
   }
 
   /**
-   * Worker chose "Place Hold Both (Empty Location)" on the occupied/staged popup. Places
-   * the hold directly via the same endpoint HoldPanel/RejectHoldDialog already use, then
-   * cancels the put — the destination is left on hold rather than completed.
+   * Worker chose "Place Hold Both (Empty Location)" on the occupied/staged popup and
+   * confirmed a reason code (issue #84 — previously a hardcoded, non-editable 'W04' direct
+   * send; now the same pre-filled-but-editable pattern every other hold entry point uses).
+   * Places the hold directly via the same endpoint HoldPanel/RejectHoldDialog already use,
+   * then cancels the put — the destination is left on hold rather than completed.
    */
-  async function handlePlaceHoldAndCancel() {
+  async function handlePlaceHoldAndCancel(reasonCode: string) {
     const loc = pendingLocationRef.current;
     const level = pendingLevelRef.current;
     if (!loc || level == null || loadingRef.current) return;
 
     const fullLocationId = loc.length === 8 ? loc : loc.slice(0, 6) + String(level).padStart(2, '0');
+    const { prefix: reasonPrefix, number: reasonNumber } = splitReasonCode(reasonCode);
 
     setLoading(true);
     try {
       await apiFetch(`/api/locations/${fullLocationId}/hold`, token!, {
         method: 'PATCH',
-        body: JSON.stringify({ holdType: 'HOLD_BOTH', reasonCode: 'W04' }),
+        body: JSON.stringify({ holdType: 'HOLD_BOTH', reasonPrefix, reasonNumber }),
       });
       playAlert('warning');
       setMessage({ type: 'warning', text: `Hold Both placed on ${fmtLocation(fullLocationId)} — put canceled` });
@@ -866,7 +904,7 @@ export function MNPPage() {
       )}
 
       {holdOpen && scannedPallet?.currentLocation && (
-        <ModalOverlay backdropClassName="p-8" padding="p-6" cardClassName="max-h-full overflow-y-auto" shadow={false}>
+        <ModalOverlay backdropClassName="p-8" padding="p-6" cardClassName="max-h-full overflow-y-auto" shadow={false} position="top-left">
           <HoldPanel locationId={scannedPallet.currentLocation} onDone={() => setHoldOpen(false)} showClose />
         </ModalOverlay>
       )}

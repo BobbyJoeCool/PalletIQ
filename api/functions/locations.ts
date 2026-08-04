@@ -1,5 +1,5 @@
-import { app } from '@azure/functions';
-import type { HttpRequest, InvocationContext } from '@azure/functions';
+import { app } from '../lib/functionsRuntime.js';
+import type { HttpRequest, InvocationContext } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth, requireRole, hasMinRole } from '../lib/permissions.js';
@@ -9,6 +9,7 @@ import { sideOf, NOT_HELD_FILTER } from '../lib/zoneLogic.js';
 import { formatDpci } from '../lib/dpci.js';
 import type { Role } from '../lib/jwt.js';
 import { clearLocation } from '../lib/logicGate.js';
+import { validateReasonCode } from '../lib/reasonCodes.js';
 
 // Canonical ascending size order (mirrors SIZES in src/pages/ELAPage.tsx and STGPage.tsx).
 const SIZE_ORDER = ['XS', 'HS', 'S', 'M', 'L'];
@@ -584,12 +585,13 @@ function resolveRangeRelease(requested: string, existing: string): { next: strin
  * a single range action can produce a mix of placed/upgraded/blocked outcomes across it.
  *
  * @param req - HTTP request with body
- *   `{ aisle, startBin, endBin, binSide?, startLevel?, endLevel?, holdType, reasonCode }`
+ *   `{ aisle, startBin, endBin, binSide?, startLevel?, endLevel?, holdType, reasonPrefix, reasonNumber }`
  * @returns `{ total, placed, upgraded, blocked, breakdown }` — `breakdown` is one entry per
  *   distinct existing-hold bucket found in the range (`{ existing, next, outcome, count }`),
  *   letting a caller report e.g. "8 upgraded HOLD_IN → HOLD_BOTH" instead of just an
  *   aggregate count (WLH's session Log panel, added alongside the Level range feature).
- * @throws 400 INVALID_INPUT for a bad range or missing/invalid holdType or reasonCode;
+ * @throws 400 INVALID_INPUT for a bad range, missing/invalid holdType, or a reason code
+ *   that doesn't validate against this user's access (issue #84 — see validateReasonCode);
  *   403 FORBIDDEN if the caller doesn't meet both the Range-mode IM+ floor and the hold
  *   type's own single-location role requirement
  */
@@ -599,13 +601,15 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
 
   const body = await req.json() as {
     aisle?: unknown; startBin?: unknown; endBin?: unknown; binSide?: unknown;
-    startLevel?: unknown; endLevel?: unknown; holdType?: string; reasonCode?: string;
+    startLevel?: unknown; endLevel?: unknown; holdType?: string;
+    reasonPrefix?: string; reasonNumber?: string;
   };
   const range = parseRangeParams(body);
-  if (!body.holdType || !(body.holdType in HOLD_PLACE_MIN_ROLE) || !body.reasonCode) {
+  if (!body.holdType || !(body.holdType in HOLD_PLACE_MIN_ROLE) || !body.reasonPrefix || !body.reasonNumber) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
   requireRole(auth, HOLD_PLACE_MIN_ROLE[body.holdType]);
+  await validateReasonCode(auth.zNumber, auth.role, 'HOLD', body.reasonPrefix, body.reasonNumber);
 
   const bins = binsInRange(range);
   const levels = levelFilter(range);
@@ -639,10 +643,12 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
     userId: auth.zNumber,
     actionType: 'RANGE_HOLD',
     locationAisle: range.aisle,
+    reasonPrefix: body.reasonPrefix,
+    reasonNumber: body.reasonNumber,
     details: {
       startBin: range.startBin, endBin: range.endBin, binSide: range.binSide,
       startLevel: range.startLevel, endLevel: range.endLevel,
-      holdType: body.holdType, reasonCode: body.reasonCode, placed, upgraded, blocked,
+      holdType: body.holdType, placed, upgraded, blocked,
     },
   });
 
@@ -744,12 +750,14 @@ async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
  * also per whatever role is required to remove that existing hold (v1.7.0 — closes a gap
  * where a role that can't remove a hold could still route around that by placing a
  * different, lower-gated type over it). Writes an activity log entry carrying the reason
- * code — per WLH.md, the reason code itself is never stored as a column, only logged.
+ * code — issue #84: now a real `reasonPrefix`/`reasonNumber` column pair, validated against
+ * this user's own access, not just an unvalidated string logged into `details`.
  *
  * @param req - HTTP request with URL param `id` (8-digit location barcode) and body
- *   `{ holdType: 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM'; reasonCode: string }`
+ *   `{ holdType: 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM'; reasonPrefix: string; reasonNumber: string }`
  * @returns `{ locationId: string; holdType: string; previousHoldType: string | null }`
- * @throws 400 INVALID_INPUT for a bad id, missing/invalid holdType, or missing reasonCode;
+ * @throws 400 INVALID_INPUT for a bad id, missing/invalid holdType, or a reason code that
+ *   doesn't validate against this user's access (issue #84 — see validateReasonCode);
  *   403 FORBIDDEN if caller's role is below the required minimum for that hold type, or
  *   (when replacing a different existing hold) below the minimum to remove that one;
  *   404 NOT_FOUND if the location doesn't exist
@@ -760,12 +768,13 @@ async function placeHold(req: HttpRequest): Promise<unknown> {
   const full = parseFullLocationBarcode(req.params.id ?? '');
   if (!full) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const body = await req.json() as { holdType?: string; reasonCode?: string };
-  if (!body.holdType || !(body.holdType in HOLD_PLACE_MIN_ROLE) || !body.reasonCode) {
+  const body = await req.json() as { holdType?: string; reasonPrefix?: string; reasonNumber?: string };
+  if (!body.holdType || !(body.holdType in HOLD_PLACE_MIN_ROLE) || !body.reasonPrefix || !body.reasonNumber) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
 
   requireRole(auth, HOLD_PLACE_MIN_ROLE[body.holdType]);
+  await validateReasonCode(auth.zNumber, auth.role, 'HOLD', body.reasonPrefix, body.reasonNumber);
 
   const location = await prisma.location.findUnique({
     where: { LocationID: { aisle: full.aisle, bin: full.bin, level: full.level } },
@@ -805,7 +814,9 @@ async function placeHold(req: HttpRequest): Promise<unknown> {
     locationAisle: full.aisle,
     locationBin:   full.bin,
     locationLevel: full.level,
-    details: { holdType: body.holdType, reasonCode: body.reasonCode, previousHoldType },
+    reasonPrefix: body.reasonPrefix,
+    reasonNumber: body.reasonNumber,
+    details: { holdType: body.holdType, previousHoldType },
   });
 
   return {

@@ -1,29 +1,31 @@
 {
   "name": "palletiq-api",
   "version": "1.2.1",
-  "description": "PalletIQ — Azure Functions API",
+  "description": "PalletIQ — backend API (Express + Prisma/MySQL)",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.json",
     "postbuild": "rm -rf dist/generated && cp -r generated dist/generated",
     "watch": "tsc -p tsconfig.json --watch",
-    "start": "func start",
+    "start": "tsx watch index.ts",
     "lint": "eslint ."
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@azure/functions": "^4.7.0",
     "@prisma/adapter-mariadb": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
     "jose": "^6.2.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^5.0.6",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "exceljs": "^4.4.0",

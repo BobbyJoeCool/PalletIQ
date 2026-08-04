@@ -13,7 +13,7 @@ import { useNumpad } from '../context/NumpadContext';
 import { useWLH } from '../context/WLHContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
-import { HOLD_REASON_CODES } from '../lib/holdReasonCodes';
+import { splitReasonCode } from '../lib/reasonCode';
 import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useLocationRangeFields } from '../lib/useLocationRangeFields';
 import { useNumpadField } from '../lib/useNumpadField';
@@ -176,13 +176,14 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
   async function submit() {
     setSubmitting(true);
     try {
+      const { prefix: reasonPrefix, number: reasonNumber } = splitReasonCode(reasonCode);
       const body = {
         aisle, startBin, endBin, binSide,
         ...(hasLevelRange ? { startLevel, endLevel } : {}),
         // Release now sends holdType too (issue #123 — which level to release), just
-        // never reasonCode (nothing placed, nothing to log a reason for).
+        // never a reason code (nothing placed, nothing to log a reason for).
         holdType,
-        ...(action === 'PLACE' ? { reasonCode } : {}),
+        ...(action === 'PLACE' ? { reasonPrefix, reasonNumber } : {}),
       };
       const result = await apiFetch<RangeResult>('/api/locations/range-hold', token!, {
         method: action === 'PLACE' ? 'PATCH' : 'DELETE',
@@ -291,7 +292,7 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
 
       {/* Reason Code stays Place-only — Release has nothing placed to log a reason for. */}
       {action === 'PLACE' && (
-        <ReasonCodeField key={reasonCodeKey} codes={HOLD_REASON_CODES} value={reasonCode} onChange={setReasonCode} label="Reason Code" />
+        <ReasonCodeField key={reasonCodeKey} domain="HOLD" value={reasonCode} onChange={setReasonCode} label="Reason Code" />
       )}
 
       <button

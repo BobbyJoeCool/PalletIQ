@@ -1,5 +1,5 @@
 import { jwtVerify } from 'jose';
-import type { HttpRequest } from '@azure/functions';
+import type { HttpRequest } from './functionsRuntime.js';
 import type { JwtPayload, Role } from './jwt.js';
 
 const ROLE_RANK: Record<Role, number> = {

@@ -160,7 +160,8 @@ exactly as left. State clears only when the authenticated route tree unmounts (l
     regardless of which position was rejected, so there was never a queue-compaction
     reason tied to position). Tapping a bubble does **not** stage anything: it opens a
     confirmation popup ("Reject suggested location?") defaulting the reason code to
-    `B05` ("Blocked", editable via the shared `ReasonCodeField` — an entry-with-dropdown-
+    `W70` ("Warehouse — Blocked Location", issue #84 — was `B05` under the old hardcoded
+    list; editable via the shared `ReasonCodeField` — an entry-with-dropdown-
     helper field as of v1.6.7, not a plain dropdown; type a code or tap the chevron for a
     popup of known ones).
     Confirming places a Hold Both on that location and recalculates a new suggestion.
@@ -487,10 +488,6 @@ next to the zone summary, not a bug where the log renders twice (it's the same
   - Activity Log detail-line rework for STG-specific entries (staged/unstaged counts per
     freight type) is still on the app-wide backlog, separate from STG's own session-local
     Log panel described above.
-  - Reason codes (used by the reject/hold flow's dropdown) don't yet match the documented
-    Department+Code scheme — no DB-backed `HoldType` table or per-role department
-    restriction (GitHub #84, flagged as needing a product conversation before any code
-    change).
   - "Add screen persistence across the app" is partially already true for STG (via
     `StagingContext`, mounted app-wide) but the item as filed is broader than STG alone.
 - **GitHub #83/#85/#86** (SDP/MNP-focused, not STG-specific) are adjacent but do not
@@ -505,6 +502,7 @@ next to the zone summary, not a bug where the log renders twice (it's the same
 
 | Date | Change |
 |---|---|
+| 2026-08-03 ([#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84)) | The reject/hold flow's default reason code changed from the old hardcoded `B05` ("Blocked") to `W70` ("Warehouse — Blocked Location") under the new database-backed reason-code system — `ReasonCodeField` now fetches this user's accessible department/role prefixes plus valid reason numbers live from `GET /api/reason-codes` instead of a flat list, and `strict`-validates instead of accepting free text. Submits `reasonPrefix`/`reasonNumber` instead of one `reasonCode` string. |
 | 2026-07-31 (#192) | Master Control gained its own optional Zone control (`ZoneField`), mirroring the per-stack Zone override that already existed — previously Master Control had no Zone at all, so a non-overridden stack's Zone always resolved to "no restriction." `effectiveStack`/`StagingContext`'s `master` state extended to carry `zone`; arming a per-stack Zone override now pre-fills from Master Control's current Zone, matching Aisle/Storage/Size's existing pre-fill behavior. **Real behavior fix found and corrected in the same pass:** `findNextStagingLocation` (`api/lib/stagingLogic.ts`) filtered candidates by an *exact* `zone: opts.zone` match instead of "starting zone, continuing toward bin 1" — meaning a Zone restriction (Master Control's new one, or the pre-existing per-stack override from #129, which shipped with the same bug) could return zero candidates even with real, eligible locations sitting a zone or two further in. Fixed to `zone: { gte: opts.zone }` plus `{ zone: 'asc' }` as the primary sort — the same range-search shape SDP's own `findNextLocation` (`api/lib/zoneLogic.ts`) already uses for its own "at or above this zone" preference. Confirmed live (aisle 303, CR-L): before the fix, restricting to a zone with real empty capacity elsewhere in the aisle returned "No Location" for every slot; after, it correctly falls through to the nearest zone that actually has capacity. Incidental fix found in the same area: Clear Forks (all 3 stacks) had drifted to omit `zone`/`zoneOverride` from its reset, unlike the single-stack Clear, which already reset it correctly. |
 | 2026-07-31 (#156) | Tapping a not-yet-overridden field (`InheritedDisplay`) armed the override but never actually focused/opened the input panel, silently requiring an unnoticed second tap to start typing — `PalletBox`/`PalletCodePicker` gained an `autoFocus` prop, passed only at the four per-stack override call sites, that focuses the field once on the mount that occurs when the override just switched on. Root-caused while investigating why `tests/e2e/stg.spec.ts`'s fill flow (15 of 22 e2e tests across STG/ELA) had been failing; see also ELA.md's Change Log for the sibling fix. Several additional stale test-only issues fixed in the same pass (wrong seed-data aisle/size pairing, a stale "Fill All" test for a button removed in issue #99, a shared `useCodePickerField.selectOption` that never closed the input panel on a popup pick) — no further product behavior changes from those. |
 | 2026-07-28 (Feature 10 / #161) | Both Aisle fields (Master Control and each stack's per-stack override) now use the shared `useAisleField` hook. Master Control's Aisle field previously had **no existence check at all** — an inconsistency with the per-stack override's own check, fixed here (documented behavior addition: Master Control's Aisle now washes red and shows "Master Control - Aisle - Invalid Entry" on a nonexistent aisle, same as the per-stack override already did). The per-stack override's own check switched from `GET /api/locations/empty-by-zone` to the purpose-built `GET /api/locations/aisle-exists` (confirmed identical existence semantics — no behavior change from that switch alone). |

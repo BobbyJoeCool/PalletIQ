@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 import './functions/auth.js';
 import './functions/health.js';
 import './functions/pallets.js';
@@ -13,3 +15,9 @@ import './functions/activity.js';
 import './functions/items.js';
 import './functions/reporting.js';
 import './functions/irp.js';
+import './functions/reasonCodes.js';
+
+import { app } from './lib/functionsRuntime.js';
+
+const PORT = Number(process.env.PORT ?? 7071);
+app.listen(PORT);

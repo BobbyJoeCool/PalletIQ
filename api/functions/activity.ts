@@ -1,5 +1,5 @@
-import { app } from '@azure/functions';
-import type { HttpRequest } from '@azure/functions';
+import { app } from '../lib/functionsRuntime.js';
+import type { HttpRequest } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
@@ -20,10 +20,12 @@ import { parseDpci, formatDpci } from '../lib/dpci.js';
  *   `user` — zNumber
  *   `hoursBack` — only include entries with `timestamp >= now - hoursBack` hours
  * @returns Array of `{ id, timestamp, userId, actionType, palletId, locationAisle,
- *   location, dpci, details }`, newest first, capped at 200 rows. `location` is the full
- *   Aisle+Bin+Level id, present only when all three are stored (e.g. not for RESTAGE/
- *   RANGE_HOLD/RANGE_REL, which log only an aisle); `locationAisle` is present whenever
- *   any location component is stored at all, for callers that only need the aisle.
+ *   location, dpci, reasonPrefix, reasonNumber, details }`, newest first, capped at 200
+ *   rows. `location` is the full Aisle+Bin+Level id, present only when all three are
+ *   stored (e.g. not for RESTAGE/RANGE_HOLD/RANGE_REL, which log only an aisle);
+ *   `locationAisle` is present whenever any location component is stored at all, for
+ *   callers that only need the aisle. `reasonPrefix`/`reasonNumber` (issue #84) are set
+ *   only on actions that carry a reason code (hold placement, pallet edits).
  * @throws 400 INVALID_INPUT if a provided filter is malformed
  */
 async function getActivity(req: HttpRequest): Promise<unknown> {
@@ -98,6 +100,8 @@ async function getActivity(req: HttpRequest): Promise<unknown> {
     dpci: e.dept != null
       ? formatDpci(e.dept, e.class!, e.item!)
       : null,
+    reasonPrefix: e.reasonPrefix,
+    reasonNumber: e.reasonNumber,
     details: e.details ? JSON.parse(e.details) as unknown : null,
   }));
 }

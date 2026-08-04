@@ -12,7 +12,7 @@ import { useNumpad } from '../context/NumpadContext';
 import { usePII, type PIIPalletData, type UserStamp } from '../context/PIIContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
-import { EDIT_REASON_CODES } from '../lib/editReasonCodes';
+import { splitReasonCode } from '../lib/reasonCode';
 import { fmtDpci } from '../lib/fmt';
 import { INVALID_WASH } from '../lib/invalidWash';
 import { usePalletIdField } from '../lib/usePalletIdField';
@@ -344,7 +344,8 @@ export function PIIPage() {
     if (!pallet) return;
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { ...changedFields, reasonCode };
+      const { prefix: reasonPrefix, number: reasonNumber } = splitReasonCode(reasonCode);
+      const body: Record<string, unknown> = { ...changedFields, reasonPrefix, reasonNumber };
       if (confirmNearExpiration) body.confirmNearExpiration = true;
 
       await apiFetch(`/api/pallets/${pallet.pid}`, token!, {
@@ -483,7 +484,7 @@ export function PIIPage() {
               <div className="flex items-start gap-2 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider pt-3">Reason Code</span>
                 <div className="w-[280px]">
-                  <ReasonCodeField codes={EDIT_REASON_CODES} value={reasonCode} onChange={setReasonCode} label="" size="compact" />
+                  <ReasonCodeField domain="PALLET_ADJUST" value={reasonCode} onChange={setReasonCode} label="" size="compact" />
                 </div>
               </div>
             </>

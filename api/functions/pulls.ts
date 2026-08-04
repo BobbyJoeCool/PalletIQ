@@ -1,5 +1,5 @@
-import { app } from '@azure/functions';
-import type { HttpRequest, InvocationContext } from '@azure/functions';
+import { app } from '../lib/functionsRuntime.js';
+import type { HttpRequest, InvocationContext } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';

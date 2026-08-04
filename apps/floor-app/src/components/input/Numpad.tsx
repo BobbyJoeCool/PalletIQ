@@ -35,12 +35,20 @@ const ROWS: NumpadKey[][] = [
  * generically was scoped out to a dedicated follow-up issue rather than guessed at here.
  * Tapping either button today is a silent no-op, same as any other unrecognized key
  * (`useNumpadField`'s handler has no final `else` branch).
+ *
+ * `z-[60]` (issue #84 fix, 2026-08-03) — every full-screen dialog in the app
+ * (`ModalOverlay`, `HotJump`) tops out at `z-50`, which otherwise sits on top of this panel
+ * and blocks it entirely, since neither `Numpad` nor `Keyboard` had any z-index of their
+ * own before this fix. Surfaced by the reason-code redesign needing the on-screen keyboard/
+ * numpad reachable from *inside* a `ModalOverlay`-wrapped dialog (MNP's occupied-location
+ * Hold confirmation, PIP/MNP's quick-hold panels, SDP's Verify-Put Hold Location) for the
+ * first time — always render above any modal instead of patching each dialog individually.
  */
 export function Numpad() {
   const { handleKey } = useNumpad();
 
   return (
-    <div data-testid="numpad-panel" className="absolute bottom-0 right-0 w-[436px] h-[494px] flex flex-col bg-[#0A0A0A] border border-b-0 border-[#2A2A2A] rounded-t-[16px] shadow-[0px_-14px_44px_0px_rgba(0,0,0,0.55)] select-none">
+    <div data-testid="numpad-panel" className="absolute bottom-0 right-0 z-[60] w-[436px] h-[494px] flex flex-col bg-[#0A0A0A] border border-b-0 border-[#2A2A2A] rounded-t-[16px] shadow-[0px_-14px_44px_0px_rgba(0,0,0,0.55)] select-none">
       {/* Key grid */}
       <div className="flex-1 flex flex-col gap-2 px-3 pt-3 pb-3">
         {ROWS.map((row, ri) => (

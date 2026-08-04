@@ -6,7 +6,7 @@ This repository is a **monorepo of independently-versioned pieces**, each with i
 
 | Piece | What it is | Own docs |
 |---|---|---|
-| [`api/`](api/) | Shared backend — Azure Functions + Prisma/MySQL, used by both apps below | [`api/CHANGELOG.md`](api/CHANGELOG.md) |
+| [`api/`](api/) | Shared backend — Express + Prisma/MySQL, used by both apps below | [`api/CHANGELOG.md`](api/CHANGELOG.md) |
 | [`apps/floor-app/`](apps/floor-app/) | The original PalletIQ app — runs on the SYMBOL tablet | [`apps/floor-app/README.md`](apps/floor-app/README.md), [`apps/floor-app/CHANGELOG.md`](apps/floor-app/CHANGELOG.md) |
 | [`apps/desktop-app/`](apps/desktop-app/) | Manager-facing desktop app (Electron), covering DPCI/Location Setup, Job/Function Assignment, Team Prod Summary, and more — **scaffold only so far** | [`apps/desktop-app/README.md`](apps/desktop-app/README.md), [`apps/desktop-app/CHANGELOG.md`](apps/desktop-app/CHANGELOG.md) |
 
@@ -28,7 +28,7 @@ Each piece installs and runs independently from its own folder:
 
 ```
 cd apps/floor-app && npm install && npm run dev     # floor app (Vite dev server)
-cd api && npm install && npm start                   # backend (Azure Functions Core Tools)
+cd api && npm install && npm start                   # backend (Express, auto-restarts on save)
 cd apps/desktop-app                                  # desktop app — scaffold only, nothing to run yet
 ```
 
