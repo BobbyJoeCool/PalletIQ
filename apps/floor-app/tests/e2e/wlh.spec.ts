@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { pickCode } from './helpers';
 
 /**
  * Covers WLH's location resolution, hold placement + reason-code entry, hold removal,
@@ -51,7 +52,7 @@ test.describe('WLH — Warehouse Location Hold', () => {
     const confirmBtn = page.getByRole('button', { name: 'Confirm Hold' });
     await expect(confirmBtn).toBeDisabled();
 
-    await page.getByLabel('Reason code').selectOption('B01');
+    await pickCode(page, 'Reason Number', '01');
     await expect(confirmBtn).toBeEnabled();
     await confirmBtn.click();
 
@@ -61,7 +62,7 @@ test.describe('WLH — Warehouse Location Hold', () => {
   test('removing an active hold clears it back to None', async ({ page }) => {
     await page.getByRole('button', { name: '✓ Valid Location' }).click();
     await page.getByRole('button', { name: 'Hold Both' }).click();
-    await page.getByLabel('Reason code').selectOption('B01');
+    await pickCode(page, 'Reason Number', '01');
     await page.getByRole('button', { name: 'Confirm Hold' }).click();
     await expect(page.getByText(/Hold Both placed on/)).toBeVisible();
 
@@ -82,7 +83,7 @@ test.describe('WLH — Warehouse Location Hold', () => {
     // Place a hold first (seed data starts with none), then confirm the Hold Any filter can find it.
     await page.getByRole('button', { name: '✓ Valid Location' }).click();
     await page.getByRole('button', { name: 'Hold Both' }).click();
-    await page.getByLabel('Reason code').selectOption('B01');
+    await pickCode(page, 'Reason Number', '01');
     await page.getByRole('button', { name: 'Confirm Hold' }).click();
     await expect(page.getByText(/Hold Both placed on/)).toBeVisible();
 
@@ -156,7 +157,7 @@ test.describe('WLH — Range mode (issue #14)', () => {
     await fillRange(page, '301', '191', '192');
     await page.getByRole('button', { name: 'Odd only' }).click();
     await page.getByRole('button', { name: 'Hold Inbound' }).click();
-    await page.getByLabel('Reason Code').selectOption('B01');
+    await pickCode(page, 'Reason Number', '01');
 
     await page.getByRole('button', { name: 'Review Hold' }).click();
     await expect(page.getByText('Place range hold?')).toBeVisible();
@@ -166,14 +167,14 @@ test.describe('WLH — Range mode (issue #14)', () => {
     await expect(page.getByText('Placed Hold Inbound on 13 locations — Aisle 301, Bin 191–192 (Odd bins only)')).toBeVisible();
     // Form resets after a successful submit, including the Reason Code dropdown, which
     // doesn't reset on its own since it stays mounted across submits (see 12.1/#14 log).
-    await expect(page.getByLabel('Reason Code')).toHaveValue('');
+    await expect(page.getByRole('button', { name: 'Reason Number', exact: true })).toHaveText('—');
   });
 
   test('placing the opposite directional hold upgrades the range to Hold Both', async ({ page }) => {
     await fillRange(page, '301', '191', '192');
     await page.getByRole('button', { name: 'Odd only' }).click();
     await page.getByRole('button', { name: 'Hold Outbound' }).click();
-    await page.getByLabel('Reason Code').selectOption('B01');
+    await pickCode(page, 'Reason Number', '01');
     await page.getByRole('button', { name: 'Review Hold' }).click();
     await page.getByRole('button', { name: 'Confirm' }).click();
 
@@ -186,7 +187,7 @@ test.describe('WLH — Range mode (issue #14)', () => {
     await fillRange(page, '301', '191', '192');
     await page.getByRole('button', { name: 'Odd only' }).click();
     await page.getByRole('button', { name: 'Hold Both' }).click();
-    await page.getByLabel('Reason Code').selectOption('B01');
+    await pickCode(page, 'Reason Number', '01');
     await page.getByRole('button', { name: 'Review Hold' }).click();
     await page.getByRole('button', { name: 'Confirm' }).click();
     await expect(page.getByText(/Placed Hold Both on 13 locations/)).toBeVisible();

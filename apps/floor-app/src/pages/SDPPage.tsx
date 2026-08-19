@@ -968,6 +968,7 @@ export function SDPPage() {
             onRedirect={handleRedirect}
             onReturnToOriginal={handleReturnToOriginal}
             onCancelRedirect={handleCancelRedirect}
+            consolidating={consolidating}
           />
         )}
 

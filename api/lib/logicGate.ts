@@ -37,6 +37,7 @@ import { NOT_HELD_FILTER } from './zoneLogic.js';
 export type LocationCoords = { aisle: number; bin: number; level: number };
 
 const RESERVE_PUT_EXPIRY_MINUTES = 5;
+const CONSOLIDATION_EXPIRY_MINUTES = 15;
 const RESERVE_REINSTATE_EXPIRY_MINUTES = 30;
 
 /** Statuses that deny any of the RESERVE_ or STAGE_LOCATION intents outright — same three
@@ -267,7 +268,7 @@ export async function reservePut(params: {
       where: { LocationID: { aisle, bin, level } },
       data: {
         status: 'RESERVED',
-        statusExpiry: new Date(Date.now() + RESERVE_PUT_EXPIRY_MINUTES * 60_000),
+        statusExpiry: new Date(Date.now() + (params.consolidating ? CONSOLIDATION_EXPIRY_MINUTES : RESERVE_PUT_EXPIRY_MINUTES) * 60_000),
         revertStatus,
       },
     });

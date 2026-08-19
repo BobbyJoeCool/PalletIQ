@@ -19,7 +19,7 @@ test.describe('LII — Location ID Info', () => {
   test('scanning a valid location loads the read-only detail view', async ({ page }) => {
     await page.getByRole('button', { name: '✓ Valid Location' }).click();
     await expect(page.getByText('Storage Code', { exact: true })).toBeVisible();
-    await expect(page.getByText('Hold', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Hold', exact: true })).toBeVisible();
   });
 
   test('an unknown location shows a not-found error', async ({ page }) => {

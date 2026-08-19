@@ -70,7 +70,7 @@ export function StorageCodeField({ value, onChange, aisle, strictToAisle = false
   // Validity check target — narrowed list only when the caller opted into strictToAisle;
   // otherwise always the full reference list, regardless of aisle narrowing (see the
   // strictToAisle doc above for why these two lists can legitimately differ).
-  const validOptions = options ?? (strictToAisle ? narrowedByAisle : fullList) ?? [];
+  const validOptions = options ?? (strictToAisle && narrowedByAisle != null ? narrowedByAisle : fullList) ?? [];
   const optionsLoading = options
     ? false
     : aisle != null

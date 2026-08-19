@@ -44,6 +44,10 @@ interface SDPVerifyPutModalProps {
   /** Cancel button — the redirected-flow's sibling to Unassign, for once there's no
    *  longer a live reservation to release. */
   onCancelRedirect: () => void;
+  /** True when the current SDP session is in consolidation mode — keeps the escape-hatch
+   *  button labeled "Unassign" even after a redirect flips `hasReservation` to false, for
+   *  consistency and simplicity for the worker (GitHub #198). */
+  consolidating: boolean;
 }
 
 /**
@@ -84,7 +88,7 @@ interface SDPVerifyPutModalProps {
  */
 export function SDPVerifyPutModal({
   directed, loading, locationEntryKey, onLocationConfirm, onLocationActiveChange,
-  onUnassign, onHoldDone, onRedirect, onReturnToOriginal, onCancelRedirect,
+  onUnassign, onHoldDone, onRedirect, onReturnToOriginal, onCancelRedirect, consolidating,
 }: SDPVerifyPutModalProps) {
   const { token, user } = useAuth();
   const { setMessage } = useMessageBar();
@@ -269,7 +273,7 @@ export function SDPVerifyPutModal({
                   disabled={loading}
                   className="h-[72px] px-6 rounded-[12px] font-ui text-[20px] font-semibold transition-colors disabled:opacity-40 bg-[#554400] hover:bg-[#665500] text-white"
                 >
-                  Cancel
+                  {consolidating ? 'Unassign' : 'Cancel'}
                 </button>
                 {/* Two-line label (same convention as the entry-state "Applying
                     Constraints" bubble) rather than fighting a single line for width —

@@ -1,12 +1,14 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Covers PAR's role gate, the two success demo paths (PUT_PENDING and STORED), and the
- * two error demo paths (bad DPCI, occupied location). See DevNotes/Screen-Specs/PAR.md.
+ * Covers PAR's role gate, the item demo scanner (valid + invalid DPCI lookup), and
+ * the IM-only access requirement. See Documentation/ScreenSpecs/PAR.md.
  *
- * Not covered: manual field entry — every field here is free-form (DPCI, quantities,
- * location), so there's no fixed valid combination to type without first querying seed
- * data; the demo buttons already exercise the same submission code path.
+ * Not covered: the full create-pallet flow (filling VCP, SSP, Size, Cartons, then
+ * submitting) — each field requires numpad/keyboard interaction and auto-advance timing,
+ * and the random item returned by the demo scanner can vary in storage code and
+ * expiration requirements, making a deterministic end-to-end create fragile without
+ * a purpose-built seed fixture. The create path is verified via manual smoke testing.
  */
 test.describe('PAR — Pallet Reinstate', () => {
   test.use({ storageState: 'playwright/.auth/im.json' });
@@ -19,32 +21,14 @@ test.describe('PAR — Pallet Reinstate', () => {
     await expect(page.getByRole('button', { name: 'Create Pallet' })).toBeVisible();
   });
 
-  test('"✓ Create" fills a valid no-location set and creates a PUT_PENDING pallet', async ({ page }) => {
-    await page.getByRole('button', { name: '✓ Create' }).click();
-    await expect(page.getByRole('button', { name: 'Create Pallet' })).toBeEnabled();
-
-    await page.getByRole('button', { name: 'Create Pallet' }).click();
-    await expect(page.getByText(/Pallet \d+ created — PUT_PENDING/)).toBeVisible();
+  test('a valid item fills the DPCI and shows the item description', async ({ page }) => {
+    await page.getByRole('button', { name: '✓ Valid Item' }).click();
+    await expect(page.getByText('Description', { exact: true })).toBeVisible();
   });
 
-  test('"✓ To Location" fills a valid located set and creates a STORED pallet', async ({ page }) => {
-    await page.getByRole('button', { name: '✓ To Location' }).click();
-    await expect(page.getByRole('button', { name: 'Create Pallet' })).toBeEnabled();
-
-    await page.getByRole('button', { name: 'Create Pallet' }).click();
-    await expect(page.getByText(/Pallet \d+ created — stored at/)).toBeVisible();
-  });
-
-  test('"✗ Bad DPCI" triggers a DPCI-not-found error on submit', async ({ page }) => {
-    await page.getByRole('button', { name: '✗ Bad DPCI' }).click();
-    await page.getByRole('button', { name: 'Create Pallet' }).click();
+  test('an invalid item shows a DPCI-not-found error', async ({ page }) => {
+    await page.getByRole('button', { name: '✗ Invalid Item' }).click();
     await expect(page.getByText('DPCI not found')).toBeVisible();
-  });
-
-  test('"✗ Invalid Location" triggers a location-not-empty error on submit', async ({ page }) => {
-    await page.getByRole('button', { name: '✗ Invalid Location' }).click();
-    await page.getByRole('button', { name: 'Create Pallet' }).click();
-    await expect(page.getByText(/is not empty — must be EMPTY to reinstate here/)).toBeVisible();
   });
 });
 
