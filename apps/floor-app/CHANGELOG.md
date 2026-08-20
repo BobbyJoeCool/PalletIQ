@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.8 — 2026-08-19](#188--2026-08-19)
 - [1.8.7 — 2026-08-03](#187--2026-08-03)
 - [1.8.6 — 2026-08-02](#186--2026-08-02)
 - [1.8.5 — 2026-08-01](#185--2026-08-01)
@@ -128,14 +129,24 @@ yet designed.
 
 ### Not yet assigned to a milestone
 
-- **Per-record audit trail (PII/LII/Container ID).** Not yet designed
-  ([#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90)) — a scoped activity history
-  for one specific Pallet ID, Location ID, or (new, undesigned) Container ID, distinct from
-  the header's own rolling 12-hour Activity overlay. Container ID needs its own product
-  conversation first — a reusable label representing a carton, SSP, or outbound pallet,
-  possibly overlapping with the already-reserved-but-unbuilt CII ("label cancellation")
-  jump code referenced in `Documentation/ScreenSpecs/LOG.md`. Flagging the possible CII
-  overlap rather than assuming which milestone this belongs to.
+- **Per-record audit trail (PII/LII).** Designed
+  ([#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90),
+  `DevNotes/DesignPrompts/Feature-15-Per-Record-Audit-Trail.md`) — inline expandable panel
+  on PII and LII showing last 30 days of `ActivityLog` entries. CII's audit trail deferred
+  to whichever issue builds CII.
+- **VCP/SSP shared component** ([#165](https://github.com/BobbyJoeCool/PalletIQ/issues/165)).
+  Designed (`DevNotes/DesignPrompts/Feature-11-VcpSsp-Shared-Component.md`) — PAR + PII
+  full parity. Build before #167.
+- **Loose SSPs shared component** ([#167](https://github.com/BobbyJoeCool/PalletIQ/issues/167)).
+  Designed (`DevNotes/DesignPrompts/Feature-12-LooseSsps-Shared-Component.md`) — standalone
+  component consuming `sspPerCarton` from #165. Depends on #165.
+- **IRP totals row + downtime** ([#133](https://github.com/BobbyJoeCool/PalletIQ/issues/133)).
+  Designed (`DevNotes/DesignPrompts/Feature-13-IRP-Totals-Row-Downtime.md`) — weighted
+  %-to-goal, `Downtime` model with function-specific vs. general kinds, `prodFunction`
+  flag on `ProdGoal`. Desktop downtime-entry UI is a separate future issue.
+- **Printer shared component** ([#168](https://github.com/BobbyJoeCool/PalletIQ/issues/168)).
+  Designed (`DevNotes/DesignPrompts/Feature-14-Printer-Shared-Component.md`) — `Printer`
+  table, PAR-only for now.
 
 ---
 
@@ -167,7 +178,6 @@ No issues currently open in this category.
 - [#96](https://github.com/BobbyJoeCool/PalletIQ/issues/96) — Add a generic status-timer/expiration mechanism for status-bearing tables, with an overdue-records report
 - [#94](https://github.com/BobbyJoeCool/PalletIQ/issues/94) — Harden Pallet CA_PULL_PEND/FP_PULL_PEND status coupling before a real label-creation endpoint ships
 - [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) — PII Edit Mode will need per-pallet-vs-partial quantity editing once Bulk Pull ships (targets v1.10.0)
-- [#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90) — Add per-record audit trail to PII, LII, and a future Container ID screen (not yet milestone-assigned)
 - [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — Bad Contraction data: every RS/RF/BS location, plus some HS locations on Levels 2-9, incorrectly flagged as contracted — **worth re-checking**: the aisle-renumbering work (v1.7.3) rewrote the contraction logic entirely and preserved BS/RF/RS's existing level-1 exemption, which may already resolve this; not closed here since that work wasn't done under this issue number
 
 ### Distant Future
@@ -176,6 +186,31 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.8.8] — 2026-08-19
+
+Settled design decisions from a design session covering six queued GitHub Issues (#165, #167,
+#133, #168, #90, #118). Five features now have implementation briefs in
+`DevNotes/DesignPrompts/Feature-11` through `Feature-15`; one (#118) deferred per its own
+recommendation. All six issues closed.
+
+### 1.8.8 — Design decisions settled
+
+- **#165 — VCP/SSP Shared Component** (`Feature-11`): PAR + PII full parity via a shared
+  `VcpSspFields` component. PII gains auto-advance on VCP→SSP (intentional UX change).
+- **#167 — Loose SSPs Shared Component** (`Feature-12`): standalone `LooseSspsField`,
+  consumes `sspPerCarton` from #165. Same full-parity standard. Depends on #165.
+- **#133 — IRP Totals Row + Downtime** (`Feature-13`): totals row pinned to top of IRP
+  (weighted %-to-goal), new `Downtime` model with function-specific vs. general kinds,
+  new `prodFunction` boolean on `ProdGoal`. Desktop downtime-entry UI out of scope.
+- **#168 — Printer Shared Component** (`Feature-14`): `Printer` table (4-char code, name,
+  active), PAR-only, `CodePickerField`-pattern autocomplete, default `OCL0`.
+- **#90 — Per-Record Audit Trail** (`Feature-15`): PII + LII only (CII deferred). Inline
+  expandable panel, last 30 days, resource-nested API endpoints. No new tables.
+- **#118 — Random Sample Row Refactor**: deferred per the issue's own recommendation;
+  revisit only if a bug in the randomization logic surfaces.
 
 ---
 
