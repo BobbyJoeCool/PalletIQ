@@ -286,12 +286,17 @@ const REASON_CODE_PREFIX_ALLOWANCES = [
   { reasonCodeNumber: '99', prefixLetter: 'A' },
 ]
 
+const CII_DOMAINS = ['CONTAINER_CANCEL', 'OVERPACK_STATUS', 'STRAY_REASSIGN'] as const
+
 const REASON_CODE_DOMAINS = [
   ...ADJUST_REASON_CODES.flatMap(({ number }) => [
     { reasonCodeNumber: number, domain: 'HOLD' },
     { reasonCodeNumber: number, domain: 'PALLET_ADJUST' },
   ]),
   ...HOLD_ONLY_REASON_CODES.map(({ number }) => ({ reasonCodeNumber: number, domain: 'HOLD' })),
+  ...REASON_CODES.flatMap(({ number }) =>
+    CII_DOMAINS.map((domain) => ({ reasonCodeNumber: number, domain })),
+  ),
 ]
 
 const STORES = [

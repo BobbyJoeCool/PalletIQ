@@ -97,7 +97,7 @@ GitHub #174), each column 3 buttons tall except Inventory Management, which is 4
 
 All buttons are visible to all roles. Restricted functionality within a screen is gated
 inside that screen, not by hiding the entry point. Several buttons above (Overpack Carton
-Create, Container Reprint, Container ID Inquiry, Warehouse Team Reporting) are reserved
+Create, Container Reprint, Pull Request by Label, Warehouse Team Reporting) are reserved
 jump-code slots for not-yet-built screens — tapping one shows an info message instead of
 navigating, per each screen's own tracked feature/GitHub issue.
 

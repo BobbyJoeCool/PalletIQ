@@ -53,7 +53,7 @@ flowchart TD
     subgraph CTM["Container Management"]
         PRQ["PRQ — Pull Request by Label\n/reporting/pull-request — PlaceholderPage (not built)"]
         LRP["LRP — Container Reprint\n/container/reprint — PlaceholderPage (not built)"]
-        CII["CII — Container ID Inquiry\n/container — PlaceholderPage (not built)"]
+        CII["CII — Container ID Inquiry\n/container — CIIPage.tsx"]
     end
 
     subgraph RPTG["Reporting Functions"]
@@ -72,7 +72,8 @@ flowchart TD
     HOM -->|"tap PII/IID/PAR"| INV
     HOM -.->|"tap OCC — built:false in JUMP_CODES\nMessageBar info, stays on Home"| OCC
     HOM -->|tap button| LOC
-    HOM -.->|"tap PRQ/LRP/CII — built:false in JUMP_CODES\nMessageBar info, stays on Home"| CTM
+    HOM -->|"tap CII"| CII
+    HOM -.->|"tap PRQ/LRP — built:false in JUMP_CODES\nMessageBar info, stays on Home"| CTM
     HOM -->|"tap SAR/IRP"| RPTG
     HOM -.->|"tap WTP — built:false in JUMP_CODES\nMessageBar info, stays on Home"| WTP
 
@@ -92,6 +93,7 @@ flowchart TD
     INV ---|"Header ›_ Jump"| JMP
     LOC ---|"Header ›_ Jump"| JMP
     RPTG ---|"Header ›_ Jump"| JMP
+    CII ---|"Header ›_ Jump"| JMP
 
     %% From HotJump, a valid built code navigates immediately, closing the overlay
     JMP -->|"resolved code, built:true"| HOM
@@ -100,6 +102,7 @@ flowchart TD
     JMP -->|"resolved code, built:true"| INV
     JMP -->|"resolved code, built:true"| LOC
     JMP -->|"resolved code, built:true"| RPTG
+    JMP -->|"resolved code, built:true"| CII
     JMP -.->|"resolved code, built:false\nMessageBar info, overlay stays open"| OCC
     JMP -.->|"resolved code, built:false\nMessageBar info, overlay stays open"| CTM
     JMP -.->|"resolved code, built:false\nMessageBar info, overlay stays open"| WTP
@@ -111,6 +114,13 @@ flowchart TD
     INV -.->|"Header Logout"| LGN
     LOC -.->|"Header Logout"| LGN
     RPTG -.->|"Header Logout"| LGN
+    CII -.->|"Header Logout"| LGN
+
+    %% CII cross-screen navigation (tappable links within detail views)
+    CII -->|"tap Pallet ID"| PII
+    CII -->|"tap DPCI"| IID
+    CII -->|"tap Location"| LII
+    CII -.->|"Header ⌂ Home"| HOM
 
     style HOM fill:#1a1a1a,stroke:#CC0000,color:#fff
     style JMP fill:#1a1a1a,stroke:#CC0000,color:#fff
@@ -118,5 +128,5 @@ flowchart TD
     style OCC fill:#330000,stroke:#660000,color:#ff8080
     style PRQ fill:#330000,stroke:#660000,color:#ff8080
     style LRP fill:#330000,stroke:#660000,color:#ff8080
-    style CII fill:#330000,stroke:#660000,color:#ff8080
+    style CII fill:#1a1a1a,stroke:#555,color:#fff
     style WTP fill:#330000,stroke:#660000,color:#ff8080

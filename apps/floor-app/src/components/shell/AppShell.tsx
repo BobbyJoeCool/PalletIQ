@@ -29,6 +29,7 @@ const SCREEN_TITLES: Record<string, string> = {
   '/reporting/individual':   'Individual Reporting',
   '/reporting/pull-request': 'Pull Request by Label',
   '/reporting/other':        'Other Reporting Functions',
+  '/container':              'Container ID Inquiry',
 };
 
 // Keypresses arriving within this many ms of each other are treated as scanner input.

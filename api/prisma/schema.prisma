@@ -54,6 +54,11 @@ model ReasonCodePrefix {
   departmentRef Department?                 @relation(fields: [departmentId], references: [id])
   allowances    ReasonCodePrefixAllowance[]
   activityLogs  ActivityLog[]
+
+  containerEvents        ContainerEvent[]
+  overpackStatusEvents   OverpackStatusEvent[]
+  strayEachReassignments StrayEachReassignmentEvent[]
+  containerCancelEvents  ContainerCancelEvent[]
 }
 
 // The 2-digit reason number, independent of prefix — the same 18 reasons apply identically
@@ -65,6 +70,11 @@ model ReasonCode {
   allowances   ReasonCodePrefixAllowance[]
   domains      ReasonCodeDomain[]
   activityLogs ActivityLog[]
+
+  containerEvents        ContainerEvent[]
+  overpackStatusEvents   OverpackStatusEvent[]
+  strayEachReassignments StrayEachReassignmentEvent[]
+  containerCancelEvents  ContainerCancelEvent[]
 }
 
 // Restricts a reason code to specific prefixes. Zero rows for a given reasonCodeNumber =
@@ -119,7 +129,10 @@ model Store {
   id   Int    @id
   name String @db.VarChar(40)
 
-  containers Container[]
+  containers  Container[]
+  overpacks   Overpack[]
+  sspUnits    SSPUnit[]
+  strayEaches StrayEach[]
 }
 
 // Grouping of aisles into a physical pick/put workstation (e.g. "CR01"). A workstation
@@ -172,6 +185,8 @@ model Item {
   pallets      Pallet[]
   containers   Container[]
   activityLogs ActivityLog[]
+  sspUnits     SSPUnit[]
+  strayEaches  StrayEach[]
 
   @@id([dept, class, item], name: "DPCI")
 }
@@ -237,6 +252,13 @@ model User {
 
   // Cross-training (issue #84) — extra departments beyond the required home one above.
   userDepartments UserDepartment[]
+
+  // CII / breakpack event models
+  containerEvents        ContainerEvent[]
+  scanLogs               ScanLog[]
+  sspUnitAdjustments     SSPUnitAdjustmentEvent[]
+  strayEachReassignments StrayEachReassignmentEvent[]
+  overpackStatusEvents   OverpackStatusEvent[]
 }
 
 model Pallet {
@@ -321,10 +343,14 @@ model Container {
   destinationStore Int
   status           String   @db.VarChar(15)
   pullFunction     String   @db.VarChar(2)
+  breakpackOrigin  Boolean  @default(false)
 
   pallet  Pallet @relation(fields: [pid], references: [pid], onDelete: NoAction, onUpdate: NoAction)
   itemRef Item   @relation(fields: [dept, class, item], references: [dept, class, item], onDelete: NoAction, onUpdate: NoAction)
   store   Store  @relation(fields: [destinationStore], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  events         ContainerEvent[]
+  breakpackUnits SSPUnit[]
 }
 
 // Tracks active SDP reservations. One row per in-flight reservation; deleted on resolution.
@@ -436,4 +462,186 @@ model ProdGoal {
   rate2         Decimal? @db.Decimal(10, 2)
   unit2         String?  @db.VarChar(20)
   effectiveDate DateTime @db.Date
+}
+
+// ─── CII / Breakpack models (#136/#196, #194) ───────────────────────────────
+
+model ContainerEvent {
+  id           Int      @id @default(autoincrement())
+  containerId  String   @db.VarChar(36)
+  eventType    String   @db.VarChar(15)
+  timestamp    DateTime @default(now())
+  userZ        String?  @db.VarChar(7)
+  reasonPrefix String?  @db.VarChar(1)
+  reasonNumber String?  @db.VarChar(2)
+  reasonNote   String?  @db.VarChar(255)
+
+  container       Container        @relation(fields: [containerId], references: [cid], onDelete: NoAction, onUpdate: NoAction)
+  user            User?            @relation(fields: [userZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  reasonPrefixRef ReasonCodePrefix? @relation(fields: [reasonPrefix], references: [letter], onDelete: NoAction, onUpdate: NoAction)
+  reasonNumberRef ReasonCode?      @relation(fields: [reasonNumber], references: [number], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([containerId, timestamp])
+}
+
+model ScanLog {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  zNumber    String   @db.VarChar(7)
+  timestamp  DateTime @default(now())
+  actionType String   @db.VarChar(20)
+  details    String   @db.Text
+
+  user User @relation(fields: [zNumber], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([zNumber, timestamp])
+  @@index([actionType, timestamp])
+}
+
+model Overpack {
+  cid              String    @id @db.VarChar(36)
+  destinationStore Int
+  open             Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  purgeDate        DateTime
+  purgedAt         DateTime?
+  closedByZ        String?   @db.VarChar(7)
+  closedAt         DateTime?
+
+  store        Store                 @relation(fields: [destinationStore], references: [id])
+  contents     OverpackContent[]
+  statusEvents OverpackStatusEvent[]
+}
+
+model OverpackContent {
+  id          Int      @id @default(autoincrement())
+  overpackCid String   @db.VarChar(36)
+  childCid    String   @db.VarChar(36)
+  childType   String   @db.VarChar(20)
+  addedAt     DateTime @default(now())
+
+  overpack Overpack @relation(fields: [overpackCid], references: [cid])
+
+  @@unique([childCid])
+  @@index([overpackCid])
+}
+
+model OverpackPlacementEvent {
+  id          Int      @id @default(autoincrement())
+  overpackCid String   @db.VarChar(36)
+  childCid    String   @db.VarChar(36)
+  childType   String   @db.VarChar(20)
+  eventType   String   @db.VarChar(10)
+  timestamp   DateTime @default(now())
+
+  @@index([childCid, timestamp])
+  @@index([overpackCid, timestamp])
+}
+
+model SSPUnit {
+  cid               String    @id @db.VarChar(36)
+  sourceContainerId String    @db.VarChar(36)
+  dept              Int
+  class             Int
+  item              Int
+  destinationStore  Int
+  standardEachQty   Int
+  actualEachQty     Int
+  status            String    @db.VarChar(15)
+  createdAt         DateTime  @default(now())
+  packedAt          DateTime?
+  canceledAt        DateTime?
+
+  sourceContainer Container                @relation(fields: [sourceContainerId], references: [cid])
+  itemRef         Item                     @relation(fields: [dept, class, item], references: [dept, class, item])
+  store           Store                    @relation(fields: [destinationStore], references: [id])
+  adjustments     SSPUnitAdjustmentEvent[]
+
+  @@index([sourceContainerId])
+}
+
+model SSPUnitAdjustmentEvent {
+  id          Int      @id @default(autoincrement())
+  unitCid     String   @db.VarChar(36)
+  previousQty Int
+  newQty      Int
+  adjustedByZ String   @db.VarChar(7)
+  adjustedAt  DateTime @default(now())
+
+  unit SSPUnit @relation(fields: [unitCid], references: [cid])
+  user User    @relation(fields: [adjustedByZ], references: [zNumber])
+
+  @@index([unitCid])
+}
+
+model StrayEach {
+  cid              String    @id @db.VarChar(36)
+  dept             Int
+  class            Int
+  item             Int
+  eachQty          Int
+  destinationStore Int
+  foundByZ         String    @db.VarChar(7)
+  createdAt        DateTime  @default(now())
+  status           String    @db.VarChar(15)
+  packedAt         DateTime?
+  canceledAt       DateTime?
+
+  itemRef       Item                          @relation(fields: [dept, class, item], references: [dept, class, item])
+  store         Store                         @relation(fields: [destinationStore], references: [id])
+  reassignments StrayEachReassignmentEvent[]
+}
+
+model OverpackStatusEvent {
+  id           Int      @id @default(autoincrement())
+  overpackCid  String   @db.VarChar(36)
+  eventType    String   @db.VarChar(15)
+  reasonPrefix String?  @db.VarChar(1)
+  reasonNumber String?  @db.VarChar(2)
+  reasonNote   String?  @db.VarChar(255)
+  userZ        String?  @db.VarChar(7)
+  timestamp    DateTime @default(now())
+
+  overpack        Overpack          @relation(fields: [overpackCid], references: [cid])
+  user            User?             @relation(fields: [userZ], references: [zNumber])
+  reasonPrefixRef ReasonCodePrefix? @relation(fields: [reasonPrefix], references: [letter], onDelete: NoAction, onUpdate: NoAction)
+  reasonNumberRef ReasonCode?       @relation(fields: [reasonNumber], references: [number], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([overpackCid, timestamp])
+}
+
+model StrayEachReassignmentEvent {
+  id            Int      @id @default(autoincrement())
+  strayEachCid  String   @db.VarChar(36)
+  previousStore Int
+  newStore      Int
+  reasonPrefix  String   @db.VarChar(1)
+  reasonNumber  String   @db.VarChar(2)
+  reasonNote    String?  @db.VarChar(255)
+  reassignedByZ String   @db.VarChar(7)
+  reassignedAt  DateTime @default(now())
+
+  strayEach       StrayEach        @relation(fields: [strayEachCid], references: [cid])
+  user            User             @relation(fields: [reassignedByZ], references: [zNumber])
+  reasonPrefixRef ReasonCodePrefix @relation(fields: [reasonPrefix], references: [letter], onDelete: NoAction, onUpdate: NoAction)
+  reasonNumberRef ReasonCode       @relation(fields: [reasonNumber], references: [number], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([strayEachCid, reassignedAt])
+}
+
+model ContainerCancelEvent {
+  id            Int      @id @default(autoincrement())
+  cid           String   @db.VarChar(36)
+  containerType String   @db.VarChar(15)
+  triggerType   String   @db.VarChar(20)
+  triggerId     String   @db.VarChar(36)
+  reasonPrefix  String?  @db.VarChar(1)
+  reasonNumber  String?  @db.VarChar(2)
+  reasonNote    String?  @db.VarChar(255)
+  canceledAt    DateTime @default(now())
+
+  reasonPrefixRef ReasonCodePrefix? @relation(fields: [reasonPrefix], references: [letter], onDelete: NoAction, onUpdate: NoAction)
+  reasonNumberRef ReasonCode?       @relation(fields: [reasonNumber], references: [number], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([cid])
+  @@index([triggerType, triggerId])
 }

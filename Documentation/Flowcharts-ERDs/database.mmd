@@ -41,6 +41,10 @@ erDiagram
     %% LocationSize:   XS, HS, S, M, L                                                                         → VarChar(2)
     %% PalletStatus:   PUT_PENDING, STORED, CA_PULL_PEND, FP_PULL_PEND, PULLED, CANCELED, CONSOLIDATED         → VarChar(15)
     %% ContainerStatus: AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                 → VarChar(15)
+    %% SSPUnitStatus:   PENDING, PACKED, CANCELED                                                              → VarChar(15)
+    %% StrayEachStatus: PENDING, PACKED, CANCELED                                                              → VarChar(15)
+    %% ContainerEventType: CREATED, PRINTED, PULLED, DIVERTED, VERIFIED, CANCELED, PURGED, STATUS_CHANGE       → VarChar(15)
+    %% OverpackStatusEventType: FORCE_CLOSE, REOPEN                                                            → VarChar(15)
     %% PullFunction:   CA (Carton Air), CF (Carton Floor), FP (Full Pallet), BK (Bulk/level-0, not in demo)   → VarChar(2)
     %% Role:           ADMIN, MANAGER, LEAD, IM, WORKER                                                        → VarChar(10)
     %% ActionType:     EDIT_PAL, PULL, RESERVE, PUT, UNASSIGN, BLOCK_PUT, RES_TMOUT, MNP_SCAN, STAGE, RESTAGE,
@@ -161,6 +165,7 @@ erDiagram
         int destinationStore FK "→ Store"
         string status "VarChar(15), ContainerStatus values"
         string pullFunction "VarChar(2), PullFunction values, default CA"
+        boolean breakpackOrigin "default: false, CII — whether this container originated from a breakpack"
     }
 
     Store {
@@ -270,3 +275,158 @@ erDiagram
 
     FunctionAssignment }o--|| User : "workerZ"
     FunctionAssignment }o--|| User : "assignedByZ"
+
+    %% ============================================================
+    %% CII (Container ID Inquiry) MODELS — v1.8.9
+    %% ============================================================
+
+    ContainerEvent {
+        int id PK "autoincrement"
+        string containerId FK "VarChar(36) → Container"
+        string eventType "VarChar(15)"
+        datetime timestamp "auto-set on creation"
+        string userZ FK "nullable, VarChar(7) → User"
+        string reasonPrefix FK "nullable, VarChar(1) → ReasonCodePrefix"
+        string reasonNumber FK "nullable, VarChar(2) → ReasonCode"
+        string reasonNote "nullable, VarChar(255)"
+    }
+
+    ScanLog {
+        string id PK "VarChar(36), uuid"
+        string zNumber FK "VarChar(7) → User"
+        datetime timestamp "auto-set on creation"
+        string actionType "VarChar(20)"
+        string details "Text, free JSON"
+    }
+
+    Overpack {
+        string cid PK "VarChar(36)"
+        int destinationStore FK "→ Store"
+        boolean open "default: true"
+        datetime createdAt "auto-set on creation"
+        datetime purgeDate
+        datetime purgedAt "nullable"
+        string closedByZ "nullable, VarChar(7)"
+        datetime closedAt "nullable"
+    }
+
+    OverpackContent {
+        int id PK "autoincrement"
+        string overpackCid FK "VarChar(36) → Overpack"
+        string childCid "VarChar(36), unique"
+        string childType "VarChar(20)"
+        datetime addedAt "auto-set on creation"
+    }
+
+    OverpackPlacementEvent {
+        int id PK "autoincrement"
+        string overpackCid "VarChar(36)"
+        string childCid "VarChar(36)"
+        string childType "VarChar(20)"
+        string eventType "VarChar(10)"
+        datetime timestamp "auto-set on creation"
+    }
+
+    SSPUnit {
+        string cid PK "VarChar(36)"
+        string sourceContainerId FK "VarChar(36) → Container"
+        int dept FK "composite FK → Item"
+        int class FK "composite FK → Item"
+        int item FK "composite FK → Item"
+        int destinationStore FK "→ Store"
+        int standardEachQty
+        int actualEachQty
+        string status "VarChar(15)"
+        datetime createdAt "auto-set on creation"
+        datetime packedAt "nullable"
+        datetime canceledAt "nullable"
+    }
+
+    SSPUnitAdjustmentEvent {
+        int id PK "autoincrement"
+        string unitCid FK "VarChar(36) → SSPUnit"
+        int previousQty
+        int newQty
+        string adjustedByZ FK "VarChar(7) → User"
+        datetime adjustedAt "auto-set on creation"
+    }
+
+    StrayEach {
+        string cid PK "VarChar(36)"
+        int dept FK "composite FK → Item"
+        int class FK "composite FK → Item"
+        int item FK "composite FK → Item"
+        int eachQty
+        int destinationStore FK "→ Store"
+        string foundByZ "VarChar(7)"
+        datetime createdAt "auto-set on creation"
+        string status "VarChar(15)"
+        datetime packedAt "nullable"
+        datetime canceledAt "nullable"
+    }
+
+    OverpackStatusEvent {
+        int id PK "autoincrement"
+        string overpackCid FK "VarChar(36) → Overpack"
+        string eventType "VarChar(15)"
+        string reasonPrefix FK "nullable, VarChar(1) → ReasonCodePrefix"
+        string reasonNumber FK "nullable, VarChar(2) → ReasonCode"
+        string reasonNote "nullable, VarChar(255)"
+        string userZ FK "nullable, VarChar(7) → User"
+        datetime timestamp "auto-set on creation"
+    }
+
+    StrayEachReassignmentEvent {
+        int id PK "autoincrement"
+        string strayEachCid FK "VarChar(36) → StrayEach"
+        int previousStore
+        int newStore
+        string reasonPrefix FK "VarChar(1) → ReasonCodePrefix"
+        string reasonNumber FK "VarChar(2) → ReasonCode"
+        string reasonNote "nullable, VarChar(255)"
+        string reassignedByZ FK "VarChar(7) → User"
+        datetime reassignedAt "auto-set on creation"
+    }
+
+    ContainerCancelEvent {
+        int id PK "autoincrement"
+        string cid "VarChar(36)"
+        string containerType "VarChar(15)"
+        string triggerType "VarChar(20)"
+        string triggerId "VarChar(36)"
+        string reasonPrefix FK "nullable, VarChar(1) → ReasonCodePrefix"
+        string reasonNumber FK "nullable, VarChar(2) → ReasonCode"
+        string reasonNote "nullable, VarChar(255)"
+        datetime canceledAt "auto-set on creation"
+    }
+
+    %% CII Relations
+    ContainerEvent }o--|| Container : "containerId"
+    ContainerEvent }o--o| User : "userZ (nullable)"
+    ContainerEvent }o--o| ReasonCodePrefix : "reasonPrefix (nullable)"
+    ContainerEvent }o--o| ReasonCode : "reasonNumber (nullable)"
+
+    ScanLog }o--|| User : "zNumber"
+
+    Overpack }o--|| Store : "destinationStore"
+    OverpackContent }o--|| Overpack : "overpackCid"
+    OverpackStatusEvent }o--|| Overpack : "overpackCid"
+    OverpackStatusEvent }o--o| User : "userZ (nullable)"
+    OverpackStatusEvent }o--o| ReasonCodePrefix : "reasonPrefix (nullable)"
+    OverpackStatusEvent }o--o| ReasonCode : "reasonNumber (nullable)"
+
+    SSPUnit }o--|| Container : "sourceContainerId"
+    SSPUnit }o--|| Item : "dept/class/item"
+    SSPUnit }o--|| Store : "destinationStore"
+    SSPUnitAdjustmentEvent }o--|| SSPUnit : "unitCid"
+    SSPUnitAdjustmentEvent }o--|| User : "adjustedByZ"
+
+    StrayEach }o--|| Item : "dept/class/item"
+    StrayEach }o--|| Store : "destinationStore"
+    StrayEachReassignmentEvent }o--|| StrayEach : "strayEachCid"
+    StrayEachReassignmentEvent }o--|| User : "reassignedByZ"
+    StrayEachReassignmentEvent }o--|| ReasonCodePrefix : "reasonPrefix"
+    StrayEachReassignmentEvent }o--|| ReasonCode : "reasonNumber"
+
+    ContainerCancelEvent }o--o| ReasonCodePrefix : "reasonPrefix (nullable)"
+    ContainerCancelEvent }o--o| ReasonCode : "reasonNumber (nullable)"

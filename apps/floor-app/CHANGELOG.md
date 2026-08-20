@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.9 — 2026-08-20](#189--2026-08-20)
 - [1.8.8 — 2026-08-19](#188--2026-08-19)
 - [1.8.7 — 2026-08-03](#187--2026-08-03)
 - [1.8.6 — 2026-08-02](#186--2026-08-02)
@@ -77,8 +78,9 @@ where everything listed under it has actually landed.
   built. Needs `Label`'s proposed `palletQuantity`/`cartonQuantity`/`sspQuantity` split
   (see `schema-additions.prisma`) and uses the `Workstation`/`WorkstationAisle` lookup
   (built this session) for its Workstation filter.
-- **CII — Container ID Inquiry.** Designed (`DevNotes/DesignPrompts/CII.md`), not yet
-  built. Needs `LabelEvent` (see `schema-additions.prisma`).
+- **CII — Container ID Inquiry.** Built (v1.8.9, API v1.2.2). Five container type views
+  (Full Case, Overpack, SSP Pull Master, SSP Unit, Stray Each), CID format parsing,
+  event log, action modals (Cancel, Force Close, Reopen, Reassign Destination).
 - Most currently open issues target this milestone too: #100, #99, #96, #95, #94, #93,
   #92, #91, #86, #85, #84, #83. (#89 is held for v1.10.0 instead, since it explicitly
   depends on Bulk Pull shipping — see below. #90 isn't assigned to a milestone yet.)
@@ -186,6 +188,45 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.8.9] — 2026-08-20
+
+CII — Container ID Inquiry screen (#136/#196) + CID Format utility (#194). New screen with
+five container type views, CID parsing, and IM+ action modals.
+
+### 1.8.9 — Added
+
+- **CII screen** (`CIIPage.tsx`) — new Container ID Inquiry screen at `/container` (jump
+  code CII). Non-standard layout with no persistent numpad: Container ID entry field in the
+  header, type-specific detail in the left column, event log in the right column.
+- **Five container type detail views** — Full Case (91), Overpack (92), SSP Pull Master (93),
+  SSP Unit (94), Stray Each (95). Each shows type-appropriate fields, status badges, and
+  tappable cross-screen navigation links (Pallet ID→PII, DPCI→IID, Location→LII, CID→CII).
+- **Three action modals** (IM+ gated): Cancel Container (Full Case + SSP Master with cascade),
+  Force Close/Reopen Overpack, Reassign Stray Each Destination. All use `ReasonCodeField`
+  with CII-specific domains (`CONTAINER_CANCEL`, `OVERPACK_STATUS`, `STRAY_REASSIGN`).
+- **Event log** — right-column merged event log fetched from all per-type event tables,
+  showing timestamps, users, reason codes, store/quantity changes, and child CID links.
+- **CID format utility** (`shared/cidFormat.ts`) — pure functions for CID validation,
+  expansion (compressed→canonical 35-digit), compression, field extraction, and type
+  resolution. Handles all five container type formats per CID-Format-Spec.md.
+- **ContainerIdField** component — CID entry with `useNumpadField`, format validation,
+  auto-expand on confirm, demo scanner support.
+- **CIIContext** — session persistence for loaded container data (discriminated union by type).
+- **StatusBadge** — added CII-specific status variants (VERIFIED, PENDING, PACKED,
+  PARTIALLY_PACKED, SHIPPED, OPEN, CLOSED).
+- **useReasonCodes** — extended domain type with three CII domains.
+
+### 1.8.9 — Schema
+
+- 11 new database models: ContainerEvent, ScanLog, Overpack, OverpackContent,
+  OverpackPlacementEvent, SSPUnit, SSPUnitAdjustmentEvent, StrayEach, OverpackStatusEvent,
+  StrayEachReassignmentEvent, ContainerCancelEvent.
+- `Container.breakpackOrigin` field added (Boolean, default false).
+- 3 new reason-code domains seeded: CONTAINER_CANCEL, OVERPACK_STATUS, STRAY_REASSIGN.
+- Corresponding API v1.2.2 — see `api/CHANGELOG.md`.
 
 ---
 

@@ -4,10 +4,48 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.2.2 — 2026-08-20](#122--2026-08-20)
 - [1.2.1 — 2026-08-03](#121--2026-08-03)
 - [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
+
+---
+
+## [1.2.2] — 2026-08-20
+
+Backend for floor-app's `[1.8.9]` entry — CII (Container ID Inquiry, #136/#196) + CID
+Format (#194).
+
+### 1.2.2 — Added
+
+- `GET /api/containers/inquiry/{cid}` — type-aware container lookup. Parses/expands CID,
+  resolves container type (91–95), queries the correct table with type-specific includes.
+  Returns a discriminated `{ type, ...data }` response.
+- `GET /api/containers/{cid}/events` — merged event log from all per-type event tables
+  (ContainerEvent, OverpackStatusEvent, OverpackPlacementEvent, SSPUnitAdjustmentEvent,
+  StrayEachReassignmentEvent, ContainerCancelEvent), unioned by timestamp desc.
+- `POST /api/containers/{cid}/cancel` — IM+ gated. Cancels Full Case (status check) or
+  SSP Pull Master (with cascade to PENDING children via ContainerCancelEvent). Validates
+  reason code against CONTAINER_CANCEL domain.
+- `POST /api/overpacks/{cid}/force-close` — IM+ gated. Closes an open, non-purged overpack.
+  Validates reason code against OVERPACK_STATUS domain.
+- `POST /api/overpacks/{cid}/reopen` — IM+ gated. Reopens a closed, non-purged overpack.
+  Validates reason code against OVERPACK_STATUS domain.
+- `POST /api/stray-eaches/{cid}/reassign` — IM+ gated. Reassigns a PENDING stray each's
+  destination store. Validates reason code against STRAY_REASSIGN domain.
+- `api/lib/cidParser.ts` — self-contained CID parsing for the API layer (type resolution,
+  expand, extract fields). Duplicated from `shared/cidFormat.ts` due to API's rootDir
+  constraint preventing `@shared/` imports.
+
+### 1.2.2 — Schema
+
+- 11 new models: ContainerEvent, ScanLog, Overpack, OverpackContent,
+  OverpackPlacementEvent, SSPUnit, SSPUnitAdjustmentEvent, StrayEach, OverpackStatusEvent,
+  StrayEachReassignmentEvent, ContainerCancelEvent.
+- `Container.breakpackOrigin` Boolean field added (default false).
+- 3 new reason-code domains seeded: CONTAINER_CANCEL, OVERPACK_STATUS, STRAY_REASSIGN
+  (all 18 reason codes each).
 
 ---
 

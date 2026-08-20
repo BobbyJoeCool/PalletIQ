@@ -31,6 +31,14 @@ const KNOWN_VARIANTS: Record<string, StatusVariant> = {
   HOLD_OUT: 'danger',
   HOLD_BOTH: 'danger',
   HOLD_PERM: 'danger',
+  // CII / breakpack statuses
+  VERIFIED: 'good',
+  PENDING: 'warning',
+  PACKED: 'info',
+  PARTIALLY_PACKED: 'warning',
+  SHIPPED: 'neutral',
+  OPEN: 'good',
+  CLOSED: 'neutral',
 };
 
 /** Looks up a reasonable default color variant for a known status string. */

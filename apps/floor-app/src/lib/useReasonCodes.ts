@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from './api';
 
-export type ReasonCodeDomain = 'HOLD' | 'PALLET_ADJUST';
+export type ReasonCodeDomain = 'HOLD' | 'PALLET_ADJUST' | 'CONTAINER_CANCEL' | 'OVERPACK_STATUS' | 'STRAY_REASSIGN';
 
 export interface ReasonPrefixOption {
   letter: string;

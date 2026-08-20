@@ -13,6 +13,7 @@ import { ReasonCodeSessionProvider } from './context/ReasonCodeSessionContext';
 import { SARProvider } from './context/SARContext';
 import { SDPProvider } from './context/SDPContext';
 import { StagingProvider } from './context/StagingContext';
+import { CIIProvider } from './context/CIIContext';
 import { WLHProvider } from './context/WLHContext';
 import { AppShell } from './components/shell/AppShell';
 import { ELAPage } from './pages/ELAPage';
@@ -29,6 +30,7 @@ import { PARPage } from './pages/PARPage';
 import { PIIPage } from './pages/PIIPage';
 import { PIPPage } from './pages/PIPPage';
 import { PinPage } from './pages/PinPage';
+import { CIIPage } from './pages/CIIPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { SARPage } from './pages/SARPage';
 import { SDPPage } from './pages/SDPPage';
@@ -72,9 +74,9 @@ export default function App() {
         <Route element={
           <StagingProvider><PIIProvider><ISIProvider><LIIProvider>
             <PIPProvider><SDPProvider><MNPProvider><IIDProvider><PARProvider>
-              <WLHProvider><SARProvider><ELAProvider><ELZProvider><ReasonCodeSessionProvider>
+              <WLHProvider><SARProvider><ELAProvider><ELZProvider><CIIProvider><ReasonCodeSessionProvider>
                 <AppShell />
-              </ReasonCodeSessionProvider></ELZProvider></ELAProvider></SARProvider></WLHProvider>
+              </ReasonCodeSessionProvider></CIIProvider></ELZProvider></ELAProvider></SARProvider></WLHProvider>
             </PARProvider></IIDProvider></MNPProvider></SDPProvider></PIPProvider>
           </LIIProvider></ISIProvider></PIIProvider></StagingProvider>
         }>
@@ -97,7 +99,7 @@ export default function App() {
           <Route path="/reporting/individual/:functionCode" element={<IRPHourlyPage />} />
           <Route path="/reporting/pull-request"  element={<PlaceholderPage code="PRQ" />} />
           <Route path="/reporting/team"          element={<PlaceholderPage code="WTP" />} />
-          <Route path="/container"               element={<PlaceholderPage code="CII" />} />
+          <Route path="/container"               element={<CIIPage />} />
           <Route path="/container/reprint"       element={<PlaceholderPage code="LRP" />} />
           <Route path="/overpack"                element={<PlaceholderPage code="OCC" />} />
         </Route>

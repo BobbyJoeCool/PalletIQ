@@ -61,6 +61,34 @@ export type ContainerStatus =
 
 export type ActionType = 'PULL' | 'PUT';
 
+export type ContainerEventType =
+  | 'CREATED'
+  | 'PRINTED'
+  | 'VERIFIED'
+  | 'PULLED'
+  | 'DIVERTED'
+  | 'CANCELED'
+  | 'PURGED';
+
+export type OverpackStatusEventType =
+  | 'FORCE_CLOSE'
+  | 'REOPEN';
+
+export type SSPUnitStatus =
+  | 'PENDING'
+  | 'PACKED'
+  | 'SHIPPED';
+
+export type StrayEachStatus =
+  | 'PENDING'
+  | 'PACKED'
+  | 'SHIPPED';
+
+export type OverpackStatus =
+  | 'OPEN'
+  | 'CLOSED'
+  | 'PURGED';
+
 // ─── Lookup tables ───────────────────────────────────────────────────────────
 
 export interface StorageCode {
@@ -165,6 +193,23 @@ export interface Container {
   destinationStore: number;
   status: ContainerStatus;
 }
+
+// ─── CID format ─────────────────────────────────────────────────────────────
+
+export {
+  CID_TYPE,
+  CID_TYPE_LABELS,
+  type CidTypeCode,
+  type CidFields,
+  resolveContainerType,
+  isValidCidFormat,
+  expandCid,
+  extractCidFields,
+  compressCid,
+  buildCid,
+} from './cidFormat.js';
+
+// ─── Activity log ───────────────────────────────────────────────────────────
 
 export interface ActivityLog {
   id: number;
