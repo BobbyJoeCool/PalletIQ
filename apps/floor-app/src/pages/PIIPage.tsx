@@ -20,6 +20,7 @@ import { useDpciFields } from '../lib/useDpciFields';
 import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
 import { checkSspCap, checkVcpSspRatio } from '../lib/vcpSspValidation';
+import { RecordActivityPanel } from '../components/shared/RecordActivityPanel';
 
 /** Formats a location object as its canonical 8-digit id (Aisle+Bin+Level). */
 function location8(loc: { aisle: number; bin: number; level: number }): string {
@@ -552,6 +553,14 @@ export function PIIPage() {
               </>
             )}
           </div>
+
+          {screenState === 'loaded' && (
+            <RecordActivityPanel
+              endpoint={`/api/pallets/${pallet.pid}/activity`}
+              token={token!}
+              recordLabel={`Pallet ${pallet.pid}`}
+            />
+          )}
         </div>
       )}
 

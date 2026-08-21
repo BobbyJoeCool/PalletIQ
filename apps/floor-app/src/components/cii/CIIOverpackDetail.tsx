@@ -21,9 +21,21 @@ export function CIIOverpackDetail({ data, isIM, token, onRefresh, onNavigateCont
   const canForceClose = isIM && data.open && !data.purged;
   const canReopen = isIM && !data.open && !data.purged;
 
+  const daysOpen = data.open && !data.purged
+    ? Math.floor((Date.now() - new Date(data.createdAt).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+  const openWarning = daysOpen !== null && daysOpen > 3;
+
   return (
     <div className="flex flex-col gap-1">
       <DataRow label="Status"><StatusBadge status={displayStatus} /></DataRow>
+      {daysOpen !== null && (
+        <DataRow label="Open Duration">
+          <span className={`font-semibold ${openWarning ? 'text-[#FF6633]' : 'text-white'}`}>
+            Opened {daysOpen} {daysOpen === 1 ? 'day' : 'days'} ago
+          </span>
+        </DataRow>
+      )}
       <DataRow label="Destination">{data.destinationStore.name} (#{data.destinationStore.id})</DataRow>
       <DataRow label="Created">{new Date(data.createdAt).toLocaleString()}</DataRow>
       <DataRow label="Purge Date">{new Date(data.purgeDate).toLocaleDateString()}</DataRow>

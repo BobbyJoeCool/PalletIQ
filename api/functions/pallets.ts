@@ -7,7 +7,7 @@ import { writeLog } from '../lib/activityLog.js';
 import { generateUniquePid } from '../lib/palletId.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { TERMINAL_CONTAINER_STATUSES } from '../lib/eligibility.js';
-import { parseDpci } from '../lib/dpci.js';
+import { parseDpci, formatDpci } from '../lib/dpci.js';
 import { storeLocationForCreate } from '../lib/logicGate.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
 
@@ -654,3 +654,42 @@ app.http('reinstatePallet', {
 // sampleReinstate / GET /api/pallets/sample-reinstate retired (Feature 9, DPCI/UPC phase)
 // — PAR's DPCI/UPC Demo Scanner now uses the shared /api/items/sample endpoint (same
 // filters, no dead vcp/ssp/cartons/ssps fields that were never consumed by any caller).
+
+// ─── Per-record audit trail (#90) ──────────────────────────────────────────
+
+async function getPalletActivity(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
+  await requireAuth(req);
+
+  const id = parseInt(req.params.id ?? '', 10);
+  if (isNaN(id)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const entries = await prisma.activityLog.findMany({
+    where: { palletId: id, timestamp: { gte: thirtyDaysAgo } },
+    orderBy: { timestamp: 'desc' },
+  });
+
+  return entries.map((e) => ({
+    id: e.id,
+    timestamp: e.timestamp,
+    userId: e.userId,
+    actionType: e.actionType,
+    palletId: e.palletId,
+    locationAisle: e.locationAisle,
+    location: e.locationAisle != null && e.locationBin != null && e.locationLevel != null
+      ? formatLocationId(e.locationAisle, e.locationBin, e.locationLevel)
+      : null,
+    dpci: e.dept != null ? formatDpci(e.dept, e.class!, e.item!) : null,
+    reasonPrefix: e.reasonPrefix,
+    reasonNumber: e.reasonNumber,
+    details: e.details ? JSON.parse(e.details) as unknown : null,
+  }));
+}
+
+app.http('getPalletActivity', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'pallets/{id:int}/activity',
+  handler: withHandler(getPalletActivity),
+});

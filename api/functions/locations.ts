@@ -1006,3 +1006,48 @@ app.http('releaseRangeHold', {
   route: 'locations/range-hold',
   handler: withHandler(releaseRangeHold),
 });
+
+// ─── Per-record audit trail (#90) ──────────────────────────────────────────
+
+async function getLocationActivity(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
+  await requireAuth(req);
+
+  const locParam = req.params.locId ?? '';
+  const parsed = parseFullLocationBarcode(locParam);
+  if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const entries = await prisma.activityLog.findMany({
+    where: {
+      locationAisle: parsed.aisle,
+      locationBin: parsed.bin,
+      locationLevel: parsed.level,
+      timestamp: { gte: thirtyDaysAgo },
+    },
+    orderBy: { timestamp: 'desc' },
+  });
+
+  return entries.map((e) => ({
+    id: e.id,
+    timestamp: e.timestamp,
+    userId: e.userId,
+    actionType: e.actionType,
+    palletId: e.palletId,
+    locationAisle: e.locationAisle,
+    location: e.locationAisle != null && e.locationBin != null && e.locationLevel != null
+      ? formatLocationId(e.locationAisle, e.locationBin, e.locationLevel)
+      : null,
+    dpci: e.dept != null ? formatDpci(e.dept, e.class!, e.item!) : null,
+    reasonPrefix: e.reasonPrefix,
+    reasonNumber: e.reasonNumber,
+    details: e.details ? JSON.parse(e.details) as unknown : null,
+  }));
+}
+
+app.http('getLocationActivity', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'locations/{locId}/activity',
+  handler: withHandler(getLocationActivity),
+});

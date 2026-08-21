@@ -1,6 +1,6 @@
 {
   "name": "palletiq-api",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "PalletIQ — backend API (Express + Prisma/MySQL)",
   "type": "module",
   "main": "dist/index.js",

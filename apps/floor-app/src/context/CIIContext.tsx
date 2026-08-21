@@ -3,7 +3,7 @@ import { createContext, useContext, useState } from 'react';
 /** Discriminated union covering all five CII inquiry results. The `type` field
  *  drives which detail sub-component CIIPage renders. */
 export type CIIContainerData =
-  | (CIIBaseData & { type: '91'; pullFunction: string; breakpackOrigin: boolean; batchDate: string | null; quantity: { pallets: number; cartons: number; ssps: number }; pallet: CIIPalletRef; location: CIILocation | null; children?: undefined })
+  | (CIIBaseData & { type: '91'; pullFunction: string; breakpackOrigin: boolean; batchDate: string | null; purgeDate: string | null; quantity: { pallets: number; cartons: number; ssps: number }; pallet: CIIPalletRef; location: CIILocation | null; children?: undefined })
   | (CIIBaseData & { type: '92'; open: boolean; purged: boolean; createdAt: string; purgeDate: string; purgedAt: string | null; closedByZ: string | null; closedAt: string | null; contents: CIIOverpackChild[] })
   | (CIIBaseData & { type: '93'; pullFunction: string; breakpackOrigin: boolean; batchDate: string | null; quantity: { pallets: number; cartons: number; ssps: number }; pallet: CIIPalletRef; location: CIILocation | null; children: CIISSPChild[] })
   | (CIIBaseData & { type: '94'; standardEachQty: number; actualEachQty: number; createdAt: string; packedAt: string | null; canceledAt: string | null; sourceMaster: { cid: string; status: string; pid: number } })

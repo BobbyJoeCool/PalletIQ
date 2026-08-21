@@ -67,6 +67,7 @@ async function lookupContainer(cid: string, type: CidTypeCode) {
     storageCode: container.itemRef.storageCode,
     quantity: { pallets: container.palletQuantity, cartons: container.cartonQuantity, ssps: container.sspQuantity },
     batchDate: container.batchDate,
+    purgeDate: container.purgeDate,
     destinationStore: { id: container.store.id, name: container.store.name },
     pallet: {
       pid: container.pallet.pid,
@@ -224,9 +225,37 @@ async function getContainerEvents(req: HttpRequest, _ctx: InvocationContext): Pr
         },
       });
     }
+
+    if (type === CID_TYPE.SSP_PULL_MASTER) {
+      const childCids = await prisma.sSPUnit.findMany({
+        where: { sourceContainerId: canonical },
+        select: { cid: true },
+      });
+      const cids = childCids.map(c => c.cid);
+      if (cids.length > 0) {
+        const childPlacements = await prisma.overpackPlacementEvent.findMany({
+          where: { childCid: { in: cids } },
+          orderBy: { timestamp: 'desc' },
+        });
+        for (const e of childPlacements) {
+          events.push({
+            source: 'OverpackPlacementEvent',
+            eventType: e.eventType,
+            timestamp: e.timestamp,
+            userZ: null,
+            details: { childCid: e.childCid, overpackCid: e.overpackCid, childType: e.childType },
+          });
+        }
+      }
+    }
   }
 
   if (type === CID_TYPE.OVERPACK) {
+    const overpack = await prisma.overpack.findUnique({ where: { cid: canonical }, select: { createdAt: true } });
+    if (overpack) {
+      events.push({ source: 'Synthesized', eventType: 'CREATED', timestamp: overpack.createdAt, userZ: null });
+    }
+
     const statusEvents = await prisma.overpackStatusEvent.findMany({
       where: { overpackCid: canonical },
       orderBy: { timestamp: 'desc' },
@@ -261,6 +290,11 @@ async function getContainerEvents(req: HttpRequest, _ctx: InvocationContext): Pr
   }
 
   if (type === CID_TYPE.SSP_UNIT) {
+    const sspUnit = await prisma.sSPUnit.findUnique({ where: { cid: canonical }, select: { createdAt: true } });
+    if (sspUnit) {
+      events.push({ source: 'Synthesized', eventType: 'CREATED', timestamp: sspUnit.createdAt, userZ: null });
+    }
+
     const adjustments = await prisma.sSPUnitAdjustmentEvent.findMany({
       where: { unitCid: canonical },
       orderBy: { adjustedAt: 'desc' },
@@ -278,9 +312,45 @@ async function getContainerEvents(req: HttpRequest, _ctx: InvocationContext): Pr
         },
       });
     }
+
+    const placements = await prisma.overpackPlacementEvent.findMany({
+      where: { childCid: canonical },
+      orderBy: { timestamp: 'desc' },
+    });
+    for (const e of placements) {
+      events.push({
+        source: 'OverpackPlacementEvent',
+        eventType: e.eventType,
+        timestamp: e.timestamp,
+        userZ: null,
+        details: { overpackCid: e.overpackCid, childType: e.childType },
+      });
+    }
+
+    const cancelEvents = await prisma.containerCancelEvent.findMany({
+      where: { cid: canonical },
+      orderBy: { canceledAt: 'desc' },
+    });
+    for (const e of cancelEvents) {
+      events.push({
+        source: 'ContainerCancelEvent',
+        eventType: `CANCEL_${e.triggerType}`,
+        timestamp: e.canceledAt,
+        userZ: null,
+        details: {
+          triggerType: e.triggerType, triggerId: e.triggerId,
+          reasonPrefix: e.reasonPrefix, reasonNumber: e.reasonNumber, reasonNote: e.reasonNote,
+        },
+      });
+    }
   }
 
   if (type === CID_TYPE.STRAY_EACH) {
+    const strayEach = await prisma.strayEach.findUnique({ where: { cid: canonical }, select: { createdAt: true } });
+    if (strayEach) {
+      events.push({ source: 'Synthesized', eventType: 'CREATED', timestamp: strayEach.createdAt, userZ: null });
+    }
+
     const reassignments = await prisma.strayEachReassignmentEvent.findMany({
       where: { strayEachCid: canonical },
       orderBy: { reassignedAt: 'desc' },
@@ -296,6 +366,37 @@ async function getContainerEvents(req: HttpRequest, _ctx: InvocationContext): Pr
           previousStore: e.previousStore, newStore: e.newStore,
           reasonPrefix: e.reasonPrefix, reasonNumber: e.reasonNumber, reasonNote: e.reasonNote,
           userName: `${e.user.firstName} ${e.user.lastName}`,
+        },
+      });
+    }
+
+    const placements = await prisma.overpackPlacementEvent.findMany({
+      where: { childCid: canonical },
+      orderBy: { timestamp: 'desc' },
+    });
+    for (const e of placements) {
+      events.push({
+        source: 'OverpackPlacementEvent',
+        eventType: e.eventType,
+        timestamp: e.timestamp,
+        userZ: null,
+        details: { overpackCid: e.overpackCid, childType: e.childType },
+      });
+    }
+
+    const cancelEvents = await prisma.containerCancelEvent.findMany({
+      where: { cid: canonical },
+      orderBy: { canceledAt: 'desc' },
+    });
+    for (const e of cancelEvents) {
+      events.push({
+        source: 'ContainerCancelEvent',
+        eventType: `CANCEL_${e.triggerType}`,
+        timestamp: e.canceledAt,
+        userZ: null,
+        details: {
+          triggerType: e.triggerType, triggerId: e.triggerId,
+          reasonPrefix: e.reasonPrefix, reasonNumber: e.reasonNumber, reasonNote: e.reasonNote,
         },
       });
     }
@@ -356,7 +457,7 @@ async function cancelContainer(req: HttpRequest, _ctx: InvocationContext): Promi
         select: { cid: true },
       });
       for (const child of pendingChildren) {
-        await tx.sSPUnit.update({ where: { cid: child.cid }, data: { status: 'SHIPPED', canceledAt: new Date() } });
+        await tx.sSPUnit.update({ where: { cid: child.cid }, data: { status: 'CANCELED', canceledAt: new Date() } });
         await tx.containerCancelEvent.create({
           data: {
             cid: child.cid, containerType: 'SSP_UNIT', triggerType: 'MASTER_CANCEL',

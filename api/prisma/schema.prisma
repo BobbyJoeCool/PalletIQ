@@ -425,6 +425,8 @@ model ActivityLog {
   @@index([userId, functionCode, timestamp])
   @@index([reasonPrefix])
   @@index([reasonNumber])
+  @@index([palletId, timestamp])
+  @@index([locationAisle, locationBin, locationLevel, timestamp])
 }
 
 // IRP hard dependency: who was assigned to which prod function, when, and by whom.
