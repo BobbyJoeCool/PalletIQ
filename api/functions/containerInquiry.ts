@@ -65,7 +65,7 @@ async function lookupContainer(cid: string, type: CidTypeCode) {
     itemDesc: container.itemRef.descShort,
     itemName: container.itemRef.name,
     storageCode: container.itemRef.storageCode,
-    quantity: { pallets: 0, cartons: container.quantity, ssps: container.sspQuantity },
+    quantity: { pallets: container.palletQuantity, cartons: container.cartonQuantity, ssps: container.sspQuantity },
     batchDate: container.batchDate,
     destinationStore: { id: container.store.id, name: container.store.name },
     pallet: {

@@ -186,7 +186,8 @@ export interface Container {
   dept: number;
   class: number;
   item: number;
-  quantity: number;
+  palletQuantity: number;
+  cartonQuantity: number;
   sspQuantity: number;
   batchDate: number;
   purgeDate: string;

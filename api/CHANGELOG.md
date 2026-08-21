@@ -4,11 +4,40 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.2.3 — 2026-08-20](#123--2026-08-20)
 - [1.2.2 — 2026-08-20](#122--2026-08-20)
 - [1.2.1 — 2026-08-03](#121--2026-08-03)
 - [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
+
+---
+
+## [1.2.3] — 2026-08-20
+
+Backend for floor-app's `[1.8.10]` entry — PRQ (Pull Request, #135) + Container quantity
+split.
+
+### 1.2.3 — Added
+
+- `GET /api/pulls/summary` — aggregated pull data grouped by batchDate × pullFunction,
+  scoped to aisle/range/workstation + status filter. Supports `byAisle` param for L2
+  per-aisle drill-in.
+- `GET /api/pulls/detail` — location-level drill-down with full container lists per
+  location. Supports bin/level range filters.
+
+### 1.2.3 — Changed
+
+- **Container quantity split** — renamed `Container.quantity` → `cartonQuantity`, added
+  `palletQuantity Int @default(0)`. Migration: `20260820230000_container_quantity_split`.
+  Updated all API consumers: `containers.ts`, `pulls.ts`, `pallets.ts`,
+  `containerInquiry.ts`, `demo-reseed.ts`, seed scripts.
+
+### 1.2.3 — Fixed
+
+- `api/index.ts` — added missing side-effect imports for `containerInquiry.js` and
+  `pullRequest.js` (routes were never registered, causing 404 on all CII and PRQ
+  endpoints).
 
 ---
 

@@ -22,7 +22,7 @@ export const JUMP_CODES: Record<string, JumpCode> = {
   ELZ: { code: 'ELZ', label: 'Empty Locations by Zone',     route: '/empty/zone',             built: true  },
   STG: { code: 'STG', label: 'Stage Aisle',                 route: '/stage',                  built: true  },
   IRP: { code: 'IRP', label: 'Individual Reporting',        route: '/reporting/individual',   built: true  },
-  PRQ: { code: 'PRQ', label: 'Pull Request by Label',       route: '/reporting/pull-request', built: false },
+  PRQ: { code: 'PRQ', label: 'Pull Request by Label',       route: '/reporting/pull-request', built: true },
   CII: { code: 'CII', label: 'Container ID Inquiry',        route: '/container',              built: true  },
   LRP: { code: 'LRP', label: 'Container Reprint',           route: '/container/reprint',      built: false },
   WTP: { code: 'WTP', label: 'Warehouse Team Reporting',    route: '/reporting/team',          built: false },

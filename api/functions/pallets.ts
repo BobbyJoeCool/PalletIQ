@@ -224,9 +224,9 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
     // Sum up quantities already committed to open containers so we can enforce a floor.
     const pending = await prisma.container.aggregate({
       where: { pid, status: { notIn: TERMINAL_CONTAINER_STATUSES } },
-      _sum: { quantity: true, sspQuantity: true },
+      _sum: { cartonQuantity: true, sspQuantity: true },
     });
-    const pendingCartons = pending._sum.quantity    ?? 0;
+    const pendingCartons = pending._sum.cartonQuantity ?? 0;
     const pendingSSPs    = pending._sum.sspQuantity ?? 0;
 
     // cartonsPerPallet (v1.6.11) replaces the old receivedCartons-as-proxy approximation

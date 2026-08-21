@@ -27,7 +27,7 @@ const SCREEN_TITLES: Record<string, string> = {
   '/empty/zone':             'Empty Locations by Zone',
   '/stage':                  'Stage Aisle',
   '/reporting/individual':   'Individual Reporting',
-  '/reporting/pull-request': 'Pull Request by Label',
+  '/reporting/pull-request': 'Pull Request',
   '/reporting/other':        'Other Reporting Functions',
   '/container':              'Container ID Inquiry',
 };

@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.10 — 2026-08-20](#1810--2026-08-20)
 - [1.8.9 — 2026-08-20](#189--2026-08-20)
 - [1.8.8 — 2026-08-19](#188--2026-08-19)
 - [1.8.7 — 2026-08-03](#187--2026-08-03)
@@ -74,10 +75,10 @@ where everything listed under it has actually landed.
   by function (units, units/hour, time in function, goal progress), or a staging summary
   for GPMers. Leads/Managers get a separate cross-worker reporting screen; IRP always
   shows only the logged-in user's own data.
-- **PRQ — Pull Request by Label.** Designed (`DevNotes/DesignPrompts/PRQ.md`), not yet
-  built. Needs `Label`'s proposed `palletQuantity`/`cartonQuantity`/`sspQuantity` split
-  (see `schema-additions.prisma`) and uses the `Workstation`/`WorkstationAisle` lookup
-  (built this session) for its Workstation filter.
+- **PRQ — Pull Request.** Built (v1.8.10, API v1.2.3). Progressive 3-level drill-down
+  reporting screen: summary by batchDate × pullFunction → per-aisle breakdown →
+  per-location detail with pull popup. Container quantity split (cartonQuantity/
+  palletQuantity) shipped as a prerequisite.
 - **CII — Container ID Inquiry.** Built (v1.8.9, API v1.2.2). Five container type views
   (Full Case, Overpack, SSP Pull Master, SSP Unit, Stray Each), CID format parsing,
   event log, action modals (Cancel, Force Close, Reopen, Reassign Destination).
@@ -188,6 +189,41 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.8.10] — 2026-08-20
+
+PRQ — Pull Request screen (#135) + Container quantity split. New reporting screen with
+progressive 3-level drill-down (summary → per-aisle → per-location) and pull detail popup.
+
+### 1.8.10 — Added
+
+- **PRQ screen** (`PRQPage.tsx`) — new Pull Request screen at `/reporting/pull-request`
+  (jump code PRQ). Progressive filter/drill-down: L1 summary by batchDate × pullFunction,
+  L2 per-aisle breakdown (range/workstation queries), L3 per-location with bin/level
+  filters, plus a full-screen pull detail popup with tappable cross-screen links
+  (Location→LII, DPCI→IID, PalletID→PII, CID→CII).
+- **PRQ context** (`PRQContext.tsx`) — filter state, drill-down level, selected row index
+  persisted across navigation within the session.
+- **API: `GET /api/pulls/summary`** — aggregated pull data grouped by batchDate ×
+  pullFunction, scoped to aisle/range/workstation + status filter. Supports `byAisle`
+  param for L2 drill-in.
+- **API: `GET /api/pulls/detail`** — location-level drill-down with full container lists
+  per location. Supports bin/level range filters.
+
+### 1.8.10 — Changed
+
+- **Container quantity split** — renamed `Container.quantity` → `cartonQuantity`, added
+  `palletQuantity Int @default(0)`. Updated all consumers: `containers.ts`, `pulls.ts`,
+  `pallets.ts`, `containerInquiry.ts`, `demo-reseed.ts`, seed scripts, shared types.
+- **Screen title** — PRQ header changed from "Pull Request by Label" to "Pull Request".
+
+### 1.8.10 — Fixed
+
+- **API route registration** — `containerInquiry.js` and `pullRequest.js` were missing
+  from `api/index.ts`'s side-effect import list, causing 404 on all CII and PRQ API
+  routes.
 
 ---
 
