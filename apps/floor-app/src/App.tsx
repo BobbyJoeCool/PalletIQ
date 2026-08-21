@@ -14,6 +14,7 @@ import { SARProvider } from './context/SARContext';
 import { SDPProvider } from './context/SDPContext';
 import { StagingProvider } from './context/StagingContext';
 import { CIIProvider } from './context/CIIContext';
+import { PRQProvider } from './context/PRQContext';
 import { WLHProvider } from './context/WLHContext';
 import { AppShell } from './components/shell/AppShell';
 import { ELAPage } from './pages/ELAPage';
@@ -31,6 +32,7 @@ import { PIIPage } from './pages/PIIPage';
 import { PIPPage } from './pages/PIPPage';
 import { PinPage } from './pages/PinPage';
 import { CIIPage } from './pages/CIIPage';
+import { PRQPage } from './pages/PRQPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { SARPage } from './pages/SARPage';
 import { SDPPage } from './pages/SDPPage';
@@ -74,9 +76,9 @@ export default function App() {
         <Route element={
           <StagingProvider><PIIProvider><ISIProvider><LIIProvider>
             <PIPProvider><SDPProvider><MNPProvider><IIDProvider><PARProvider>
-              <WLHProvider><SARProvider><ELAProvider><ELZProvider><CIIProvider><ReasonCodeSessionProvider>
+              <WLHProvider><SARProvider><ELAProvider><ELZProvider><CIIProvider><PRQProvider><ReasonCodeSessionProvider>
                 <AppShell />
-              </ReasonCodeSessionProvider></CIIProvider></ELZProvider></ELAProvider></SARProvider></WLHProvider>
+              </ReasonCodeSessionProvider></PRQProvider></CIIProvider></ELZProvider></ELAProvider></SARProvider></WLHProvider>
             </PARProvider></IIDProvider></MNPProvider></SDPProvider></PIPProvider>
           </LIIProvider></ISIProvider></PIIProvider></StagingProvider>
         }>
@@ -97,7 +99,7 @@ export default function App() {
           <Route path="/stage"                   element={<STGPage />} />
           <Route path="/reporting/individual"    element={<IRPPage />} />
           <Route path="/reporting/individual/:functionCode" element={<IRPHourlyPage />} />
-          <Route path="/reporting/pull-request"  element={<PlaceholderPage code="PRQ" />} />
+          <Route path="/reporting/pull-request"  element={<PRQPage />} />
           <Route path="/reporting/team"          element={<PlaceholderPage code="WTP" />} />
           <Route path="/container"               element={<CIIPage />} />
           <Route path="/container/reprint"       element={<PlaceholderPage code="LRP" />} />

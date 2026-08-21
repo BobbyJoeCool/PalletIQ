@@ -66,8 +66,8 @@ async function getContainer(req: HttpRequest, _ctx: InvocationContext): Promise<
       status: container.status,
       pullFunction: container.pullFunction,
       quantity: {
-        pallets: 0,
-        cartons: container.quantity,
+        pallets: container.palletQuantity,
+        cartons: container.cartonQuantity,
         ssps: container.sspQuantity,
       },
       dpci: formatDpci(container.dept, container.class, container.item),

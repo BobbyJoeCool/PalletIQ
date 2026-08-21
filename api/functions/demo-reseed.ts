@@ -130,7 +130,7 @@ async function simulateCartonAirPulls(tx: TxClient, resumeFrom: Date, w: ShiftWi
   while (t < w.shiftEnd) {
     const container = await tx.container.findFirst({
       where: { pullFunction: 'CA', status: { in: ['AVAILABLE', 'PRINTED'] } },
-      select: { cid: true, pid: true, quantity: true, sspQuantity: true, dept: true, class: true, item: true },
+      select: { cid: true, pid: true, cartonQuantity: true, sspQuantity: true, dept: true, class: true, item: true },
     });
     if (!container) break; // CA container pool exhausted for this reseed — nothing left to pull
 
@@ -145,7 +145,7 @@ async function simulateCartonAirPulls(tx: TxClient, resumeFrom: Date, w: ShiftWi
       continue;
     }
 
-    const newCartons = Math.max(0, pallet.currentCartons - container.quantity);
+    const newCartons = Math.max(0, pallet.currentCartons - container.cartonQuantity);
     const newSSPs = Math.max(0, pallet.currentSSPs - container.sspQuantity);
 
     await tx.container.update({ where: { cid: container.cid }, data: { status: 'PULLED' } });
@@ -169,14 +169,14 @@ async function simulateCartonAirPulls(tx: TxClient, resumeFrom: Date, w: ShiftWi
       functionCode: 'CA',
       details: {
         containerId: container.cid, pullFunction: 'CA',
-        pulled: { pallets: 0, cartons: container.quantity, ssps: container.sspQuantity },
+        pulled: { pallets: 0, cartons: container.cartonQuantity, ssps: container.sspQuantity },
         remaining: { pallets: 0, cartons: newCartons, ssps: newSSPs },
         verifiedVia: 'PID', wasScanned: true, workerLog: true,
       },
     }, tx);
 
     pulled++;
-    const minutesForThisPull = (container.quantity / RATE_CARTONS_PER_HOUR) * 60;
+    const minutesForThisPull = (container.cartonQuantity / RATE_CARTONS_PER_HOUR) * 60;
     t = pastBreak(new Date(t.getTime() + minutesForThisPull * 60_000), w);
   }
 
@@ -694,7 +694,8 @@ interface ContainerRow {
   dept: number;
   class: number;
   item: number;
-  quantity: number;
+  palletQuantity: number;
+  cartonQuantity: number;
   sspQuantity: number;
   batchDate: number;
   purgeDate: Date;
@@ -930,7 +931,7 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
         bucket.push({
           cid: genCid(store.id, p.dept, p.class, p.item, p.pid, batchDate),
           pid: p.pid, dept: p.dept, class: p.class, item: p.item,
-          quantity: qty, sspQuantity: 0, batchDate, purgeDate,
+          palletQuantity: 0, cartonQuantity: qty, sspQuantity: 0, batchDate, purgeDate,
           destinationStore: store.id, status: 'PRINTED', pullFunction: fn,
         });
         buckets.set(key, bucket);

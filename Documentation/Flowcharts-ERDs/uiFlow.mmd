@@ -51,7 +51,7 @@ flowchart TD
     end
 
     subgraph CTM["Container Management"]
-        PRQ["PRQ — Pull Request by Label\n/reporting/pull-request — PlaceholderPage (not built)"]
+        PRQ["PRQ — Pull Request\n/reporting/pull-request — PRQPage.tsx"]
         LRP["LRP — Container Reprint\n/container/reprint — PlaceholderPage (not built)"]
         CII["CII — Container ID Inquiry\n/container — CIIPage.tsx"]
     end
@@ -73,7 +73,8 @@ flowchart TD
     HOM -.->|"tap OCC — built:false in JUMP_CODES\nMessageBar info, stays on Home"| OCC
     HOM -->|tap button| LOC
     HOM -->|"tap CII"| CII
-    HOM -.->|"tap PRQ/LRP — built:false in JUMP_CODES\nMessageBar info, stays on Home"| CTM
+    HOM -->|"tap PRQ"| PRQ
+    HOM -.->|"tap LRP — built:false in JUMP_CODES\nMessageBar info, stays on Home"| CTM
     HOM -->|"tap SAR/IRP"| RPTG
     HOM -.->|"tap WTP — built:false in JUMP_CODES\nMessageBar info, stays on Home"| WTP
 
@@ -103,6 +104,7 @@ flowchart TD
     JMP -->|"resolved code, built:true"| LOC
     JMP -->|"resolved code, built:true"| RPTG
     JMP -->|"resolved code, built:true"| CII
+    JMP -->|"resolved code, built:true"| PRQ
     JMP -.->|"resolved code, built:false\nMessageBar info, overlay stays open"| OCC
     JMP -.->|"resolved code, built:false\nMessageBar info, overlay stays open"| CTM
     JMP -.->|"resolved code, built:false\nMessageBar info, overlay stays open"| WTP
@@ -122,11 +124,19 @@ flowchart TD
     CII -->|"tap Location"| LII
     CII -.->|"Header ⌂ Home"| HOM
 
+    %% PRQ cross-screen navigation (tappable links within pull detail popup)
+    PRQ -->|"tap Container ID"| CII
+    PRQ -->|"tap Location"| LII
+    PRQ -->|"tap DPCI"| IID
+    PRQ -->|"tap Pallet ID"| PII
+    PRQ -.->|"Header ⌂ Home"| HOM
+    PRQ ---|"Header ›_ Jump"| JMP
+
     style HOM fill:#1a1a1a,stroke:#CC0000,color:#fff
     style JMP fill:#1a1a1a,stroke:#CC0000,color:#fff
     style LGN fill:#1a1a1a,stroke:#555,color:#fff
     style OCC fill:#330000,stroke:#660000,color:#ff8080
-    style PRQ fill:#330000,stroke:#660000,color:#ff8080
+    style PRQ fill:#1a1a1a,stroke:#555,color:#fff
     style LRP fill:#330000,stroke:#660000,color:#ff8080
     style CII fill:#1a1a1a,stroke:#555,color:#fff
     style WTP fill:#330000,stroke:#660000,color:#ff8080

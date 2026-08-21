@@ -16,6 +16,8 @@ import './functions/items.js';
 import './functions/reporting.js';
 import './functions/irp.js';
 import './functions/reasonCodes.js';
+import './functions/containerInquiry.js';
+import './functions/pullRequest.js';
 
 import { app } from './lib/functionsRuntime.js';
 

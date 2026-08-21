@@ -100,14 +100,14 @@ async function main() {
       {
         cid: genCid(stores[i % stores.length].id, p.dept, p.class, p.item, p.pid, batchDate),
         pid: p.pid, dept: p.dept, class: p.class, item: p.item,
-        quantity: qty1, sspQuantity: 0, batchDate, purgeDate,
+        palletQuantity: 0, cartonQuantity: qty1, sspQuantity: 0, batchDate, purgeDate,
         destinationStore: stores[i % stores.length].id,
         status: 'PRINTED', pullFunction: fn1,
       },
       {
         cid: genCid(stores[(i + 1) % stores.length].id, p.dept, p.class, p.item, p.pid, batchDate),
         pid: p.pid, dept: p.dept, class: p.class, item: p.item,
-        quantity: qty2, sspQuantity: 0, batchDate, purgeDate,
+        palletQuantity: 0, cartonQuantity: qty2, sspQuantity: 0, batchDate, purgeDate,
         destinationStore: stores[(i + 1) % stores.length].id,
         status: 'PRINTED', pullFunction: fn2,
       },

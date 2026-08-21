@@ -205,7 +205,7 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
 
   // Deduct the container's quantities from the pallet; floor at 0.
   // Any carton pull always zeroes the pallet count (breaks full-pallet status).
-  const newCartons = Math.max(0, pallet.currentCartons - container.quantity);
+  const newCartons = Math.max(0, pallet.currentCartons - container.cartonQuantity);
   const newSSPs    = Math.max(0, pallet.currentSSPs    - container.sspQuantity);
   const newPallets = 0;
 
@@ -272,7 +272,7 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
     details: {
       containerId: container.cid,
       pullFunction: body.pullFunction,
-      pulled: { pallets: pulledPallets, cartons: container.quantity, ssps: container.sspQuantity },
+      pulled: { pallets: pulledPallets, cartons: container.cartonQuantity, ssps: container.sspQuantity },
       remaining: { pallets: newPallets, cartons: newCartons, ssps: newSSPs },
       verifiedVia,
       wasScanned: body.wasScanned === true,

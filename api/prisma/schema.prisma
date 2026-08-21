@@ -336,7 +336,8 @@ model Container {
   dept             Int
   class            Int
   item             Int
-  quantity         Int
+  palletQuantity   Int      @default(0)
+  cartonQuantity   Int
   sspQuantity      Int
   batchDate        Int
   purgeDate        DateTime @db.Date
