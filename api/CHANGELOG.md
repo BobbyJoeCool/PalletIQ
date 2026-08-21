@@ -4,12 +4,37 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.2.4 — 2026-08-21](#124--2026-08-21)
 - [1.2.3 — 2026-08-20](#123--2026-08-20)
 - [1.2.2 — 2026-08-20](#122--2026-08-20)
 - [1.2.1 — 2026-08-03](#121--2026-08-03)
 - [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
+
+---
+
+## [1.2.4] — 2026-08-21
+
+Backend for floor-app's `[1.8.11]` entry — CII completion, per-record audit trail (#90).
+
+### 1.2.4 — Added
+
+- `GET /api/pallets/{id}/activity` — per-pallet ActivityLog entries, 30-day window, newest
+  first. Same response shape as the existing `GET /api/activity` endpoint.
+- `GET /api/locations/{locId}/activity` — per-location ActivityLog entries (8-digit
+  location barcode as path param), 30-day window, newest first.
+- Schema indexes on `ActivityLog` for `[palletId, timestamp]` and
+  `[locationAisle, locationBin, locationLevel, timestamp]`.
+- CII event log: synthesized CREATED events for Overpack, SSP Unit, Stray Each;
+  added `OverpackPlacementEvent` and `ContainerCancelEvent` queries for SSP Unit, Stray
+  Each, and SSP Pull Master children.
+- CII inquiry: Full Case response now includes `purgeDate`.
+
+### 1.2.4 — Fixed
+
+- CII SSP Master Cancel: cascading cancel set child SSPUnit status to `SHIPPED` instead of
+  `CANCELED`.
 
 ---
 

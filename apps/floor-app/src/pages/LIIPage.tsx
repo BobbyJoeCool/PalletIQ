@@ -9,6 +9,7 @@ import { useLII, type LIILocationData } from '../context/LIIContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
+import { RecordActivityPanel } from '../components/shared/RecordActivityPanel';
 
 const HOLD_NAMES: Record<string, string> = {
   HOLD_IN: 'Hold Inbound',
@@ -184,6 +185,12 @@ export function LIIPage() {
               Hold
             </button>
           </div>
+
+          <RecordActivityPanel
+            endpoint={`/api/locations/${locationId}/activity`}
+            token={token!}
+            recordLabel={`Location ${locationId}`}
+          />
         </div>
       )}
     </div>

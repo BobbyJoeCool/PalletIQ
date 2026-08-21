@@ -72,11 +72,15 @@ export function CIIPage() {
     void lookup(cid, cid.slice(0, 2) as CidTypeCode);
   }
 
+  function navigateToPRQ() {
+    navigate('/reporting/pull-request');
+  }
+
   function renderDetail() {
     if (!data) return null;
     const props = { data, isIM, token: token!, onRefresh: () => void lookup(data.cid, data.type as CidTypeCode) };
     switch (data.type) {
-      case '91': return <CIIFullCaseDetail {...props} data={data} onNavigatePallet={navigateToPallet} onNavigateItem={navigateToItem} onNavigateLocation={navigateToLocation} />;
+      case '91': return <CIIFullCaseDetail {...props} data={data} onNavigatePallet={navigateToPallet} onNavigateItem={navigateToItem} onNavigateLocation={navigateToLocation} onNavigatePRQ={navigateToPRQ} />;
       case '92': return <CIIOverpackDetail {...props} data={data} onNavigateContainer={navigateToContainer} />;
       case '93': return <CIISSPMasterDetail {...props} data={data} onNavigatePallet={navigateToPallet} onNavigateItem={navigateToItem} onNavigateLocation={navigateToLocation} onNavigateContainer={navigateToContainer} />;
       case '94': return <CIISSPUnitDetail data={data} onNavigateContainer={navigateToContainer} onNavigateItem={navigateToItem} />;

@@ -14,9 +14,10 @@ interface Props {
   onNavigatePallet: (pid: number) => void;
   onNavigateItem: (dept: number, cls: number, item: number) => void;
   onNavigateLocation: (aisle: number, bin: number, level: number) => void;
+  onNavigatePRQ: () => void;
 }
 
-export function CIIFullCaseDetail({ data, isIM, token, onRefresh, onNavigatePallet, onNavigateItem, onNavigateLocation }: Props) {
+export function CIIFullCaseDetail({ data, isIM, token, onRefresh, onNavigatePallet, onNavigateItem, onNavigateLocation, onNavigatePRQ }: Props) {
   const [showCancel, setShowCancel] = useState(false);
   const canCancel = isIM && ['AVAILABLE', 'VERIFIED'].includes(data.status);
 
@@ -32,6 +33,7 @@ export function CIIFullCaseDetail({ data, isIM, token, onRefresh, onNavigatePall
       <DataRow label="Qty: Cartons">{data.quantity.cartons}</DataRow>
       <DataRow label="Qty: SSPs">{data.quantity.ssps}</DataRow>
       <DataRow label="Batch Date">{data.batchDate ?? '—'}</DataRow>
+      <DataRow label="Purge Date">{data.purgeDate ? new Date(data.purgeDate).toLocaleDateString() : '—'}</DataRow>
       <DataRow label="Destination">{data.destinationStore.name} (#{data.destinationStore.id})</DataRow>
       <DataRow label="Pallet ID">
         <button type="button" onClick={() => onNavigatePallet(data.pallet.pid)} className="text-[#4499FF] underline">{data.pallet.pid}</button>
@@ -44,6 +46,10 @@ export function CIIFullCaseDetail({ data, isIM, token, onRefresh, onNavigatePall
           </button>
         </DataRow>
       )}
+
+      <DataRow label="Pull Request">
+        <button type="button" onClick={onNavigatePRQ} className="text-[#4499FF] underline">View in PRQ</button>
+      </DataRow>
 
       {canCancel && (
         <div className="mt-4">

@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.11 — 2026-08-21](#1811--2026-08-21)
 - [1.8.10 — 2026-08-20](#1810--2026-08-20)
 - [1.8.9 — 2026-08-20](#189--2026-08-20)
 - [1.8.8 — 2026-08-19](#188--2026-08-19)
@@ -189,6 +190,46 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.8.11] — 2026-08-21
+
+CII completion, per-record audit trail (#90), and IRP ship. API v1.2.4.
+
+### 1.8.11 — Added
+
+- **Per-record audit trail** (#90) — inline expandable panel on PII and LII showing the
+  last 30 days of `ActivityLog` entries for the loaded Pallet ID or Location ID. Collapsed
+  by default; fetches on first expand. New `RecordActivityPanel` shared component reuses
+  the same entry rendering as `ActivityLogOverlay`.
+- **API: `GET /api/pallets/{id}/activity`** — per-pallet activity log, 30-day window,
+  newest first.
+- **API: `GET /api/locations/{locId}/activity`** — per-location activity log, 30-day
+  window, newest first.
+- **Schema indexes** — `ActivityLog[palletId, timestamp]` and
+  `ActivityLog[locationAisle, locationBin, locationLevel, timestamp]` for efficient
+  per-record queries.
+- **CII Full Case: Purge Date** row added to detail view.
+- **CII Full Case: PRQ link** — "View in PRQ" navigates to the Pull Request screen.
+- **CII Overpack: "Opened N days ago"** indicator with warning styling (orange) past 3
+  days, per spec.
+- **CII event log: synthesized CREATED events** for Overpack (from `createdAt`), SSP Unit,
+  and Stray Each.
+- **CII event log: SSP Unit** now queries `OverpackPlacementEvent` (pack events) and
+  `ContainerCancelEvent` (cascade cancels).
+- **CII event log: Stray Each** now queries `OverpackPlacementEvent` and
+  `ContainerCancelEvent`.
+- **CII event log: SSP Pull Master** now queries `OverpackPlacementEvent` for its
+  children's pack events.
+- **IRP** — Individual Reporting screen shipped (built in v1.7.x, routes/jump code already
+  wired). Personal productivity dashboard: 9-function summary with tap-to-zoom hourly
+  drill-down. `IRPPage.tsx`, `IRPHourlyPage.tsx`, jump code `IRP`.
+
+### 1.8.11 — Fixed
+
+- **CII SSP Master Cancel bug** — cascading cancel set children to `SHIPPED` instead of
+  `CANCELED` (`containerInquiry.ts:359`).
 
 ---
 
