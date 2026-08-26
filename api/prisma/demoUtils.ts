@@ -59,16 +59,21 @@ export function makePidGenerator(usedPids: Set<number> = new Set()): () => numbe
   };
 }
 
-/** Builds a Container ID string: store(4) + DPCI(9) + pid(8) + random(8) + batchDate. */
+/** Builds a canonical 35-digit CID: TYPE(2) + DEST_STORE(4) + DPCI(9) + PALLET_ID(8) +
+ *  CARTON_NUM(3) + PACKING_ZONE(2) + BATCH_DATE(7). All demo containers are Full Case
+ *  (type 91); carton number and packing zone are randomized. */
 export function genCid(storeId: number, dept: number, cls: number, item: number, pid: number, batchDate: number): string {
-  const rnd = Math.random().toString(36).substring(2, 10).padEnd(8, '0');
+  const cartonNum = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
+  const packZone = String(Math.floor(Math.random() * 99) + 1).padStart(2, '0');
   return (
+    '91' +
     String(storeId).padStart(4, '0') +
     String(dept).padStart(3, '0') +
     String(cls).padStart(2, '0') +
     String(item).padStart(4, '0') +
     String(pid).padStart(8, '0') +
-    rnd +
-    String(batchDate)
+    cartonNum +
+    packZone +
+    String(batchDate).padStart(7, '0')
   );
 }

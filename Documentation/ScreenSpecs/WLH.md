@@ -229,3 +229,19 @@ flowchart TD
 | 2026-07-17 | Rebuilt onto the new screen-spec template from the legacy `DevNotes/Screen-Specs/WLH.md`, reconciled against the current shipped code: added Range Mode (v1.5.0) and the Find Held/Available helper bar (v1.5.0), neither present in the old doc; corrected the role table (Hold Both is placeable by any role including Worker, matching `HOLD_LABELS`/`HOLD_PLACE_MIN_ROLE` — the old doc's "All roles" wording for Place was retained but Remove's IM+ floor for Hold Both is now explicit); removed the old doc's Location "Status" row from the State 2 display description — the current `HoldPanel`/WLH UI does not render occupancy status (EMPTY/STORED/etc.) at all, only the location id and Current Hold, a divergence from the original spec's documented State 2 layout. |
 | 2026-07-12 (v1.5.0) | Range Mode and Find Held/Available Location shipped — see `CHANGELOG.md` [1.5.0]. |
 | 2026-07-05 (v0.9.0) | Initial build — single-location Hold Place/Replace/Remove, role-gated hold types, shared `HoldPanel` also used inline on PIP/SDP/MNP, per `DevNotes/Screen-Specs/WLH.md`'s original design. |
+
+## Tab Order
+
+Tab / Back Tab navigation is wired only in **Range mode** (IM+ only), inside
+the `RangeHoldPanel` component. Single Location mode relies on
+`LocationEntryFields`' own auto-advance chain (Aisle/Bin/Level) and does not
+register a separate `useTabOrder` -- competing parent/child tab handlers would
+conflict.
+
+**Range mode** (wraps in both directions):
+
+1. Aisle
+2. Start Bin
+3. End Bin
+4. Start Level
+5. End Level

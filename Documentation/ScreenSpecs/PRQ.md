@@ -85,3 +85,18 @@ Full-screen overlay showing complete detail for one pull:
 - `apps/floor-app/src/pages/PRQPage.tsx` — main page with filter bar, 3 level tables, zoom-in button, pull detail popup
 - `apps/floor-app/src/context/PRQContext.tsx` — filter/level/selection state
 - `api/functions/pullRequest.ts` — summary + detail API endpoints
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions), inside the `PRQFilterBar` component:
+
+1. Aisle
+2. End Aisle
+3. Workstation
+4. Bin Start *(Level 3 drill-down only)*
+5. Bin End *(Level 3 drill-down only)*
+6. Level *(Level 3 drill-down only)*
+
+Fields 4-6 are enabled only when the current drill-down level is L3
+(location-level).

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AisleGrid, type GridLevel, type ZoneBinRange } from '../components/shared/AisleGrid';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { type CodePickerFieldHandle } from '../components/shared/CodePickerField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { ZoneCodeBadge } from '../components/shared/ZoneCodeBadge';
 import { useAuth } from '../context/AuthContext';
@@ -10,6 +11,7 @@ import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { useNumpadField } from '../lib/useNumpadField';
+import { useTabOrder } from '../lib/useTabOrder';
 import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 
 interface Breakdown {
@@ -56,6 +58,7 @@ export function ELZPage() {
 
   // padOnSubmit: typing "5" and hitting OK is accepted as "005" (see LocationEntryFields).
   const aisleField = useNumpadField('numpad', 3, true);
+  const storageCodeRef = useRef<CodePickerFieldHandle>(null);
   // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
   // ELZContext.tsx's own doc comment. Router-state prefill (below) still wins over the
   // persisted value on a fresh navigation with explicit state attached.
@@ -97,6 +100,11 @@ export function ELZPage() {
       hidePanel();
     });
   }, [aisleField, hidePanel, setAisle]);
+
+  useTabOrder([
+    { fieldId: aisleField.fieldId, activate: focusAisleField },
+    { fieldId: storageCodeRef.current?.fieldId ?? '', activate: () => storageCodeRef.current?.focus() },
+  ]);
 
   // Query trigger: grid loads from Aisle alone (issue #60 — Storage Code is no longer
   // required); re-runs on either field's change. When Storage Code is present the zone
@@ -164,7 +172,7 @@ export function ELZPage() {
           valueClass="text-[26px] font-medium"
           caretClass="w-[2px] h-[28px]"
         />
-        <StorageCodeField value={storageCode} onChange={setStorageCode} aisle={aisle} closeOnAutoSubmit onValidityChange={setIsInvalidStorageCode} />
+        <StorageCodeField ref={storageCodeRef} value={storageCode} onChange={setStorageCode} aisle={aisle} closeOnAutoSubmit onValidityChange={setIsInvalidStorageCode} />
       </div>
 
       {/* Main area: grid + zone summary */}

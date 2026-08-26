@@ -160,7 +160,7 @@ export function useNumpadField(panel: 'numpad' | 'keyboard' = 'numpad', maxLengt
   // render loop if that recomputed value flows back into shared state (see PIP's
   // pre-existing "Maximum update depth exceeded" bug, root-caused to exactly this).
   return useMemo(
-    () => ({ value, focus, clear, set, isActive }),
-    [value, focus, clear, set, isActive],
+    () => ({ value, focus, clear, set, isActive, fieldId }),
+    [value, focus, clear, set, isActive, fieldId],
   );
 }

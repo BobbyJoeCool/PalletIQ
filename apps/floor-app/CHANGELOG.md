@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.12 — 2026-08-26](#1812--2026-08-26)
 - [1.8.11 — 2026-08-21](#1811--2026-08-21)
 - [1.8.10 — 2026-08-20](#1810--2026-08-20)
 - [1.8.9 — 2026-08-20](#189--2026-08-20)
@@ -190,6 +191,50 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.8.12] — 2026-08-26
+
+Tab/Back Tab field navigation (#199), CII polish, IRP totals row (#133 partial).
+API v1.2.5.
+
+### 1.8.12 — Added
+
+- **Tab/Back Tab field navigation** (#199) — the Tab and Back Tab buttons on Numpad and
+  Keyboard now navigate between fields on every screen. New `useTabOrder` hook declares
+  per-screen field order; `NumpadContext.handleKey` intercepts `'Tab'`/`'Back Tab'` and
+  routes them to the screen's registered handler. Wraps at both ends; disabled fields are
+  skipped. Wired on: ELZ, SDP, MNP, PIP, PAR, PII, WLH (range mode), ELA, PRQ, IID, ISI,
+  LII. Not wired on STG (complex multi-component layout), CII (single field), SAR (no
+  numpad fields).
+- **`useNumpadField` — `fieldId` exposed** in the returned object so screens can reference
+  a field's stable `useId()` token for tab-order slots.
+- **Component forwardRef conversions** — `LocationEntryFields`, `StorageCodeField`,
+  `ZoneField` converted to forwardRef with imperative handles exposing internal field IDs
+  and focus methods. `CodePickerFieldHandle`, `PalletIdFieldHandle`,
+  `ContainerIdFieldHandle` extended with `fieldId`.
+- **IRP totals row** (#133 partial) — `TotalsRow` component pinned to top of function list;
+  computes Total Hours, Total Hours of Work, and weighted Total % to Goal client-side from
+  existing per-function response data. No API or schema changes.
+- **CII demo scanner: type selector** — dropdown visible when Container ID is empty lets
+  the user pick a container type (91–95) before scanning; type param passed through to
+  `fetchValidContainer`/`fetchContainerByStatus`.
+- **API: `sampleContainer` type filter** — `type` query param filters by container type
+  (92→Overpack, 94→SSPUnit, 95→StrayEach, 91/93→Container prefix).
+
+### 1.8.12 — Fixed
+
+- **CII detail layouts** — all five detail views (Full Case, Overpack, SSP Master, SSP
+  Unit, Stray Each) split from single-column to 2-column layout to fit event log column.
+- **PII/LII RecordActivityPanel** — rewritten from collapsible to always-visible
+  fixed-height (240px) panel with touch scroll; moved into right column.
+- **CII event log column width** — `w-[380px]` → `w-[340px] shrink-0`.
+- **CID field width** — `w-[420px]` → `w-[520px]`, text `text-[22px]` → `text-[18px]` to
+  fit 35-digit CIDs.
+- **`genCid()` format** — rewrote to produce canonical 35-digit CIDs with proper
+  TYPE+DEST_STORE+DPCI+PALLET_ID+CARTON_NUM+PACKING_ZONE+BATCH_DATE format (was producing
+  alphanumeric via `toString(36)`, failing validation).
 
 ---
 

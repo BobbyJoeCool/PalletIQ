@@ -3,7 +3,7 @@ import { DataRow } from '../components/shared/DataRow';
 import { ContainerDemoScannerBar } from '../components/shared/ContainerDemoScannerBar';
 import { Dropdown } from '../components/shared/Dropdown';
 import { HoldPanel } from '../components/shared/HoldPanel';
-import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { LocationEntryFields, type LocationEntryFieldsHandle } from '../components/shared/LocationEntryFields';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
@@ -20,6 +20,7 @@ import { playAlert } from '../lib/audio';
 import { PULL_FUNCTIONS } from '../lib/demoScanner';
 import { useDigitInput } from '../lib/useDigitInput';
 import { useNumpadField } from '../lib/useNumpadField';
+import { useTabOrder } from '../lib/useTabOrder';
 import { fmtLocation } from '../lib/fmt';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -337,6 +338,7 @@ export function PIPPage() {
 
   const containerField = useNumpadField();
   const pidFieldRef   = useRef<PalletIdFieldHandle>(null);
+  const locRef = useRef<LocationEntryFieldsHandle>(null);
   const [pidValue, setPidValue] = useState('');
   const [pidActive, setPidActive] = useState(false);
   // Invalid-wash flags (issue #185) — an unsuccessful Pallet ID/UPC/Location attempt now
@@ -433,6 +435,15 @@ export function PIPPage() {
     suppressAutoPidFocusRef.current = true;
     upcField.focus(handleUpcVerify);
   }, [upcField]);
+
+  useTabOrder([
+    { fieldId: containerField.fieldId, activate: focusContainerField, enabled: screenState === 'ready' },
+    { fieldId: pidFieldRef.current?.fieldId ?? '', activate: focusPidField, enabled: screenState === 'verifying' && cidStatus === 'valid' },
+    { fieldId: upcField.fieldId, activate: focusUpcField, enabled: screenState === 'verifying' && cidStatus === 'valid' },
+    { fieldId: locRef.current?.aisleFieldId ?? '', activate: () => locRef.current?.focusAisle(), enabled: screenState === 'verifying' && cidStatus === 'valid' },
+    { fieldId: locRef.current?.binFieldId ?? '', activate: () => locRef.current?.focusBin(), enabled: screenState === 'verifying' && cidStatus === 'valid' },
+    { fieldId: locRef.current?.levelFieldId ?? '', activate: () => locRef.current?.focusLevel(), enabled: screenState === 'verifying' && cidStatus === 'valid' },
+  ]);
 
   /** Clears Location's three boxes via a full remount; pass autoFocus to also refocus Aisle immediately (matching PID/UPC's clear-and-refocus-on-error behavior). */
   const resetLocationField = useCallback((autoFocus: boolean) => {
@@ -1034,6 +1045,7 @@ export function PIPPage() {
             <div className="flex flex-col gap-1">
               <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Location</span>
               <LocationEntryFields
+                ref={locRef}
                 key={locationEntryKey}
                 autoFocus={locationAutoFocusRef.current}
                 onResolved={handleLocationVerify}

@@ -36,16 +36,11 @@ z-index at all, so any `ModalOverlay`-wrapped dialog needing keyboard/numpad inp
 fully blocked/unreachable underneath it. Fixed once at the panel level rather than patched
 per-dialog, so it applies to every current and future modal automatically.
 
-**Tab/Back Tab are inert today** — they dispatch their own key strings (`'Tab'`/`'Back
-Tab'`) but nothing consumes them yet. Confirmed while researching #100 that no field-
-navigation mechanism (an ordered field registry, `focusNext`/`focusPrev`) exists anywhere
-in the app — every existing "advance to next field" (SDP, MNP, PAR, PIP) is a bespoke
-single-field `.focus()` call wired per screen, with no shared abstraction a generic Tab
-implementation could plug into. Building that was scoped out of #100 itself to
-[#199](https://github.com/BobbyJoeCool/PalletIQ/issues/199) (screen-by-screen field-order
-design) rather than guessed at here — see that issue for the open design question. Tapping either button is a
-silent no-op (`useNumpadField`'s handler has no final `else` branch, so an unrecognized key
-string is simply dropped, same as before this change for any other unmapped key).
+**Tab/Back Tab** dispatch `'Tab'`/`'Back Tab'` key strings, which `NumpadContext.handleKey`
+intercepts before the active field's own handler and routes to the screen's `useTabOrder`
+hook (issue #199). Each screen declares its ordered field slots; Tab advances forward,
+Back Tab backward, wrapping at both ends. Screens without a `useTabOrder` call ignore
+both keys silently.
 
 ## Props / Hook API
 
@@ -60,8 +55,8 @@ Renders the 4×4 (3+1-spanning) button grid described above. Every tap calls
 | --- | --- | --- |
 | `7`–`9`, `0`–`1`–`2`–`3`, `4`–`6` | the digit itself | unchanged from the old layout |
 | `⌫` | `'⌫'` | same key/label as before — just moved from the old bottom-left slot to the 4th column |
-| `Tab` | `'Tab'` | new, inert (see above) |
-| `Back Tab` | `'Back Tab'` | new, inert (see above) |
+| `Tab` | `'Tab'` | intercepted by NumpadContext, routed to `useTabOrder` (issue #199) |
+| `Back Tab` | `'Back Tab'` | intercepted by NumpadContext, routed to `useTabOrder` (issue #199) |
 | `Clear` | `'CLEAR'` | new on this panel; same key string `Keyboard.tsx`'s pre-existing Clear button already uses |
 | `Enter` | `'Enter'` | renamed from `OK` (issue #100) — `useNumpadField` already treats `'Enter'`/`'OK'`/`'Blur'` as equivalent submit triggers, so this is label-only, not a new codepath |
 

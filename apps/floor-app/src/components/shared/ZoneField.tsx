@@ -1,4 +1,5 @@
-import { CodePickerField, type CodeOption } from './CodePickerField';
+import { forwardRef } from 'react';
+import { CodePickerField, type CodePickerFieldHandle, type CodeOption } from './CodePickerField';
 
 const ZONE_OPTIONS: CodeOption[] = [1, 2, 3, 4].map((z) => ({ code: String(z), desc: `Zone ${z}` }));
 
@@ -31,9 +32,10 @@ interface ZoneFieldProps {
  * `onInvalid`/`onValidityChange` added (Feature 10) — previously missing entirely, so
  * this field could never wash even though `CodePickerField` already supported it.
  */
-export function ZoneField({ value, onChange, size = 'default', width, label = 'Zone', disabled = false, strict = false, onInvalid, onValidityChange, invalid = false }: ZoneFieldProps) {
+export const ZoneField = forwardRef<CodePickerFieldHandle, ZoneFieldProps>(function ZoneField({ value, onChange, size = 'default', width, label = 'Zone', disabled = false, strict = false, onInvalid, onValidityChange, invalid = false }, ref) {
   return (
     <CodePickerField
+      ref={ref}
       value={value != null ? String(value) : ''}
       onChange={(v) => onChange(v ? parseInt(v, 10) : null)}
       options={ZONE_OPTIONS}
@@ -50,4 +52,4 @@ export function ZoneField({ value, onChange, size = 'default', width, label = 'Z
       invalid={invalid}
     />
   );
-}
+});

@@ -525,3 +525,11 @@ next to the zone summary, not a bug where the log renders twice (it's the same
 | 2026-07-06 (v1.0.5) | Fixed (all 6 items filed against STG in the v0.9.1 bug report, frontend-only): master info now fully pulls in when navigating to STG from ELZ/ELA; second/third stack location-collision and no-propagation bugs fixed via client-side priority-order exclusion between sibling stacks (a since-superseded architecture, replaced by v1.3.0/v1.4.1's single-computing-stack model); Fill All's disabled state now responds to quantity entry; dynamic sizing + bold red final location added to the per-stack "Pallets Go To" list; STG's embedded zone map (`AisleGrid`, `dense` prop) made visibly narrower than ELZ's own full-page rendering (the `dense` prop itself was later retired entirely in v1.6.6, once STG's info panel was expanded to `flex-1`). |
 | 2026-07-06 (v1.0.4) | Fixed: STG showed no active-state (focused-field) indicator at all on several of its fields — every numpad/keyboard-driven field, including STG's, now turns its border red while active. |
 | 2026-07-05 (v0.9.0) | Initial build — v0.9.0 (2026-07-05). Shipped as a new feature not present in the legacy system this project improves on: three independent fork-truck stack positions (Aisle/Storage Code/Size/Quantity each), a pallet-rider-triple graphic (already flagged mid-session for a further visual redesign), Master Control's Fill All, per-stack live destination-location list with dynamic sizing, IM+ Unstage Aisle, and a collapsible session log — largely superseded in presentation by every redesign listed above, but establishing the core staging/queue/back-to-front-fill model that has persisted through all of them. |
+
+## Tab Order
+
+STG does not wire `useTabOrder`. The screen's multi-component layout (Master
+Control with its own Aisle/Storage Code/Size/Zone fields, plus three independent
+per-stack field sets each with their own override-gated Aisle/Storage Code/Size/
+Zone/Quantity) would require significant architectural changes to present as a
+single flat tab order. Each field set manages its own focus independently.

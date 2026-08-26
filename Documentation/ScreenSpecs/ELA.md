@@ -276,3 +276,14 @@ button, which is the only behavioral difference between the two call sites.
 | 2026-07-08 (v1.0.9) | Fixed: ELA's Storage Code field didn't blur or dismiss the keyboard after entry — every other field-confirm handler in the app already released the shared input panel; ELA's alone hadn't. |
 | 2026-07-06 (v1.0.4) | Fixed: ELA's Storage Code field (among four screens named in this fix) previously showed no active-state (focused) indicator at all; every numpad/keyboard-driven field, including this one, now turns its border red while active, in addition to the existing blinking-cursor treatment. |
 | 2026-07-05 (v0.9.0) | Initial build — v0.9.0 (2026-07-05). Shipped as part of the original feature-complete core application: Storage Code (required) + Size (then required) filter, per-aisle/per-size empty and staged counts, row selection enabling "View Zone Map"/"Stage Aisle" navigation, shared `AisleGrid`-adjacent empty-locations feature pair with ELZ. |
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions):
+
+1. Storage Code
+2. Size
+3. Start Aisle
+4. End Aisle
+5. Workstation

@@ -166,3 +166,14 @@ flowchart TD
 | 2026-07-06 (v1.0.4) | Aisle/Bin/Level entry fixed to actually auto-advance at each box's fixed digit count, matching what the original spec already called for but the code hadn't implemented; added the `maxLength`/`isScanningRef` mechanism to `useNumpadField`/`LocationEntryFields` that this relies on. |
 | 2026-07-08 (v1.1.0) | Added a second column showing the located pallet's summary alongside the location detail, instead of stacking everything in one narrow column (issue #18); DPCI values made tappable, jumping to IID (issue #47). |
 | Initial build — v0.9.0 (2026-07-05) | LII shipped as part of the initial feature-complete build: read-only location lookup for all roles via a three-field Aisle/Bin/Level entry or full barcode scan, with a pallet summary shown when occupied. |
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions):
+
+1. Aisle
+2. Bin
+3. Level
+
+All three fields are inside the shared `LocationEntryFields` component.

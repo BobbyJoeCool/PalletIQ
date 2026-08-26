@@ -148,3 +148,13 @@ flowchart TD
 | 2026-07-08 (v1.1.0) | DPCI entry split into three separate Dept/Class/Item boxes with auto-advance, replacing one combined field (issue #16) — same pattern later reused by ISI; fixed a bug where the three display boxes stayed on `—` placeholders after a demo scan or `?dpci=` link despite the item loading successfully. |
 | 2026-07-06 (v1.0.4) | Fixed missing focused-field (red border) highlighting on the DPCI/UPC fields. |
 | Initial build — v0.9.0 (2026-07-05) | IID shipped as part of the initial feature-complete build: read-only item lookup for all roles by DPCI or UPC, no edit capability. |
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions):
+
+1. Dept
+2. Class
+3. Item
+4. UPC

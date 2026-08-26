@@ -195,19 +195,22 @@ export const CONTAINER_STATUS_OPTIONS: { value: ContainerStatus; label: string }
 
 /** Fetches a valid, PRINTED container id matching the given pull function — PIP always has
  *  a Pull Function selected and only accepts a container whose own `pullFunction` matches
- *  it, so (unlike Pallet ID's unfiltered "Valid" button) this filter isn't optional here. */
-export async function fetchValidContainer(token: string, fn: string): Promise<string> {
-  const { containerId } = await apiFetch<{ containerId: string }>(`/api/demo/container?fn=${fn}`, token);
+ *  it, so (unlike Pallet ID's unfiltered "Valid" button) this filter isn't optional here.
+ *  Optional `type` narrows to a specific CID type (91–95) — used by CII's type selector. */
+export async function fetchValidContainer(token: string, fn: string, type?: string): Promise<string> {
+  const params = new URLSearchParams();
+  if (fn) params.set('fn', fn);
+  if (type) params.set('type', type);
+  const { containerId } = await apiFetch<{ containerId: string }>(`/api/demo/container?${params.toString()}`, token);
   return containerId;
 }
 
 /** Fetches a container matching an exact status, optionally narrowed by Pull Function
- *  (the by-status popup's own two dropdowns) — replaces PIP's old dedicated "Invalid Label"
- *  picker (Wrong Function/Pulled/Canceled/Purged), each of which is now just a Status pick
- *  here, per the Core Concept section's already-settled "Invalid is strictly not-found" rule. */
-export async function fetchContainerByStatus(token: string, status: ContainerStatus, fn?: string): Promise<string> {
+ *  and/or CID type (91–95). */
+export async function fetchContainerByStatus(token: string, status: ContainerStatus, fn?: string, type?: string): Promise<string> {
   const params = new URLSearchParams({ status });
   if (fn) params.set('fn', fn);
+  if (type) params.set('type', type);
   const { containerId } = await apiFetch<{ containerId: string }>(`/api/demo/container?${params.toString()}`, token);
   return containerId;
 }

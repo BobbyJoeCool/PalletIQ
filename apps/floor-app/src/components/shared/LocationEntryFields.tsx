@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useNumpad } from '../../context/NumpadContext';
 import { useDemoSlot } from '../../context/FooterDemoContext';
 import { INVALID_WASH } from '../../lib/invalidWash';
@@ -158,6 +158,15 @@ interface LocationEntryFieldsProps {
   onLockedMismatch?: (message: string) => void;
 }
 
+export interface LocationEntryFieldsHandle {
+  aisleFieldId: string;
+  binFieldId: string;
+  levelFieldId: string;
+  focusAisle: () => void;
+  focusBin: () => void;
+  focusLevel: () => void;
+}
+
 /**
  * Shared three-field Aisle/Bin/Level entry with auto-advance, plus an always-on full
  * 8-digit barcode scan — used identically by LII and WLH per their screen specs ("same
@@ -175,13 +184,13 @@ interface LocationEntryFieldsProps {
  * a locked one — unless it disagrees with that locked box's own known value, in which
  * case `onLockedMismatch` fires instead of `onResolved` (issue #183).
  */
-export function LocationEntryFields({
+export const LocationEntryFields = forwardRef<LocationEntryFieldsHandle, LocationEntryFieldsProps>(function LocationEntryFields({
   onResolved, autoFocus = true, value, highlight = false, onActiveChange, lockedAisle, lockedLevel, size = 'default',
   levelOptional = false, checkAisle, checkAisleBin, onAisleValidityChange, onBinValidityChange,
   aisleInvalid: externalAisleInvalid = false, binInvalid: externalBinInvalid = false, levelInvalid = false,
   groupInvalid = false, demoScanner = false, demoItemStorageCode, demoScannedPalletId,
   disabled = false, onLockedMismatch,
-}: LocationEntryFieldsProps) {
+}, ref) {
   const { hidePanel } = useNumpad();
   // maxLength auto-advances once the fixed-length manual entry is complete (3/3/2 digits);
   // a full 8-digit scanner override still lands correctly since NumpadContext's
@@ -260,6 +269,15 @@ export function LocationEntryFields({
   function focusLevelField() {
     levelField.focus(handleLevelConfirm);
   }
+
+  useImperativeHandle(ref, () => ({
+    aisleFieldId: aisleField.fieldId,
+    binFieldId: binField.fieldId,
+    levelFieldId: levelField.fieldId,
+    focusAisle: focusAisleField,
+    focusBin: focusBinField,
+    focusLevel: focusLevelField,
+  }));
 
   /** A full-value scan/prefill override bypasses the interactive per-box chain entirely,
    *  so any internal invalid state left over from a prior manual attempt no longer means
@@ -463,4 +481,4 @@ export function LocationEntryFields({
       </div>
     </div>
   );
-}
+});

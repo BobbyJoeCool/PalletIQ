@@ -1,6 +1,7 @@
+import { forwardRef } from 'react';
 import { useStorageCodes } from '../../lib/useStorageCodes';
 import { useAisleFreightTypes } from '../../lib/useAisleFreightTypes';
-import { CodePickerField, type CodeOption } from './CodePickerField';
+import { CodePickerField, type CodePickerFieldHandle, type CodeOption } from './CodePickerField';
 
 interface StorageCodeFieldProps {
   value: string;
@@ -55,7 +56,7 @@ interface StorageCodeFieldProps {
  * explicit `options` override, or the full `GET /api/storage-codes` reference list
  * otherwise.
  */
-export function StorageCodeField({ value, onChange, aisle, strictToAisle = false, options, size = 'default', width, label = 'Storage Code', disabled = false, closeOnAutoSubmit = false, strict = false, onInvalid, onValidityChange, invalid = false }: StorageCodeFieldProps) {
+export const StorageCodeField = forwardRef<CodePickerFieldHandle, StorageCodeFieldProps>(function StorageCodeField({ value, onChange, aisle, strictToAisle = false, options, size = 'default', width, label = 'Storage Code', disabled = false, closeOnAutoSubmit = false, strict = false, onInvalid, onValidityChange, invalid = false }, ref) {
   // Always called (Rules of Hooks) — its cached result is simply unused once `options` or
   // `aisle`-based narrowing supplies a list instead.
   const fullList = useStorageCodes();
@@ -79,6 +80,7 @@ export function StorageCodeField({ value, onChange, aisle, strictToAisle = false
 
   return (
     <CodePickerField
+      ref={ref}
       value={value}
       onChange={onChange}
       options={resolvedOptions}
@@ -99,4 +101,4 @@ export function StorageCodeField({ value, onChange, aisle, strictToAisle = false
       invalid={invalid}
     />
   );
-}
+});

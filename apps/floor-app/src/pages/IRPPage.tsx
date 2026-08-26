@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/api';
-import { FUNCTION_META, fmtClock, type FunctionFieldValues } from '../lib/irpFormat';
-import { FunctionFields } from '../components/shared/IRPFields';
+import { FUNCTION_META, fmtClock, fmt1, fmtPct, type FunctionFieldValues } from '../lib/irpFormat';
+import { FunctionFields, Field } from '../components/shared/IRPFields';
 
 interface FunctionSummary extends FunctionFieldValues {
   greyed: boolean;
@@ -15,6 +15,34 @@ interface SummaryResponse {
   shiftStart: string | null;
   shiftEnd: string;
   functions: FunctionSummary[];
+}
+
+function computeTotals(functions: FunctionSummary[]): { totalHours: number; totalHoursOfWork: number | null; totalPctToGoal: number | null } {
+  let totalHours = 0;
+  let totalHoursOfWork = 0;
+  let hasAnyGoal = false;
+  for (const f of functions) {
+    if (f.greyed) continue;
+    totalHours += f.hours;
+    if (f.hoursOfWork != null) {
+      totalHoursOfWork += f.hoursOfWork;
+      hasAnyGoal = true;
+    }
+  }
+  const totalPctToGoal = hasAnyGoal && totalHours > 0 ? totalHoursOfWork / totalHours : null;
+  return { totalHours, totalHoursOfWork: hasAnyGoal ? totalHoursOfWork : null, totalPctToGoal };
+}
+
+function TotalsRow({ functions }: { functions: FunctionSummary[] }) {
+  const { totalHours, totalHoursOfWork, totalPctToGoal } = computeTotals(functions);
+  return (
+    <div className="flex items-center gap-6 px-5 py-3 border-b-2 border-[#3A3A3A] bg-[#0A0A0A]">
+      <span className="font-ui text-[16px] font-semibold text-white w-[170px] shrink-0">Totals</span>
+      <Field label="Total Hours" value={fmt1(totalHours)} />
+      <Field label="Hours of Work" value={fmt1(totalHoursOfWork)} />
+      <Field label="% to Goal" value={fmtPct(totalPctToGoal)} star pct={totalPctToGoal} />
+    </div>
+  );
 }
 
 /** One IRP summary row — tapping a non-greyed row zooms into its hourly breakdown. */
@@ -73,13 +101,16 @@ export function IRPPage() {
         ) : !data || data.functions.length === 0 ? (
           <p className="px-5 py-4 font-ui text-[15px] text-[#555]">Unable to load today's data</p>
         ) : (
-          data.functions.map((f) => (
-            <FunctionRow
-              key={f.functionCode}
-              summary={f}
-              onOpen={() => navigate(`/reporting/individual/${f.functionCode}`)}
-            />
-          ))
+          <>
+            <TotalsRow functions={data.functions} />
+            {data.functions.map((f) => (
+              <FunctionRow
+                key={f.functionCode}
+                summary={f}
+                onOpen={() => navigate(`/reporting/individual/${f.functionCode}`)}
+              />
+            ))}
+          </>
         )}
       </div>
     </div>

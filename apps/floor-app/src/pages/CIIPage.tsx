@@ -111,16 +111,14 @@ export function CIIPage() {
         {loading && <span className="font-ui text-[14px] text-[#666]">Loading...</span>}
       </div>
 
-      {/* Body — two column layout */}
+      {/* Body — detail (2 cols) + event log (3rd col) */}
       {data && (
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          {/* Left: type-specific detail */}
           <div className="flex-1 overflow-y-auto px-6 py-4">
             {renderDetail()}
           </div>
 
-          {/* Right: event log */}
-          <div className="w-[380px] border-l border-[#1A1A1A] overflow-y-auto px-4 py-4">
+          <div className="w-[340px] shrink-0 border-l border-[#1A1A1A] overflow-y-auto px-4 py-4">
             <CIIEventLog cid={data.cid} token={token!} onNavigateContainer={navigateToContainer} />
           </div>
         </div>

@@ -191,3 +191,20 @@ flowchart TD
 | 2026-07-08 (v1.0.9) | The "✓ Empty"/"~ Occupied" demo destination buttons started pre-filling the Level Confirmation modal with the fetched location's actual level (previously left blank even though the system already knew it). |
 | 2026-07-06 (v1.0.3) | Fixed the "✗ PID" demo button showing a generic "Scan failed" instead of "Pallet not found" (non-numeric placeholder ID failed the API's numeric validation before ever reaching the not-found check; changed to a numeric placeholder that simply doesn't exist). |
 | Initial build — v0.9.0 (2026-07-05) | Manual Put: worker-directed put-away/move with pallet-eligibility safety checks, no system direction, no reservation, no screen lock.
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions). Which fields are active depends on the screen state:
+
+**Ready state** (before pallet scan):
+
+1. Pallet ID
+
+**Pallet Scanned state** (after a pallet loads):
+
+1. Aisle
+2. Bin
+3. Level
+
+The location fields are inside the shared `LocationEntryFields` component.

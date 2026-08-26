@@ -19,6 +19,7 @@ import { usePalletIdField } from '../lib/usePalletIdField';
 import { useDpciFields } from '../lib/useDpciFields';
 import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
+import { useTabOrder } from '../lib/useTabOrder';
 import { checkSspCap, checkVcpSspRatio } from '../lib/vcpSspValidation';
 import { RecordActivityPanel } from '../components/shared/RecordActivityPanel';
 
@@ -280,6 +281,22 @@ export function PIIPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idParam]);
 
+  const isEdit = screenState === 'edit';
+  useTabOrder([
+    { fieldId: pidField.field.fieldId, activate: pidField.focusField, enabled: screenState === 'ready' },
+    { fieldId: dpciFields.deptField.fieldId, activate: dpciFields.focusDeptField, enabled: isEdit },
+    { fieldId: dpciFields.classField.fieldId, activate: dpciFields.focusClassField, enabled: isEdit },
+    { fieldId: dpciFields.itemField.fieldId, activate: dpciFields.focusItemField, enabled: isEdit },
+    { fieldId: vcpEdit.field.fieldId, activate: vcpEdit.focus, enabled: isEdit },
+    { fieldId: sspEdit.field.fieldId, activate: sspEdit.focus, enabled: isEdit },
+    { fieldId: cartonsEdit.field.fieldId, activate: cartonsEdit.focus, enabled: isEdit },
+    { fieldId: sspsEdit.field.fieldId, activate: sspsEdit.focus, enabled: isEdit },
+    { fieldId: palletsEdit.field.fieldId, activate: palletsEdit.focus, enabled: isEdit },
+    { fieldId: monthField.fieldId, activate: focusMonthField, enabled: isEdit },
+    { fieldId: dayField.fieldId, activate: focusDayField, enabled: isEdit },
+    { fieldId: yearField.fieldId, activate: focusYearField, enabled: isEdit },
+  ]);
+
   /** Seeds the edit-mode fields from the currently loaded pallet and switches to the edit state. */
   function enterEditMode() {
     if (!pallet) return;
@@ -521,6 +538,14 @@ export function PIIPage() {
                 <DataRow label="Received By">{fmtUser(pallet.receivedBy, pallet.receivedAt)}</DataRow>
                 <DataRow label="Put By">{fmtUser(pallet.putBy, pallet.putAt)}</DataRow>
                 <DataRow label="Last Pulled By">{fmtUser(pallet.lastPulledBy, pallet.lastPulledAt)}</DataRow>
+
+                {screenState === 'loaded' && (
+                  <RecordActivityPanel
+                    endpoint={`/api/pallets/${pallet.pid}/activity`}
+                    token={token!}
+                    recordLabel={`Pallet ${pallet.pid}`}
+                  />
+                )}
               </div>
             </div>
           )}
@@ -554,13 +579,6 @@ export function PIIPage() {
             )}
           </div>
 
-          {screenState === 'loaded' && (
-            <RecordActivityPanel
-              endpoint={`/api/pallets/${pallet.pid}/activity`}
-              token={token!}
-              recordLabel={`Pallet ${pallet.pid}`}
-            />
-          )}
         </div>
       )}
 

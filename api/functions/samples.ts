@@ -27,7 +27,41 @@ async function sampleContainer(req: HttpRequest, _ctx: InvocationContext): Promi
   const params = new URL(req.url).searchParams;
   const fn = params.get('fn') ?? undefined;
   const status = params.get('status') ?? 'PRINTED';
-  const where = { status, ...(fn ? { pullFunction: fn } : {}) };
+  const typeParam = params.get('type') ?? undefined;
+
+  if (typeParam === '92') {
+    const count = await prisma.overpack.count();
+    if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+    const skip = Math.floor(Math.random() * count);
+    const op = await prisma.overpack.findFirst({ skip, select: { cid: true } });
+    return { containerId: op!.cid };
+  }
+
+  if (typeParam === '94') {
+    const where94 = status !== 'PRINTED' ? { status } : {};
+    const count = await prisma.sSPUnit.count({ where: where94 });
+    if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+    const skip = Math.floor(Math.random() * count);
+    const unit = await prisma.sSPUnit.findFirst({ where: where94, skip, select: { cid: true } });
+    return { containerId: unit!.cid };
+  }
+
+  if (typeParam === '95') {
+    const where95 = status !== 'PRINTED' ? { status } : {};
+    const count = await prisma.strayEach.count({ where: where95 });
+    if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+    const skip = Math.floor(Math.random() * count);
+    const stray = await prisma.strayEach.findFirst({ where: where95, skip, select: { cid: true } });
+    return { containerId: stray!.cid };
+  }
+
+  // Types 91 (Full Case) and 93 (SSP Pull Master) — both in Container table
+  const cidPrefix = typeParam === '93' ? '93' : typeParam === '91' ? '91' : undefined;
+  const where = {
+    status,
+    ...(fn ? { pullFunction: fn } : {}),
+    ...(cidPrefix ? { cid: { startsWith: cidPrefix } } : {}),
+  };
 
   const count = await prisma.container.count({ where });
   if (count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });

@@ -22,37 +22,42 @@ export function CIIFullCaseDetail({ data, isIM, token, onRefresh, onNavigatePall
   const canCancel = isIM && ['AVAILABLE', 'VERIFIED'].includes(data.status);
 
   return (
-    <div className="flex flex-col gap-1">
-      <DataRow label="Status"><StatusBadge status={data.status} /></DataRow>
-      <DataRow label="Pull Function"><span className="text-white">{data.pullFunction}</span></DataRow>
-      <DataRow label="DPCI">
-        <button type="button" onClick={() => onNavigateItem(data.deptClassItem!.dept, data.deptClassItem!.class, data.deptClassItem!.item)} className="text-[#4499FF] underline">{data.dpci}</button>
-      </DataRow>
-      <DataRow label="Item">{data.itemDesc}</DataRow>
-      <DataRow label="Storage Code">{data.storageCode}</DataRow>
-      <DataRow label="Qty: Cartons">{data.quantity.cartons}</DataRow>
-      <DataRow label="Qty: SSPs">{data.quantity.ssps}</DataRow>
-      <DataRow label="Batch Date">{data.batchDate ?? '—'}</DataRow>
-      <DataRow label="Purge Date">{data.purgeDate ? new Date(data.purgeDate).toLocaleDateString() : '—'}</DataRow>
-      <DataRow label="Destination">{data.destinationStore.name} (#{data.destinationStore.id})</DataRow>
-      <DataRow label="Pallet ID">
-        <button type="button" onClick={() => onNavigatePallet(data.pallet.pid)} className="text-[#4499FF] underline">{data.pallet.pid}</button>
-      </DataRow>
-      <DataRow label="Pallet Status"><StatusBadge status={data.pallet.status} /></DataRow>
-      {data.location && (
-        <DataRow label="Location">
-          <button type="button" onClick={() => onNavigateLocation(data.location!.aisle, data.location!.bin, data.location!.level)} className="text-[#4499FF] underline">
-            {String(data.location.aisle).padStart(3, '0')}-{String(data.location.bin).padStart(3, '0')}-{String(data.location.level).padStart(2, '0')}
-          </button>
-        </DataRow>
-      )}
-
-      <DataRow label="Pull Request">
-        <button type="button" onClick={onNavigatePRQ} className="text-[#4499FF] underline">View in PRQ</button>
-      </DataRow>
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-6">
+        <div className="flex-1 flex flex-col gap-1">
+          <DataRow label="Status"><StatusBadge status={data.status} /></DataRow>
+          <DataRow label="Pull Function"><span className="text-white">{data.pullFunction}</span></DataRow>
+          <DataRow label="DPCI">
+            <button type="button" onClick={() => onNavigateItem(data.deptClassItem!.dept, data.deptClassItem!.class, data.deptClassItem!.item)} className="text-[#4499FF] underline">{data.dpci}</button>
+          </DataRow>
+          <DataRow label="Item">{data.itemDesc}</DataRow>
+          <DataRow label="Storage Code">{data.storageCode}</DataRow>
+          <DataRow label="Qty: Cartons">{data.quantity.cartons}</DataRow>
+          <DataRow label="Qty: SSPs">{data.quantity.ssps}</DataRow>
+        </div>
+        <div className="flex-1 flex flex-col gap-1">
+          <DataRow label="Batch Date">{data.batchDate ?? '—'}</DataRow>
+          <DataRow label="Purge Date">{data.purgeDate ? new Date(data.purgeDate).toLocaleDateString() : '—'}</DataRow>
+          <DataRow label="Destination">{data.destinationStore.name} (#{data.destinationStore.id})</DataRow>
+          <DataRow label="Pallet ID">
+            <button type="button" onClick={() => onNavigatePallet(data.pallet.pid)} className="text-[#4499FF] underline">{data.pallet.pid}</button>
+          </DataRow>
+          <DataRow label="Pallet Status"><StatusBadge status={data.pallet.status} /></DataRow>
+          {data.location && (
+            <DataRow label="Location">
+              <button type="button" onClick={() => onNavigateLocation(data.location!.aisle, data.location!.bin, data.location!.level)} className="text-[#4499FF] underline">
+                {String(data.location.aisle).padStart(3, '0')}-{String(data.location.bin).padStart(3, '0')}-{String(data.location.level).padStart(2, '0')}
+              </button>
+            </DataRow>
+          )}
+          <DataRow label="Pull Request">
+            <button type="button" onClick={onNavigatePRQ} className="text-[#4499FF] underline">View in PRQ</button>
+          </DataRow>
+        </div>
+      </div>
 
       {canCancel && (
-        <div className="mt-4">
+        <div className="mt-2">
           <button
             type="button"
             onClick={() => setShowCancel(true)}

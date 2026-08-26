@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AisleSizeTable, type AisleSizeRow, type AisleSizeSort } from '../components/shared/AisleSizeTable';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import type { CodePickerFieldHandle } from '../components/shared/CodePickerField';
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
 import { WorkstationField } from '../components/shared/WorkstationField';
@@ -12,6 +13,7 @@ import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useStorageCodes } from '../lib/useStorageCodes';
+import { useTabOrder } from '../lib/useTabOrder';
 import { useWorkstations, type Workstation } from '../lib/useWorkstations';
 
 type AisleRow = AisleSizeRow;
@@ -127,6 +129,9 @@ export function ELAPage() {
     workstationFilterActive, setWorkstationFilterActive,
     excludedWorkstations, setExcludedWorkstations,
   } = useELA();
+  const storageCodeRef = useRef<CodePickerFieldHandle>(null);
+  const sizeFieldRef = useRef<CodePickerFieldHandle>(null);
+  const workstationRef = useRef<CodePickerFieldHandle>(null);
   const [rows, setRows] = useState<AisleRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState<SortState>({ column: 'aisle', direction: 'asc' });
@@ -165,6 +170,14 @@ export function ELAPage() {
   const handleWorkstationValidityChange = useCallback((inv: boolean) => {
     if (inv) setMessage({ type: 'error', text: 'Invalid Workstation' });
   }, [setMessage]);
+
+  useTabOrder([
+    { fieldId: storageCodeRef.current?.fieldId ?? '', activate: () => storageCodeRef.current?.focus() },
+    { fieldId: sizeFieldRef.current?.fieldId ?? '', activate: () => sizeFieldRef.current?.focus() },
+    { fieldId: aisleStartFields.field.fieldId, activate: aisleStartFields.focusField },
+    { fieldId: aisleEndFields.field.fieldId, activate: aisleEndFields.focusField },
+    { fieldId: workstationRef.current?.fieldId ?? '', activate: () => workstationRef.current?.focus() },
+  ]);
 
   /** Workstation exclude filter (GitHub #125) — toggling the filter chip itself, or
    *  toggling one workstation's membership in the excluded set. */
@@ -288,8 +301,8 @@ export function ELAPage() {
       {/* Top bar: filter fields + navigation actions */}
       <div className="flex items-end justify-between gap-4 shrink-0 flex-wrap">
         <div className="flex items-end gap-4 flex-wrap">
-          <StorageCodeField value={storageCode} onChange={handleStorageCodeChange} closeOnAutoSubmit onValidityChange={setIsInvalidCode} />
-          <SizeField value={size} onChange={(v) => { setSize(v); setSelected(null); }} onValidityChange={setIsInvalidSize} />
+          <StorageCodeField ref={storageCodeRef} value={storageCode} onChange={handleStorageCodeChange} closeOnAutoSubmit onValidityChange={setIsInvalidCode} />
+          <SizeField ref={sizeFieldRef} value={size} onChange={(v) => { setSize(v); setSelected(null); }} onValidityChange={setIsInvalidSize} />
           {/* Aisle Range (GitHub #124) — restricts results to aisles within [start, end]. */}
           <div className="flex items-end gap-2">
             <NumpadFieldBox
@@ -319,6 +332,7 @@ export function ELAPage() {
           {/* Workstation restrict-to (GitHub #124) — independent of the exclude-bubble
               Workstation filter below; both can be active at once. */}
           <WorkstationField
+            ref={workstationRef}
             value={workstation}
             onChange={handleWorkstationChange}
             size="compact"

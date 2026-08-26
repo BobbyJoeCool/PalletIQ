@@ -253,3 +253,11 @@ component with no per-caller divergence left.
 | 2026-07-06 (v1.0.4) | Fixed: ELZ showed no active-state (focused-field) indicator at all — every numpad/keyboard-driven field, including ELZ's Aisle and Storage Code fields, now turns its border red while active. |
 | 2026-07-06 (v1.0.3) | Fixed: zone summary panel's Storage Code-Size rows had no defined sort order — now sorted ascending by size (XS, HS, S, M, L). |
 | 2026-07-05 (v0.9.0) | Initial build — v0.9.0 (2026-07-05). Shipped as part of the original feature-complete core application: Aisle (required) + Storage Code (then required) filter, physical zone/level grid via the shared `AisleGrid` component, per-zone empty/staged summary, "Stage Aisle" navigation to STG. |
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions):
+
+1. Aisle
+2. Storage Code

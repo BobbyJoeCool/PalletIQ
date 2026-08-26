@@ -19,10 +19,8 @@ Layout: a number row (`1`–`0`), three QWERTY rows (last one ending in `⌫`), 
 row — **Tab / Back Tab / Clear / space / Enter** (issue #100 added Tab and Back Tab, and
 renamed the old `OK` button to `Enter`; Clear and space already existed).
 
-**Tab/Back Tab are inert today**, same as `Numpad`'s own new buttons — see `Numpad.md`'s
-"What it is" section for the full explanation (no field-navigation mechanism exists
-anywhere in the app yet; building one was scoped to
-[#199](https://github.com/BobbyJoeCool/PalletIQ/issues/199) rather than guessed at here).
+**Tab/Back Tab** dispatch `'Tab'`/`'Back Tab'` into `NumpadContext.handleKey`, routed to
+the screen's `useTabOrder` hook (issue #199) — see `Numpad.md` for the full mechanism.
 
 **Renders at `z-[60]`** — see `Numpad.md`'s own doc comment (issue #84 fix, 2026-08-03):
 every full-screen dialog tops out at `z-50`, which otherwise sits on top of this panel and
@@ -41,8 +39,8 @@ Renders the number row, three QWERTY rows, and the action row. Every tap calls
 | --- | --- | --- |
 | `1`–`0` (number row), `Q`–`P`/`A`–`L`/`Z`–`M` (QWERTY rows) | the character itself | unchanged |
 | `⌫` (end of the bottom QWERTY row) | `'⌫'` | unchanged |
-| `Tab` | `'Tab'` | new, inert |
-| `Back Tab` | `'Back Tab'` | new, inert |
+| `Tab` | `'Tab'` | intercepted by NumpadContext, routed to `useTabOrder` (issue #199) |
+| `Back Tab` | `'Back Tab'` | intercepted by NumpadContext, routed to `useTabOrder` (issue #199) |
 | `Clear` | `'CLEAR'` | unchanged — same key `Numpad`'s new Clear button (issue #100) now also dispatches |
 | `space` | `' '` | unchanged |
 | `Enter` | `'Enter'` | renamed from `OK` (issue #100) — label-only, see `Numpad.md`'s equivalent note |

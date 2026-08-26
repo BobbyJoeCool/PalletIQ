@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
-import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { LocationEntryFields, type LocationEntryFieldsHandle } from '../components/shared/LocationEntryFields';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { LiveId } from '../components/ui/LiveId';
 import { useAuth } from '../context/AuthContext';
@@ -9,6 +9,7 @@ import { useLII, type LIILocationData } from '../context/LIIContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
+import { useTabOrder } from '../lib/useTabOrder';
 import { RecordActivityPanel } from '../components/shared/RecordActivityPanel';
 
 const HOLD_NAMES: Record<string, string> = {
@@ -37,6 +38,13 @@ export function LIIPage() {
   // App.tsx), not local state, so it survives navigating away and back.
   const { location: loaded, setLocation: setLoaded } = useLII();
   const [loading, setLoading] = useState(false);
+  const locRef = useRef<LocationEntryFieldsHandle>(null);
+
+  useTabOrder([
+    { fieldId: locRef.current?.aisleFieldId ?? '', activate: () => locRef.current?.focusAisle() },
+    { fieldId: locRef.current?.binFieldId ?? '', activate: () => locRef.current?.focusBin() },
+    { fieldId: locRef.current?.levelFieldId ?? '', activate: () => locRef.current?.focusLevel() },
+  ]);
   const [entryKey, setEntryKey] = useState(0);
   const [palletIndex, setPalletIndex] = useState(0);
 
@@ -112,7 +120,7 @@ export function LIIPage() {
 
   return (
     <div className="absolute inset-0 flex flex-col p-6 gap-5 select-none">
-      <LocationEntryFields key={entryKey} onResolved={loadLocation} value={locationId ?? ''} autoFocus={initialAutoFocus} demoScanner />
+      <LocationEntryFields ref={locRef} key={entryKey} onResolved={loadLocation} value={locationId ?? ''} autoFocus={initialAutoFocus} demoScanner />
 
       {loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
 
@@ -169,6 +177,12 @@ export function LIIPage() {
               <DataRow label="Pallets">{pallet ? pallet.pallets : '—'}</DataRow>
               <DataRow label="SSPs">{pallet ? pallet.ssps : '—'}</DataRow>
               <DataRow label="Pallet Status">{pallet ? <StatusBadge status={pallet.status} /> : '—'}</DataRow>
+
+              <RecordActivityPanel
+                endpoint={`/api/locations/${locationId}/activity`}
+                token={token!}
+                recordLabel={`Location ${locationId}`}
+              />
             </div>
           </div>
 
@@ -186,11 +200,6 @@ export function LIIPage() {
             </button>
           </div>
 
-          <RecordActivityPanel
-            endpoint={`/api/locations/${locationId}/activity`}
-            token={token!}
-            recordLabel={`Location ${locationId}`}
-          />
         </div>
       )}
     </div>

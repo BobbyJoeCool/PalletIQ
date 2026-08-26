@@ -29,12 +29,11 @@ const ROWS: NumpadKey[][] = [
  * triggers, so this is a label-only change, not a new codepath. Clear dispatches the same
  * `'CLEAR'` key Keyboard.tsx's own Clear button already uses.
  *
- * Tab/Back Tab (issue #100) dispatch their own key strings but have no handler yet — see
- * `Documentation/Components/Numpad.md` for why: no field-navigation mechanism (an ordered
- * field registry, focusNext/focusPrev) exists anywhere in the app today, and building one
- * generically was scoped out to a dedicated follow-up issue rather than guessed at here.
- * Tapping either button today is a silent no-op, same as any other unrecognized key
- * (`useNumpadField`'s handler has no final `else` branch).
+ * Tab/Back Tab (issue #199) dispatch `'Tab'`/`'Back Tab'` key strings into
+ * `NumpadContext.handleKey`, which intercepts them before the active field's own handler
+ * and routes them to the screen's `useTabOrder` hook (see `useTabOrder.ts`). Each screen
+ * declares its own ordered slot list; Tab advances forward, Back Tab backward, wrapping
+ * at both ends. Screens without a `useTabOrder` call ignore Tab/Back Tab silently.
  *
  * `z-[60]` (issue #84 fix, 2026-08-03) — every full-screen dialog in the app
  * (`ModalOverlay`, `HotJump`) tops out at `z-50`, which otherwise sits on top of this panel

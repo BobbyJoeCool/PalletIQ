@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { Dropdown } from '../components/shared/Dropdown';
 import { StatusBadge } from '../components/shared/StatusBadge';
+import type { CodePickerFieldHandle } from '../components/shared/CodePickerField';
 import { WorkstationField } from '../components/shared/WorkstationField';
 import { useAuth } from '../context/AuthContext';
 import { usePRQ, type PRQLevel } from '../context/PRQContext';
@@ -10,6 +11,7 @@ import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
 import { useAisleField } from '../lib/useAisleField';
 import { useNumpadField } from '../lib/useNumpadField';
+import { useTabOrder } from '../lib/useTabOrder';
 
 // ─── API response types ──────────────────────────────────────────────────────
 
@@ -126,6 +128,16 @@ function PRQFilterBar() {
   const binStartField = useNumpadField('numpad', 3, true);
   const binEndField = useNumpadField('numpad', 3, true);
   const levelField = useNumpadField('numpad', 2, true);
+  const workstationRef = useRef<CodePickerFieldHandle>(null);
+
+  useTabOrder([
+    { fieldId: aisleStart.field.fieldId, activate: aisleStart.focusField },
+    { fieldId: aisleEnd.field.fieldId, activate: aisleEnd.focusField },
+    { fieldId: workstationRef.current?.fieldId ?? '', activate: () => workstationRef.current?.focus() },
+    { fieldId: binStartField.fieldId, activate: () => binStartField.focus((v: string) => { setFilters((f) => ({ ...f, binStart: v })); }), enabled: currentLevel === 3 },
+    { fieldId: binEndField.fieldId, activate: () => binEndField.focus((v: string) => { setFilters((f) => ({ ...f, binEnd: v })); }), enabled: currentLevel === 3 },
+    { fieldId: levelField.fieldId, activate: () => levelField.focus((v: string) => { setFilters((f) => ({ ...f, level: v })); }), enabled: currentLevel === 3 },
+  ]);
 
   const handleWorkstationChange = useCallback((ws: string) => {
     setFilters((f) => ({ ...f, workstation: ws, aisleStart: '', aisleEnd: '' }));
@@ -181,6 +193,7 @@ function PRQFilterBar() {
       </div>
 
       <WorkstationField
+        ref={workstationRef}
         value={filters.workstation}
         onChange={handleWorkstationChange}
         size="compact"

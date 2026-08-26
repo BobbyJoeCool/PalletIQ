@@ -15,10 +15,9 @@ const QWERTY_ROWS = [
  * dispatches the key string to NumpadContext.handleKey — `useNumpadField` already treats
  * `'Enter'`/`'OK'`/`'Blur'` as equivalent submit triggers, so the rename is label-only.
  *
- * Tab/Back Tab (issue #100) dispatch their own key strings but have no handler yet — see
- * `Numpad.tsx`'s own doc comment and `Documentation/Components/Keyboard.md` for why (no
- * field-navigation mechanism exists anywhere in the app today; building one generically
- * was scoped out to a dedicated follow-up issue). Tapping either is a silent no-op today.
+ * Tab/Back Tab (issue #199) dispatch `'Tab'`/`'Back Tab'` into `NumpadContext.handleKey`,
+ * routed to the screen's `useTabOrder` hook — see `Numpad.tsx`'s own doc comment for the
+ * full mechanism.
  *
  * Used for free-text entry fields (Size and Storage Code overrides on SDP) where
  * alphanumeric input is needed rather than digits only.

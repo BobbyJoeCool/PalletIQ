@@ -3,7 +3,7 @@ import { DataRow } from '../components/shared/DataRow';
 import { HoldPanel } from '../components/shared/HoldPanel';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
-import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { LocationEntryFields, type LocationEntryFieldsHandle } from '../components/shared/LocationEntryFields';
 import { LockedHoldConfirmDialog } from '../components/shared/LockedHoldConfirmDialog';
 import { StorageCodeBadge } from '../components/shared/StorageCodeBadge';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
@@ -18,6 +18,7 @@ import { playAlert } from '../lib/audio';
 import { useDigitInput } from '../lib/useDigitInput';
 import { fmtLocation } from '../lib/fmt';
 import { splitReasonCode } from '../lib/reasonCode';
+import { useTabOrder } from '../lib/useTabOrder';
 import { hasMinRole, type Role } from '@shared/index';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -309,6 +310,7 @@ export function MNPPage() {
   const role = (user?.role ?? 'WORKER') as Role;
 
   const palletFieldRef = useRef<PalletIdFieldHandle>(null);
+  const locRef = useRef<LocationEntryFieldsHandle>(null);
   const [palletIdValue, setPalletIdValue] = useState('');
   // Invalid-wash flags (issue #190) — set on a failed scan/resolve, cleared on success or a
   // full reset. Fields persist their entered value through an error instead of clearing (the
@@ -322,6 +324,13 @@ export function MNPPage() {
   const focusPalletField = useCallback(() => {
     palletFieldRef.current?.focus();
   }, []);
+
+  useTabOrder([
+    { fieldId: palletFieldRef.current?.fieldId ?? '', activate: focusPalletField, enabled: screenState === 'ready' },
+    { fieldId: locRef.current?.aisleFieldId ?? '', activate: () => locRef.current?.focusAisle(), enabled: screenState === 'pallet_scanned' },
+    { fieldId: locRef.current?.binFieldId ?? '', activate: () => locRef.current?.focusBin(), enabled: screenState === 'pallet_scanned' },
+    { fieldId: locRef.current?.levelFieldId ?? '', activate: () => locRef.current?.focusLevel(), enabled: screenState === 'pallet_scanned' },
+  ]);
 
   useEffect(() => {
     if (screenState === 'ready') {
@@ -773,6 +782,7 @@ export function MNPPage() {
                     Destination Location
                   </span>
                   <LocationEntryFields
+                    ref={locRef}
                     key={locationEntryKey}
                     autoFocus
                     levelOptional

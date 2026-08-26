@@ -359,3 +359,33 @@ flowchart TD
 | 2026-07-11 (v1.4.3) | Relabeled "Cartons" to "Cartons per Pallet" for clarity (issue #71). |
 | 2026-07-12 (v1.5.0) | DPCI and Location entry rebuilt as 3-box components (`DpciField`, `LocationEntryFields`), replacing single free-text fields (issues #68, #69). |
 | 2026-07-05 (v0.9.0) | Initial build — single-form Pallet Reinstate, IM+ only, PUT_PENDING/STORED outcome based on whether a location was supplied, per `DevNotes/Screen-Specs/PAR.md`'s original design. |
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions). Some fields are conditionally enabled based on mode and item
+data:
+
+1. Dept
+2. Class
+3. Item
+4. UPC
+5. VCP
+6. SSP
+7. Size
+8. Cartons *(Single Pallet mode only)*
+9. SSPs *(Single Pallet mode only)*
+10. Full Pallets *(Multiple Pallets mode only)*
+11. Cartons per Pallet *(Multiple Pallets mode only)*
+12. Partial Cartons *(Multiple Pallets mode only)*
+13. Partial SSPs *(Multiple Pallets mode only)*
+14. Month *(only when the item requires an Expiration Date)*
+15. Day *(only when the item requires an Expiration Date)*
+16. Year *(only when the item requires an Expiration Date)*
+17. Aisle
+18. Bin
+19. Level
+
+Fields 1-4 are from `useDpciFields`/`useUpcField`; fields 14-16 are from
+`useExpirationDateFields`; fields 17-19 are inside the shared
+`LocationEntryFields` component.

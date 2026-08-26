@@ -215,3 +215,26 @@ flowchart TD
 | 2026-07-08 (v1.1.0) | Received/Put/Last Pulled By switched to show zNumbers instead of names (issue #7); added a Full Pallets quantity field (issue #19); Cartons field relabeled "Total Cartons" (issue #20); DPCI edit split into three Dept/Class/Item boxes (issue #21); read-only view switched to a two-column layout (issue #22); DPCI/UPC values made tappable, jumping to IID (issue #47). |
 | 2026-07-06 (v1.0.4) | Fixed missing focused-field (red border) highlighting on the Pallet ID field. |
 | Initial build — v0.9.0 (2026-07-05) | PII shipped as part of the initial feature-complete build: read-only pallet lookup for all roles by Pallet ID, with in-place IM+ editing of DPCI/VCP/SSP/quantity fields, gated behind an explicit Edit keypress. |
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions). Which fields are active depends on the screen state:
+
+**Ready / Loaded state** (read-only):
+
+1. Pallet ID
+
+**Edit mode** (IM+ only):
+
+1. Dept
+2. Class
+3. Item
+4. VCP
+5. SSP
+6. Total Cartons
+7. SSPs on Pallet
+8. Full Pallets
+9. Month
+10. Day
+11. Year

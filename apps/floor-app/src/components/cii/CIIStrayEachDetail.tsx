@@ -19,19 +19,25 @@ export function CIIStrayEachDetail({ data, isIM, token, onRefresh, onNavigateIte
   const canReassign = isIM && data.status === 'PENDING';
 
   return (
-    <div className="flex flex-col gap-1">
-      <DataRow label="Status"><StatusBadge status={data.status} /></DataRow>
-      <DataRow label="DPCI">
-        <button type="button" onClick={() => onNavigateItem(data.deptClassItem!.dept, data.deptClassItem!.class, data.deptClassItem!.item)} className="text-[#4499FF] underline">{data.dpci}</button>
-      </DataRow>
-      <DataRow label="Item">{data.itemDesc}</DataRow>
-      <DataRow label="Storage Code">{data.storageCode}</DataRow>
-      <DataRow label="Each Qty">{data.eachQty}</DataRow>
-      <DataRow label="Destination">{data.destinationStore.name} (#{data.destinationStore.id})</DataRow>
-      <DataRow label="Found By">{data.foundByZ}</DataRow>
-      <DataRow label="Created">{new Date(data.createdAt).toLocaleString()}</DataRow>
-      {data.packedAt && <DataRow label="Packed At">{new Date(data.packedAt).toLocaleString()}</DataRow>}
-      {data.canceledAt && <DataRow label="Canceled At">{new Date(data.canceledAt).toLocaleString()}</DataRow>}
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-6">
+        <div className="flex-1 flex flex-col gap-1">
+          <DataRow label="Status"><StatusBadge status={data.status} /></DataRow>
+          <DataRow label="DPCI">
+            <button type="button" onClick={() => onNavigateItem(data.deptClassItem!.dept, data.deptClassItem!.class, data.deptClassItem!.item)} className="text-[#4499FF] underline">{data.dpci}</button>
+          </DataRow>
+          <DataRow label="Item">{data.itemDesc}</DataRow>
+          <DataRow label="Storage Code">{data.storageCode}</DataRow>
+          <DataRow label="Each Qty">{data.eachQty}</DataRow>
+        </div>
+        <div className="flex-1 flex flex-col gap-1">
+          <DataRow label="Destination">{data.destinationStore.name} (#{data.destinationStore.id})</DataRow>
+          <DataRow label="Found By">{data.foundByZ}</DataRow>
+          <DataRow label="Created">{new Date(data.createdAt).toLocaleString()}</DataRow>
+          {data.packedAt && <DataRow label="Packed At">{new Date(data.packedAt).toLocaleString()}</DataRow>}
+          {data.canceledAt && <DataRow label="Canceled At">{new Date(data.canceledAt).toLocaleString()}</DataRow>}
+        </div>
+      </div>
 
       {canReassign && (
         <div className="mt-4">

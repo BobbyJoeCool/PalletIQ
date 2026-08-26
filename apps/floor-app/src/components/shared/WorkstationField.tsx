@@ -1,5 +1,6 @@
+import { forwardRef } from 'react';
 import { useWorkstations } from '../../lib/useWorkstations';
-import { CodePickerField } from './CodePickerField';
+import { CodePickerField, type CodePickerFieldHandle } from './CodePickerField';
 
 interface WorkstationFieldProps {
   value: string;
@@ -30,12 +31,13 @@ interface WorkstationFieldProps {
  * `CodePickerField`; this just gives it a named, reusable component for consistency with
  * every other entry field in the app.
  */
-export function WorkstationField({ value, onChange, size = 'default', width, label = 'Workstation', disabled = false, strict = false, onInvalid, onValidityChange, invalid = false }: WorkstationFieldProps) {
+export const WorkstationField = forwardRef<CodePickerFieldHandle, WorkstationFieldProps>(function WorkstationField({ value, onChange, size = 'default', width, label = 'Workstation', disabled = false, strict = false, onInvalid, onValidityChange, invalid = false }, ref) {
   const workstations = useWorkstations();
   const options = (workstations ?? []).map((w) => ({ code: w.id, desc: w.name }));
 
   return (
     <CodePickerField
+      ref={ref}
       value={value}
       onChange={onChange}
       options={options}
@@ -54,4 +56,4 @@ export function WorkstationField({ value, onChange, size = 'default', width, lab
       invalid={invalid}
     />
   );
-}
+});

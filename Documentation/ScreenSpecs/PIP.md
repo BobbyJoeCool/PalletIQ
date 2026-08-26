@@ -200,3 +200,22 @@ flowchart TD
 | 2026-07-08 (v1.1.0) | FP Alternate ID level mismatch changed from an outright reject to a confirm-and-proceed dialog (issue #49) — a Full Pallet pull is done from floor level, so requiring a scan of the true (possibly high) level's barcode isn't physically viable. Location display enlarged/bolded/reddened; added a "⚠ Wrong Function" demo button; DPCI/UPC values became tap-to-jump links. Fixed a status-bar-stomping bug on plain rescans (issue #45). |
 | 2026-07-08 (v1.0.9) | Alternate ID verification on FP pulls now checks level (previously aisle+bin only, same as CA/CF) given FP empties the whole location and a bin can hold several stacked levels (issue #48). Fixed the pull-verification success message being overwritten by a spurious "Label not verified" warning (issue #45 root cause). |
 | Initial build — v0.9.0 (2026-07-05) | Unified pull screen for every pull type (CA/CF/FP/BK), with two-path verification (Pallet ID or a single combined Alternate ID field guessed as UPC-or-Location).
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions). Which fields are active depends on the screen state:
+
+**Ready state** (before a container is scanned):
+
+1. Container ID
+
+**Verifying state** (after a valid container loads):
+
+1. Pallet ID
+2. UPC
+3. Aisle
+4. Bin
+5. Level
+
+The location fields (3-5) are inside the shared `LocationEntryFields` component.

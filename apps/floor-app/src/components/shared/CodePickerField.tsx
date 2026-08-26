@@ -71,6 +71,7 @@ interface CodePickerFieldProps {
  *  reliably re-fire on every chain pass rather than only the first. */
 export interface CodePickerFieldHandle {
   focus: () => void;
+  fieldId: string;
 }
 
 /**
@@ -91,7 +92,7 @@ export const CodePickerField = forwardRef<CodePickerFieldHandle, CodePickerField
   });
   const invalid = forcedInvalid || computedInvalid;
 
-  useImperativeHandle(ref, () => ({ focus: focusField }));
+  useImperativeHandle(ref, () => ({ focus: focusField, fieldId: field.fieldId }));
 
   const boxHeight = size === 'compact' ? 'h-[52px]' : 'h-[64px]';
   const textSize = size === 'compact' ? 'text-[20px]' : 'text-[26px]';

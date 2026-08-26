@@ -6,42 +6,34 @@ import {
   INVALID_CONTAINER_ID, CONTAINER_STATUS_OPTIONS, PULL_FUNCTIONS,
   fetchContainerByStatus, fetchValidContainer,
 } from '../../lib/demoScanner';
+import { CID_TYPE_LABELS, type CidTypeCode } from '@shared/index';
 import type { ContainerStatus } from '@shared/index';
 
 const ANY = '';
 
+const CID_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: ANY, label: 'Any' },
+  ...(['91', '92', '93', '94', '95'] as CidTypeCode[]).map((code) => ({
+    value: code,
+    label: `${code} — ${CID_TYPE_LABELS[code]}`,
+  })),
+];
+
 interface ContainerDemoScannerBarProps {
-  /** Fills the resolved value into the owning field — exactly like a real scanner
-   *  delivery (PIP passes `deliverScan`). */
   onFill: (value: string) => void;
-  /** PIP's currently-selected Pull Function — required, not optional, since PIP only
-   *  accepts a container whose own `pullFunction` matches it; unlike Pallet ID's aisle
-   *  filter (SDP-only, everyone else omits it), every Container ID consumer has this
-   *  context, so there's no "omitted" case to design around. */
   fn: string;
 }
 
-/**
- * Container ID's Demo Scanner (Feature 9, CID phase) — the generalized 3-button pattern
- * (Valid / by-status / Invalid) replacing PIP's old bespoke "✓/✗ Scan Label" pair plus its
- * dedicated "⚠ Invalid Label" picker (Wrong Function/Pulled/Canceled/Purged). Per the Core
- * Concept section's already-settled "Invalid is strictly not-found" rule, those four
- * picker options are now just Status picks in the by-status popup below — Invalid Label is
- * a plain not-found sentinel, same as every other scan type.
- *
- * PIP is the only consumer today (CII, #136, will be the second once built) — matches
- * `DemoScannerBar`'s own precedent of building a real per-scan-type component rather than
- * a per-consumer one, even before a second consumer exists.
- */
 export function ContainerDemoScannerBar({ onFill, fn }: ContainerDemoScannerBarProps) {
   const { token } = useAuth();
   const { setMessage } = useMessageBar();
 
   const [popupOpen, setPopupOpen] = useState(false);
-  // Defaults to Printed — the normal scannable state (matches `sampleContainer`'s own
-  // default), the most useful starting point for a worker demoing a real pull.
   const [status, setStatus] = useState<ContainerStatus>('PRINTED');
   const [pullFunction, setPullFunction] = useState(ANY);
+  const [containerType, setContainerType] = useState(ANY);
+
+  const showTypeFilter = !fn;
 
   function fail() {
     setMessage({ type: 'error', text: 'Demo label unavailable' });
@@ -49,7 +41,7 @@ export function ContainerDemoScannerBar({ onFill, fn }: ContainerDemoScannerBarP
 
   async function fillValid() {
     try {
-      onFill(await fetchValidContainer(token!, fn));
+      onFill(await fetchValidContainer(token!, fn, containerType || undefined));
     } catch { fail(); }
   }
 
@@ -59,7 +51,7 @@ export function ContainerDemoScannerBar({ onFill, fn }: ContainerDemoScannerBarP
 
   async function find() {
     try {
-      onFill(await fetchContainerByStatus(token!, status, pullFunction || undefined));
+      onFill(await fetchContainerByStatus(token!, status, pullFunction || undefined, containerType || undefined));
       setPopupOpen(false);
     } catch { fail(); }
   }
@@ -71,6 +63,9 @@ export function ContainerDemoScannerBar({ onFill, fn }: ContainerDemoScannerBarP
 
   return (
     <>
+      {showTypeFilter && (
+        <Dropdown value={containerType} onChange={setContainerType} options={CID_TYPE_OPTIONS} />
+      )}
       <button
         type="button"
         onClick={() => void fillValid()}
@@ -94,13 +89,14 @@ export function ContainerDemoScannerBar({ onFill, fn }: ContainerDemoScannerBarP
       </button>
 
       {popupOpen && (
-        // z-[65] (2026-08-03) — above Numpad/Keyboard's z-[60], same fix as
-        // LocationDemoScannerBar's identical popup; see its own comment for why.
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[65]">
           <div className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] p-6 w-[420px] shadow-2xl flex flex-col gap-4">
             <h2 className="font-ui text-[19px] font-semibold text-white text-center">Find a Label</h2>
 
             <div className="flex flex-col gap-3">
+              {showTypeFilter && (
+                <Dropdown label="Container Type" value={containerType} onChange={setContainerType} options={CID_TYPE_OPTIONS} />
+              )}
               <Dropdown label="Status" value={status} onChange={setStatus} options={CONTAINER_STATUS_OPTIONS} />
               <Dropdown label="Pull Function" value={pullFunction} onChange={setPullFunction} options={pullFunctionOptions} />
             </div>

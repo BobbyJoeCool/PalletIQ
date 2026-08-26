@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { HOLD_LABELS, type HoldCategory } from '../components/shared/HoldPanel';
 import { ItemDemoScannerBar } from '../components/shared/ItemDemoScannerBar';
-import { LocationEntryFields } from '../components/shared/LocationEntryFields';
+import { LocationEntryFields, type LocationEntryFieldsHandle } from '../components/shared/LocationEntryFields';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { SizeField } from '../components/shared/SizeField';
@@ -21,6 +21,7 @@ import { INVALID_WASH } from '../lib/invalidWash';
 import { useDpciFields } from '../lib/useDpciFields';
 import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
+import { useTabOrder } from '../lib/useTabOrder';
 import { useUpcField } from '../lib/useUpcField';
 import { checkSspCap, checkVcpSspRatio } from '../lib/vcpSspValidation';
 
@@ -345,6 +346,7 @@ export function PARPage() {
   // precedence over this field server-side, same as Storage Code already does.
   const [sizeValue, setSizeValue] = useState('');
   const sizeFieldRef = useRef<CodePickerFieldHandle>(null);
+  const locRef = useRef<LocationEntryFieldsHandle>(null);
 
   const vcpNum = vcpField.value ? parseInt(vcpField.value, 10) : NaN;
   const sspNum = sspField.value ? parseInt(sspField.value, 10) : NaN;
@@ -463,6 +465,28 @@ export function PARPage() {
   const focusCartonsPerPallet = useCallback(() => cartonsPerPalletField.focus((v) => { cartonsPerPalletField.set(v.trim()); resetToNumpad(); }), [cartonsPerPalletField, resetToNumpad]);
   const focusPartialCartons = useCallback(() => partialCartonsField.focus((v) => { partialCartonsField.set(v.trim()); resetToNumpad(); }), [partialCartonsField, resetToNumpad]);
   const focusPartialSsps = useCallback(() => partialSspsField.focus((v) => { partialSspsField.set(v.trim()); resetToNumpad(); runSspCapCheck(v.trim(), setPartialSspsInvalid); }), [partialSspsField, resetToNumpad, runSspCapCheck]);
+
+  useTabOrder([
+    { fieldId: deptField.fieldId, activate: focusDeptField },
+    { fieldId: classField.fieldId, activate: focusClassField },
+    { fieldId: itemField.fieldId, activate: focusItemField },
+    { fieldId: upcFields.field.fieldId, activate: upcFields.focusField },
+    { fieldId: vcpField.fieldId, activate: focusVcp },
+    { fieldId: sspField.fieldId, activate: focusSsp },
+    { fieldId: sizeFieldRef.current?.fieldId ?? '', activate: () => sizeFieldRef.current?.focus() },
+    { fieldId: cartonsField.fieldId, activate: focusCartons, enabled: mode === 'single' },
+    { fieldId: sspsField.fieldId, activate: focusSsps, enabled: mode === 'single' },
+    { fieldId: fullPalletsField.fieldId, activate: focusFullPallets, enabled: mode === 'multiple' },
+    { fieldId: cartonsPerPalletField.fieldId, activate: focusCartonsPerPallet, enabled: mode === 'multiple' },
+    { fieldId: partialCartonsField.fieldId, activate: focusPartialCartons, enabled: mode === 'multiple' },
+    { fieldId: partialSspsField.fieldId, activate: focusPartialSsps, enabled: mode === 'multiple' },
+    { fieldId: monthField.fieldId, activate: focusMonthField, enabled: !!item?.requiresExpirationDate },
+    { fieldId: dayField.fieldId, activate: focusDayField, enabled: !!item?.requiresExpirationDate },
+    { fieldId: yearField.fieldId, activate: focusYearField, enabled: !!item?.requiresExpirationDate },
+    { fieldId: locRef.current?.aisleFieldId ?? '', activate: () => locRef.current?.focusAisle() },
+    { fieldId: locRef.current?.binFieldId ?? '', activate: () => locRef.current?.focusBin() },
+    { fieldId: locRef.current?.levelFieldId ?? '', activate: () => locRef.current?.focusLevel() },
+  ]);
 
   // ── Row 4: Summary (derived, read-only) ─────────────────────────────────────
   const cartonsNum = cartonsField.value ? parseInt(cartonsField.value, 10) : 0;
@@ -1121,6 +1145,7 @@ export function PARPage() {
           ].filter(Boolean).join(' ')}
           >
             <LocationEntryFields
+              ref={locRef}
               value={location}
               onResolved={handleLocationResolved}
               autoFocus={locationAutoFocus}

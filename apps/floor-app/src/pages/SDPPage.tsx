@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
+import { type CodePickerFieldHandle } from '../components/shared/CodePickerField';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { SizeField } from '../components/shared/SizeField';
@@ -18,6 +19,7 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
+import { useTabOrder } from '../lib/useTabOrder';
 import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 import { SDPVerifyPutModal } from './SDPVerifyPutModal';
 
@@ -186,6 +188,9 @@ export function SDPPage() {
   directedRef.current    = directed;
 
   const palletFieldRef = useRef<PalletIdFieldHandle>(null);
+  const sizeFieldRef = useRef<CodePickerFieldHandle>(null);
+  const storageFieldRef = useRef<CodePickerFieldHandle>(null);
+  const zoneFieldRef = useRef<CodePickerFieldHandle>(null);
   // Aisle entry field (issue #161) — existence check now owned internally (previously
   // this screen's own `handleAisleConfirm`, reusing `GET /api/locations/empty-by-zone`
   // purely for its NOT_FOUND side effect, discarding the actual zone-map payload; switched
@@ -264,6 +269,14 @@ export function SDPPage() {
   const focusPalletField = useCallback(() => {
     palletFieldRef.current?.focus();
   }, []);
+
+  useTabOrder([
+    { fieldId: aisleFields.field.fieldId, activate: aisleFields.focusField, enabled: screenState !== 'directed' },
+    { fieldId: sizeFieldRef.current?.fieldId ?? '', activate: () => sizeFieldRef.current?.focus(), enabled: screenState !== 'directed' },
+    { fieldId: storageFieldRef.current?.fieldId ?? '', activate: () => storageFieldRef.current?.focus(), enabled: isIM && screenState !== 'directed' },
+    { fieldId: zoneFieldRef.current?.fieldId ?? '', activate: () => zoneFieldRef.current?.focus(), enabled: isIM && screenState !== 'directed' },
+    { fieldId: palletFieldRef.current?.fieldId ?? '', activate: () => palletFieldRef.current?.focus(), enabled: screenState !== 'directed' && !!aisleFields.field.value.trim() },
+  ]);
 
   /** Storage Code override committed via the shared field's onChange — advances to Pallet ID, matching the old numpad-driven behavior. */
   const handleStorageOverrideChange = useCallback((v: string) => {
@@ -813,7 +826,7 @@ export function SDPPage() {
               stay IM+-gated entirely — a Worker doesn't need it echoed back at them. */}
           <div className="flex-1 flex gap-4 min-w-0">
             <div className="flex-1 max-w-[220px] flex flex-col gap-1 min-w-0">
-              <SizeField value={sizeOverride} onChange={setSizeOverride} aisle={overrideAisle} storageCode={storageOverride} width="w-full" disabled={locked} />
+              <SizeField ref={sizeFieldRef} value={sizeOverride} onChange={setSizeOverride} aisle={overrideAisle} storageCode={storageOverride} width="w-full" disabled={locked} />
               {isIM && (
                 <button
                   type="button"
@@ -829,7 +842,7 @@ export function SDPPage() {
             {isIM && (
               <>
                 <div className="flex-1 flex flex-col gap-1 min-w-0">
-                  <StorageCodeField value={storageOverride} onChange={handleStorageOverrideChange} aisle={overrideAisle} label="Storage" width="w-full" disabled={locked} />
+                  <StorageCodeField ref={storageFieldRef} value={storageOverride} onChange={handleStorageOverrideChange} aisle={overrideAisle} label="Storage" width="w-full" disabled={locked} />
                   <button
                     type="button"
                     onClick={() => setStorageLocked(l => !l)}
@@ -841,7 +854,7 @@ export function SDPPage() {
                   </button>
                 </div>
                 <div className="flex-1 flex flex-col gap-1 min-w-0">
-                  <ZoneField value={zoneOverride} onChange={setZoneOverride} width="w-full" disabled={locked} />
+                  <ZoneField ref={zoneFieldRef} value={zoneOverride} onChange={setZoneOverride} width="w-full" disabled={locked} />
                   <button
                     type="button"
                     onClick={() => setZoneLocked(l => !l)}

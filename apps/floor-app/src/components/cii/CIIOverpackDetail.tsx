@@ -27,21 +27,27 @@ export function CIIOverpackDetail({ data, isIM, token, onRefresh, onNavigateCont
   const openWarning = daysOpen !== null && daysOpen > 3;
 
   return (
-    <div className="flex flex-col gap-1">
-      <DataRow label="Status"><StatusBadge status={displayStatus} /></DataRow>
-      {daysOpen !== null && (
-        <DataRow label="Open Duration">
-          <span className={`font-semibold ${openWarning ? 'text-[#FF6633]' : 'text-white'}`}>
-            Opened {daysOpen} {daysOpen === 1 ? 'day' : 'days'} ago
-          </span>
-        </DataRow>
-      )}
-      <DataRow label="Destination">{data.destinationStore.name} (#{data.destinationStore.id})</DataRow>
-      <DataRow label="Created">{new Date(data.createdAt).toLocaleString()}</DataRow>
-      <DataRow label="Purge Date">{new Date(data.purgeDate).toLocaleDateString()}</DataRow>
-      {data.closedAt && <DataRow label="Closed At">{new Date(data.closedAt).toLocaleString()}</DataRow>}
-      {data.closedByZ && <DataRow label="Closed By">{data.closedByZ}</DataRow>}
-      {data.purgedAt && <DataRow label="Purged At">{new Date(data.purgedAt).toLocaleString()}</DataRow>}
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-6">
+        <div className="flex-1 flex flex-col gap-1">
+          <DataRow label="Status"><StatusBadge status={displayStatus} /></DataRow>
+          {daysOpen !== null && (
+            <DataRow label="Open Duration">
+              <span className={`font-semibold ${openWarning ? 'text-[#FF6633]' : 'text-white'}`}>
+                Opened {daysOpen} {daysOpen === 1 ? 'day' : 'days'} ago
+              </span>
+            </DataRow>
+          )}
+          <DataRow label="Destination">{data.destinationStore.name} (#{data.destinationStore.id})</DataRow>
+          <DataRow label="Created">{new Date(data.createdAt).toLocaleString()}</DataRow>
+        </div>
+        <div className="flex-1 flex flex-col gap-1">
+          <DataRow label="Purge Date">{new Date(data.purgeDate).toLocaleDateString()}</DataRow>
+          {data.closedAt && <DataRow label="Closed At">{new Date(data.closedAt).toLocaleString()}</DataRow>}
+          {data.closedByZ && <DataRow label="Closed By">{data.closedByZ}</DataRow>}
+          {data.purgedAt && <DataRow label="Purged At">{new Date(data.purgedAt).toLocaleString()}</DataRow>}
+        </div>
+      </div>
 
       <div className="mt-3">
         <h3 className="font-ui text-[14px] font-semibold text-[#9A9A9A] uppercase tracking-wider mb-2">

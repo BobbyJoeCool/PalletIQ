@@ -4,6 +4,7 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.2.5 — 2026-08-26](#125--2026-08-26)
 - [1.2.4 — 2026-08-21](#124--2026-08-21)
 - [1.2.3 — 2026-08-20](#123--2026-08-20)
 - [1.2.2 — 2026-08-20](#122--2026-08-20)
@@ -11,6 +12,23 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 - [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
+
+---
+
+## [1.2.5] — 2026-08-26
+
+Backend for floor-app's `[1.8.12]` entry — CII demo scanner type filter, `genCid()` fix.
+
+### 1.2.5 — Added
+
+- `sampleContainer` endpoint: `type` query param filters by container type (92→Overpack
+  table, 94→SSPUnit, 95→StrayEach, 91/93→Container CID prefix).
+
+### 1.2.5 — Fixed
+
+- `genCid()` — rewrote to produce canonical 35-digit CIDs with proper
+  TYPE+DEST_STORE+DPCI+PALLET_ID+CARTON_NUM+PACKING_ZONE+BATCH_DATE structure (was
+  producing alphanumeric via `toString(36)`, failing CID validation).
 
 ---
 

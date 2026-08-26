@@ -224,3 +224,15 @@ flowchart TD
 | 2026-07-08 (v1.1.0) | Added an "Applying: …" override summary (clarifying overrides combine with AND, not last-one-wins) and fixed the "✗ PID" demo button showing a generic failure instead of "Pallet not found". |
 | 2026-07-06 (v1.0.3) | Fixed the Consolidating toggle being silently ignored on the next pallet scan (stale-closure bug — `handlePalletScan` was registered once per entry into the `entry` state and never re-read a later toggle). |
 | Initial build — v0.9.0 (2026-07-05) | System Directed Put: zone-aware location assignment with move/consolidation handling, screen-locked reservation flow with Confirm/Unassign/Blocked Put resolution paths.
+
+## Tab Order
+
+Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
+both directions). All fields are disabled while in the `directed` (screen-locked)
+state.
+
+1. Aisle
+2. Size
+3. Storage Code *(IM+ only)*
+4. Zone *(IM+ only)*
+5. Pallet ID *(enabled only after an Aisle is entered)*
