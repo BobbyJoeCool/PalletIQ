@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DataRow } from '../components/shared/DataRow';
+import { ItemDescription } from '../components/shared/ItemDescription';
 import { ContainerDemoScannerBar } from '../components/shared/ContainerDemoScannerBar';
 import { Dropdown } from '../components/shared/Dropdown';
 import { HoldPanel } from '../components/shared/HoldPanel';
@@ -1000,9 +1001,7 @@ export function PIPPage() {
               )
               : <span className="text-[#9A9A9A]">—</span>}
           </DataRow>
-          <DataRow label="Item" dense labelWidth={160}>
-            {containerData?.container.descShort ?? <span className="text-[#9A9A9A]">—</span>}
-          </DataRow>
+          <ItemDescription value={containerData?.container.descShort} label="Item" dense labelWidth={160} />
           <DataRow label="DPCI" dense labelWidth={160}>
             {containerData ? <LiveId type="dpci" id={containerData.container.dpci} /> : <span className="text-[#9A9A9A]">—</span>}
           </DataRow>

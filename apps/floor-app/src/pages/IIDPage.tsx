@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
+import { ItemDescription } from '../components/shared/ItemDescription';
 import { ItemDemoScannerBar } from '../components/shared/ItemDemoScannerBar';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { useAuth } from '../context/AuthContext';
@@ -208,7 +209,7 @@ export function IIDPage() {
             <DataRow label="DPCI">{item.dpci}</DataRow>
             <DataRow label="UPC">{item.upc}</DataRow>
             <DataRow label="Name">{item.name}</DataRow>
-            <DataRow label="Short Description">{item.descShort}</DataRow>
+            <ItemDescription value={item.descShort} label="Short Description" />
             <DataRow label="Description">{item.desc}</DataRow>
             <DataRow label="Retail Price">${item.retailPrice.toFixed(2)}</DataRow>
             <DataRow label="Cost">${item.cost.toFixed(2)}</DataRow>

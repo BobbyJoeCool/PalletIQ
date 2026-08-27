@@ -3,9 +3,11 @@ import { useSearchParams } from 'react-router-dom';
 import { HOLD_LABELS, type HoldCategory } from '../components/shared/HoldPanel';
 import { ItemDemoScannerBar } from '../components/shared/ItemDemoScannerBar';
 import { LocationEntryFields, type LocationEntryFieldsHandle } from '../components/shared/LocationEntryFields';
+import { LooseSspsField, type LooseSspsFieldHandle } from '../components/shared/LooseSspsField';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
 import { SizeField } from '../components/shared/SizeField';
+import { VcpSspFields, type VcpSspFieldsHandle } from '../components/shared/VcpSspFields';
 import type { CodePickerFieldHandle } from '../components/shared/CodePickerField';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveId } from '../components/ui/LiveId';
@@ -23,7 +25,6 @@ import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useTabOrder } from '../lib/useTabOrder';
 import { useUpcField } from '../lib/useUpcField';
-import { checkSspCap, checkVcpSspRatio } from '../lib/vcpSspValidation';
 
 type Mode = 'single' | 'multiple';
 
@@ -323,163 +324,65 @@ export function PARPage() {
     focusMonthField, focusDayField, focusYearField,
   } = expirationFields;
 
-  // ── Row 2: VCP / SSP ────────────────────────────────────────────────────────
-  const vcpField = useNumpadField();
-  const sspField = useNumpadField();
-  const [vcpSspInvalid, setVcpSspInvalid] = useState(false);
-  // Live-value mirrors for handleVcpConfirm/handleSspConfirm to read the *other* field's
-  // just-committed value from — reading vcpField.value/sspField.value directly here would
-  // be stale: each handler is a closure frozen at the moment its own field was tapped
-  // (vcpField.focus(handleVcpConfirm)), which predates that field ever having a value, so
-  // its own internal reference to the *other* field's `.value` never sees later updates
-  // (same stale-closure hazard already documented on the DPCI chain's deptValueRef/
-  // classValueRef — this bug went unnoticed here until a direct report: typing VCP=9,
-  // SSP=2 never washed/warned, because handleSspConfirm's `vcpField.value` read was frozen
-  // at '' from before VCP was ever typed).
-  const vcpValueRef = useRef('');
-  const sspValueRef = useRef('');
-  // Pallet Size (direct instruction, v1.7.0) — worker-entered, since a PAR-reinstated
-  // pallet has no Item-level intrinsic Size to fall back on (unlike Storage Code) and would
-  // otherwise start with a null Size until its first put, leaving SDP's default location
-  // search with nothing to match on for this pallet. Optional — `Pallet.size` stays
-  // nullable regardless; a Location entered below (with its own real Size) still takes
-  // precedence over this field server-side, same as Storage Code already does.
+  // ── Row 2: VCP / SSP (shared component — issue #165) ───────────────────────
+  const vcpSspRef = useRef<VcpSspFieldsHandle>(null);
+  const [vcpSspState, setVcpSspState] = useState({ vcpValue: '', sspValue: '', sspPerCarton: null as number | null, invalid: false });
   const [sizeValue, setSizeValue] = useState('');
   const sizeFieldRef = useRef<CodePickerFieldHandle>(null);
   const locRef = useRef<LocationEntryFieldsHandle>(null);
 
-  const vcpNum = vcpField.value ? parseInt(vcpField.value, 10) : NaN;
-  const sspNum = sspField.value ? parseInt(sspField.value, 10) : NaN;
-  const sspPerCarton = checkVcpSspRatio(vcpField.value, sspField.value).sspPerCarton;
+  const vcpNum = vcpSspState.vcpValue ? parseInt(vcpSspState.vcpValue, 10) : NaN;
+  const sspNum = vcpSspState.sspValue ? parseInt(vcpSspState.sspValue, 10) : NaN;
+  const sspPerCarton = vcpSspState.sspPerCarton;
 
-  /** Checked whenever VCP or SSP commits — SSP must evenly divide VCP (Feature 10, issue
-   *  #164 — shared rule with PII, via `checkVcpSspRatio`). This wrapper just owns PAR's
-   *  own state/message-bar side effects around that shared pure check. */
-  const runVcpSspCheck = useCallback((vcp: string, ssp: string) => {
-    const { ratioInvalid } = checkVcpSspRatio(vcp, ssp);
-    setVcpSspInvalid(ratioInvalid);
-    if (ratioInvalid) setMessage({ type: 'error', text: 'SSP must divide evenly into VCP' });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /** VCP field submit: checks the ratio and advances to SSP — screen-wide auto-advance
-   *  (v1.6.11, direct instruction): "after VCP, SSP should focus." */
-  function handleVcpConfirm(value: string) {
-    const v = value.trim();
-    vcpField.set(v);
-    vcpValueRef.current = v;
-    runVcpSspCheck(v, sspValueRef.current);
-    setTimeout(() => focusSsp(), 50);
-  }
-  /** SSP field submit: checks the ratio and advances to Size — Single Pallet mode only
-   *  (direct instruction doesn't cover Multiple Pallets' own fields, which aren't part of
-   *  this auto-advance flow) — screen-wide auto-advance (v1.7.0, direct instruction): "after
-   *  entering VCP/SSP, it should direct to Size before we direct to carton count." Skips
-   *  straight to Cartons instead when a Location is already entered, since Size is disabled
-   *  (inherited from the Location) at that point — see SizeField's `disabled` prop below.
-   *  Via focusCartonsRef, not focusCartons directly — see that ref's own declaration comment
-   *  (near the top of the component) for why. */
-  function handleSspConfirm(value: string) {
-    const v = value.trim();
-    sspField.set(v);
-    sspValueRef.current = v;
-    runVcpSspCheck(vcpValueRef.current, v);
-    if (mode === 'single') {
-      if (location) setTimeout(() => focusCartonsRef.current(), 50);
-      else setTimeout(() => sizeFieldRef.current?.focus(), 50);
-    } else resetToNumpad();
-  }
-
-  /** Size field commit: advances to Cartons — Single Pallet mode only, continuing the
-   *  VCP -> SSP -> Size -> Cartons chain (see handleSspConfirm's own comment). */
   function handleSizeChange(v: string) {
     setSizeValue(v);
     if (mode === 'single') setTimeout(() => focusCartonsRef.current(), 50);
   }
 
-  /** Registers the VCP field's numpad handler, wired to handleVcpConfirm on confirm. */
-  function focusVcp() { vcpField.focus(handleVcpConfirm); }
-  /** Registers the SSP field's numpad handler, wired to handleSspConfirm on confirm. */
-  function focusSsp() { sspField.focus(handleSspConfirm); }
-  // Keeps focusVcpRef current for dpciFields'/upcFields' own onResolved (declared above)
-  // to call — see that ref's own declaration comment.
-  useEffect(() => { focusVcpRef.current = focusVcp; });
+  useEffect(() => { focusVcpRef.current = () => vcpSspRef.current?.focusVcp(); });
 
   // ── Row 3: Unit Entry (Single / Multiple Pallet) ────────────────────────────
   const [mode, setMode] = useState<Mode>('single');
 
   // 3a. Single Pallet
   const cartonsField = useNumpadField();
-  const sspsField = useNumpadField();
-  const [sspsInvalid, setSspsInvalid] = useState(false);
+  const sspsRef = useRef<LooseSspsFieldHandle>(null);
+  const [sspsState, setSspsState] = useState({ value: '', invalid: false });
 
   // 3b. Multiple Pallets
   const fullPalletsField = useNumpadField();
   const cartonsPerPalletField = useNumpadField();
   const partialCartonsField = useNumpadField();
-  const partialSspsField = useNumpadField();
-  const [partialSspsInvalid, setPartialSspsInvalid] = useState(false);
+  const partialSspsRef = useRef<LooseSspsFieldHandle>(null);
+  const [partialSspsState, setPartialSspsState] = useState({ value: '', invalid: false });
 
-  /** Checked whenever a loose-SSPs field commits — must stay below one full carton's
-   *  worth (Feature 10, issue #164 — shared rule with PII, via `checkSspCap`). This
-   *  wrapper just owns PAR's own state/message-bar side effects. */
-  const runSspCapCheck = useCallback((looseSSPsStr: string, setInvalid: (b: boolean) => void) => {
-    const bad = checkSspCap(sspPerCarton, looseSSPsStr);
-    setInvalid(bad);
-    if (bad) setMessage({ type: 'error', text: `SSPs must be less than a full carton (${sspPerCarton} per carton)` });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sspPerCarton]);
-
-  /** Cartons field submit: advances to SSPs — screen-wide auto-advance (v1.6.11, direct
-   *  instruction): "Then Cartons -> SSPS." */
   function handleCartonsConfirm(value: string) {
     cartonsField.set(value.trim());
-    setTimeout(() => focusSsps(), 50);
-  }
-  /** SSPs field submit: checks the cap, then branches to Expiration Date's Month box (if
-   *  the resolved item requires one) or straight to Location's Aisle box otherwise —
-   *  screen-wide auto-advance (v1.6.11, direct instruction): "then, IF the expiration date
-   *  is required, Month -> Day -> Year, otherwise -> Aisle -> Bin -> Level." focusMonthField
-   *  is declared above (Expiration Date section); setLocationAutoFocus is declared near the
-   *  top of the component (see its own declaration comment for why). */
-  function handleSspsConfirm(value: string) {
-    const v = value.trim();
-    sspsField.set(v);
-    runSspCapCheck(v, setSspsInvalid);
-    if (item?.requiresExpirationDate) {
-      setTimeout(() => focusMonthField(), 50);
-    } else {
-      setTimeout(() => setLocationAutoFocus(true), 50);
-    }
+    setTimeout(() => sspsRef.current?.focus(), 50);
   }
 
-  /** Registers the Cartons field's numpad handler, wired to handleCartonsConfirm on confirm. */
   function focusCartons() { cartonsField.focus(handleCartonsConfirm); }
-  /** Registers the SSPs field's numpad handler, wired to handleSspsConfirm on confirm. */
-  function focusSsps() { sspsField.focus(handleSspsConfirm); }
-  // Keeps focusCartonsRef current for handleSspConfirm (declared above, in the VCP/SSP
-  // section) to call — see that ref's own declaration comment.
   useEffect(() => { focusCartonsRef.current = focusCartons; });
 
   const focusFullPallets = useCallback(() => fullPalletsField.focus((v) => { fullPalletsField.set(v.trim()); resetToNumpad(); }), [fullPalletsField, resetToNumpad]);
   const focusCartonsPerPallet = useCallback(() => cartonsPerPalletField.focus((v) => { cartonsPerPalletField.set(v.trim()); resetToNumpad(); }), [cartonsPerPalletField, resetToNumpad]);
   const focusPartialCartons = useCallback(() => partialCartonsField.focus((v) => { partialCartonsField.set(v.trim()); resetToNumpad(); }), [partialCartonsField, resetToNumpad]);
-  const focusPartialSsps = useCallback(() => partialSspsField.focus((v) => { partialSspsField.set(v.trim()); resetToNumpad(); runSspCapCheck(v.trim(), setPartialSspsInvalid); }), [partialSspsField, resetToNumpad, runSspCapCheck]);
 
   useTabOrder([
     { fieldId: deptField.fieldId, activate: focusDeptField },
     { fieldId: classField.fieldId, activate: focusClassField },
     { fieldId: itemField.fieldId, activate: focusItemField },
     { fieldId: upcFields.field.fieldId, activate: upcFields.focusField },
-    { fieldId: vcpField.fieldId, activate: focusVcp },
-    { fieldId: sspField.fieldId, activate: focusSsp },
+    { fieldId: vcpSspRef.current?.vcpFieldId ?? '', activate: () => vcpSspRef.current?.focusVcp() },
+    { fieldId: vcpSspRef.current?.sspFieldId ?? '', activate: () => vcpSspRef.current?.focusSsp() },
     { fieldId: sizeFieldRef.current?.fieldId ?? '', activate: () => sizeFieldRef.current?.focus() },
     { fieldId: cartonsField.fieldId, activate: focusCartons, enabled: mode === 'single' },
-    { fieldId: sspsField.fieldId, activate: focusSsps, enabled: mode === 'single' },
+    { fieldId: sspsRef.current?.fieldId ?? '', activate: () => sspsRef.current?.focus(), enabled: mode === 'single' },
     { fieldId: fullPalletsField.fieldId, activate: focusFullPallets, enabled: mode === 'multiple' },
     { fieldId: cartonsPerPalletField.fieldId, activate: focusCartonsPerPallet, enabled: mode === 'multiple' },
     { fieldId: partialCartonsField.fieldId, activate: focusPartialCartons, enabled: mode === 'multiple' },
-    { fieldId: partialSspsField.fieldId, activate: focusPartialSsps, enabled: mode === 'multiple' },
+    { fieldId: partialSspsRef.current?.fieldId ?? '', activate: () => partialSspsRef.current?.focus(), enabled: mode === 'multiple' },
     { fieldId: monthField.fieldId, activate: focusMonthField, enabled: !!item?.requiresExpirationDate },
     { fieldId: dayField.fieldId, activate: focusDayField, enabled: !!item?.requiresExpirationDate },
     { fieldId: yearField.fieldId, activate: focusYearField, enabled: !!item?.requiresExpirationDate },
@@ -490,13 +393,13 @@ export function PARPage() {
 
   // ── Row 4: Summary (derived, read-only) ─────────────────────────────────────
   const cartonsNum = cartonsField.value ? parseInt(cartonsField.value, 10) : 0;
-  const sspsNum = sspsField.value ? parseInt(sspsField.value, 10) : 0;
+  const sspsNum = sspsState.value ? parseInt(sspsState.value, 10) : 0;
   const totalSspsSingle = sspPerCarton != null ? cartonsNum * sspPerCarton + sspsNum : null;
 
   const fullPalletsNum = fullPalletsField.value ? parseInt(fullPalletsField.value, 10) : 0;
   const cartonsPerPalletNum = cartonsPerPalletField.value ? parseInt(cartonsPerPalletField.value, 10) : 0;
   const partialCartonsNum = partialCartonsField.value ? parseInt(partialCartonsField.value, 10) : 0;
-  const partialSspsNum = partialSspsField.value ? parseInt(partialSspsField.value, 10) : 0;
+  const partialSspsNum = partialSspsState.value ? parseInt(partialSspsState.value, 10) : 0;
   const totalCartonsMulti = fullPalletsNum * cartonsPerPalletNum + partialCartonsNum;
   const totalSspsMulti = sspPerCarton != null ? totalCartonsMulti * sspPerCarton + partialSspsNum : null;
 
@@ -650,7 +553,7 @@ export function PARPage() {
   const expirationBoxesComplete = monthField.value.length === 2 && dayField.value.length === 2 && yearField.value.length === 4;
   const canSubmit =
     item != null &&
-    vcpField.value.trim() !== '' && sspField.value.trim() !== '' && !vcpSspInvalid &&
+    vcpSspState.vcpValue.trim() !== '' && vcpSspState.sspValue.trim() !== '' && !vcpSspState.invalid &&
     (!item.requiresExpirationDate || expirationDate !== '') &&
     !expirationInvalid && !monthInvalid && !dayInvalid &&
     (!expirationBoxesTouched || expirationBoxesComplete) &&
@@ -664,8 +567,8 @@ export function PARPage() {
       // mode's own Partial SSPs field, which already defaults empty to 0 (sspsNum's own
       // derivation already treats a blank box as 0; this only removes the submit-blocking
       // "must be non-empty" requirement).
-      ? cartonsField.value.trim() !== '' && !sspsInvalid
-      : (fullPalletsNum > 0 || hasPartial) && !partialSspsInvalid && (fullPalletsNum === 0 || cartonsPerPalletNum > 0));
+      ? cartonsField.value.trim() !== '' && !sspsState.invalid
+      : (fullPalletsNum > 0 || hasPartial) && !partialSspsState.invalid && (fullPalletsNum === 0 || cartonsPerPalletNum > 0));
 
   /** Create Pallet: if the resolved location needs the warn-then-allow popup and hasn't
    *  been acknowledged yet for this specific location, show that first; otherwise go
@@ -695,21 +598,18 @@ export function PARPage() {
     setExpirationDate('');
     setExpirationInvalid(false);
     expirationFields.clear();
-    vcpField.clear();
-    sspField.clear();
-    vcpValueRef.current = '';
-    sspValueRef.current = '';
-    setVcpSspInvalid(false);
+    vcpSspRef.current?.set('', '');
+    setVcpSspState({ vcpValue: '', sspValue: '', sspPerCarton: null, invalid: false });
     setSizeValue('');
     setMode('single');
     cartonsField.clear();
-    sspsField.clear();
-    setSspsInvalid(false);
+    sspsRef.current?.clear();
+    setSspsState({ value: '', invalid: false });
     fullPalletsField.clear();
     cartonsPerPalletField.clear();
     partialCartonsField.clear();
-    partialSspsField.clear();
-    setPartialSspsInvalid(false);
+    partialSspsRef.current?.clear();
+    setPartialSspsState({ value: '', invalid: false });
     setLocation('');
     setLocationInvalid(false);
     setAisleInvalid(false);
@@ -798,10 +698,10 @@ export function PARPage() {
         setLocationInvalid(true);
         setMessage({ type: 'error', text: 'Location not found' });
       } else if (code === 'INVALID_VCP_SSP_RATIO') {
-        setVcpSspInvalid(true);
+        vcpSspRef.current?.markInvalid();
         setMessage({ type: 'error', text: 'SSP must divide evenly into VCP' });
       } else if (code === 'SSPS_EXCEED_CARTON') {
-        if (mode === 'single') setSspsInvalid(true); else setPartialSspsInvalid(true);
+        if (mode === 'single') sspsRef.current?.markInvalid(); else partialSspsRef.current?.markInvalid();
         setMessage({ type: 'error', text: `SSPs must be less than a full carton (${sspPerCarton ?? '?'} per carton)` });
       } else if (code === 'EXPIRATION_TOO_SOON') {
         setExpirationInvalid(true);
@@ -967,17 +867,25 @@ export function PARPage() {
         <PlainText label="Description" value={item?.descShort ?? ''} width="w-[600px]" />
       </div>
 
-      {/* Row 2 — VCP / SSP entry. Group-washed together (direct instruction — "apply it to
-          the VCP/SSP on this page as well," extending the DPCI/Expiration Date/Location
-          group-wash treatment here too) rather than each box washing independently — VCP
-          and SSP invalidate as a pair (the ratio-divides-evenly rule needs both), so one
-          shared wash reads as "this pair is wrong together," not two separately-wrong
-          numbers. */}
+      {/* Row 2 — VCP / SSP entry (shared VcpSspFields component — issue #165). */}
       <div className="flex flex-wrap items-end gap-4">
-        <div className={`flex items-end gap-4 rounded-[10px] ${vcpSspInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
-          <FieldBox label="VCP" value={vcpField.value} onFocus={focusVcp} active={vcpField.isActive} width="w-[126px]" />
-          <FieldBox label="SSP" value={sspField.value} onFocus={focusSsp} active={sspField.isActive} width="w-[126px]" />
-        </div>
+        <VcpSspFields
+          ref={vcpSspRef}
+          onSspConfirm={() => {
+            if (mode === 'single') {
+              if (location) setTimeout(() => focusCartonsRef.current(), 50);
+              else setTimeout(() => sizeFieldRef.current?.focus(), 50);
+            } else resetToNumpad();
+          }}
+          onChange={setVcpSspState}
+          setMessage={setMessage}
+          playAlert={playAlert}
+          vcpLabel="VCP"
+          sspLabel="SSP"
+          vcpWidth="w-[126px]"
+          sspWidth="w-[126px]"
+          wrapperClass="flex items-end gap-4"
+        />
         <SizeField ref={sizeFieldRef} value={sizeValue} onChange={handleSizeChange} width="w-[126px]" disabled={mode === 'single' && !!location} />
         <PlainText label="SSPs per Carton" value={sspPerCarton != null ? String(sspPerCarton) : ''} width="w-[160px]" />
       </div>
@@ -1014,7 +922,18 @@ export function PARPage() {
         {mode === 'single' ? (
           <div className="flex flex-wrap gap-4">
             <FieldBox label="Cartons" value={cartonsField.value} onFocus={focusCartons} active={cartonsField.isActive} width="w-[144px]" />
-            <FieldBox label="SSPs" value={sspsField.value} onFocus={focusSsps} active={sspsField.isActive} invalid={sspsInvalid} width="w-[144px]" />
+            <LooseSspsField
+              ref={sspsRef}
+              sspPerCarton={sspPerCarton}
+              onConfirm={() => {
+                if (item?.requiresExpirationDate) setTimeout(() => focusMonthField(), 50);
+                else setTimeout(() => setLocationAutoFocus(true), 50);
+              }}
+              onChange={setSspsState}
+              setMessage={setMessage}
+              playAlert={playAlert}
+              label="SSPs"
+            />
           </div>
         ) : (
           <div className="flex items-stretch gap-4">
@@ -1022,7 +941,15 @@ export function PARPage() {
             <FieldBox label="Cartons per Pallet" value={cartonsPerPalletField.value} onFocus={focusCartonsPerPallet} active={cartonsPerPalletField.isActive} width="w-[180px]" />
             <div className="w-px bg-[#3A3A3A]" />
             <FieldBox label="Partial: Carton Count" value={partialCartonsField.value} onFocus={focusPartialCartons} active={partialCartonsField.isActive} width="w-[180px]" />
-            <FieldBox label="Partial: SSPs" value={partialSspsField.value} onFocus={focusPartialSsps} active={partialSspsField.isActive} invalid={partialSspsInvalid} width="w-[144px]" />
+            <LooseSspsField
+              ref={partialSspsRef}
+              sspPerCarton={sspPerCarton}
+              onConfirm={() => resetToNumpad()}
+              onChange={setPartialSspsState}
+              setMessage={setMessage}
+              playAlert={playAlert}
+              label="Partial: SSPs"
+            />
           </div>
         )}
       </div>

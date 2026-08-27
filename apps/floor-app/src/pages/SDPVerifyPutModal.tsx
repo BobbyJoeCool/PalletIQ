@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { hasMinRole, type Role } from '@shared/index';
 import { DataRow } from '../components/shared/DataRow';
+import { ItemDescription } from '../components/shared/ItemDescription';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
 import { LockedHoldConfirmDialog } from '../components/shared/LockedHoldConfirmDialog';
 import { StorageCodeBadge } from '../components/shared/StorageCodeBadge';
@@ -209,7 +210,7 @@ export function SDPVerifyPutModal({
     <ModalOverlay width="w-[820px]" position="left" testId="sdp-verify-put-modal">
       <div className="flex flex-col gap-3">
         <DataRow label="Pallet ID"><LiveId type="pallet" id={String(directed.pallet.id)} /></DataRow>
-        <DataRow label="Item">{directed.pallet.descShort}</DataRow>
+        <ItemDescription value={directed.pallet.descShort} label="Item" />
         <DataRow label="DPCI">
           <span className="flex items-center gap-2">
             <LiveId type="dpci" id={directed.pallet.dpci} className="!text-[22px]" />

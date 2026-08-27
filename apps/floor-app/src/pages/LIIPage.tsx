@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
+import { ItemDescription } from '../components/shared/ItemDescription';
 import { LocationEntryFields, type LocationEntryFieldsHandle } from '../components/shared/LocationEntryFields';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { LiveId } from '../components/ui/LiveId';
@@ -172,7 +173,7 @@ export function LIIPage() {
               </div>
               <DataRow label="Pallet ID">{pallet ? <LiveId type="pallet" id={String(pallet.id)} /> : '—'}</DataRow>
               <DataRow label="DPCI">{pallet ? <LiveId type="dpci" id={pallet.dpci} /> : '—'}</DataRow>
-              <DataRow label="Description">{pallet ? pallet.descShort : '—'}</DataRow>
+              <ItemDescription value={pallet?.descShort} />
               <DataRow label="Cartons">{pallet ? pallet.cartons : '—'}</DataRow>
               <DataRow label="Pallets">{pallet ? pallet.pallets : '—'}</DataRow>
               <DataRow label="SSPs">{pallet ? pallet.ssps : '—'}</DataRow>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DataRow } from '../components/shared/DataRow';
+import { ItemDescription } from '../components/shared/ItemDescription';
 import { HoldPanel } from '../components/shared/HoldPanel';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
@@ -746,7 +747,7 @@ export function MNPPage() {
               <DataRow label="Pallet ID">
                 <LiveId type="pallet" id={String(scannedPallet.id)} />
               </DataRow>
-              <DataRow label="Item">{scannedPallet.descShort}</DataRow>
+              <ItemDescription value={scannedPallet.descShort} label="Item" />
               <DataRow label="DPCI">
                 <div className="flex items-center gap-2">
                   <LiveId type="dpci" id={scannedPallet.dpci} />

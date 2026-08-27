@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PalletIQ Manual E2E Test Checklist</title>
+<style>
+  :root {
+    --bg: #0e0e14;
+    --surface: #16161e;
+    --surface-alt: #1c1c26;
+    --border: #2a2a38;
+    --text: #e0e0e0;
+    --text-muted: #9a9a9a;
+    --accent: #4a6cf7;
+    --accent-hover: #5a7cf9;
+    --pass: #22c55e;
+    --fail: #ef4444;
+    --partial: #f59e0b;
+    --not-tested: #6b7280;
+    --tab-active: #4a6cf7;
+    --tab-inactive: #2a2a38;
+    --header-bg: #1a1a2e;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .header {
+    background: var(--header-bg);
+    padding: 20px 32px;
+    border-bottom: 2px solid var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .header h1 span { color: var(--accent); }
+  .header-meta {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .header-meta label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .header-meta input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    width: 140px;
+  }
+  .header-meta input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .toolbar {
+    background: var(--surface);
+    padding: 10px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-secondary {
+    background: var(--border);
+    color: var(--text);
+  }
+  .btn-secondary:hover { background: #3a3a4a; }
+  .btn-danger {
+    background: #7f1d1d;
+    color: #fca5a5;
+  }
+  .btn-danger:hover { background: #991b1b; }
+  .stats {
+    margin-left: auto;
+    font-size: 13px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 16px;
+  }
+  .stats .stat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .stats .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .stats .dot-pass { background: var(--pass); }
+  .stats .dot-fail { background: var(--fail); }
+  .stats .dot-partial { background: var(--partial); }
+  .stats .dot-not { background: var(--not-tested); }
+  .layout {
+    display: flex;
+    height: calc(100vh - 140px);
+  }
+  .tab-sidebar {
+    width: 220px;
+    min-width: 220px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+  .tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 16px;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.1s;
+    border-left: 3px solid transparent;
+  }
+  .tab-btn:hover { background: var(--surface-alt); }
+  .tab-btn.active {
+    color: var(--text);
+    background: var(--surface-alt);
+    border-left-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab-btn .tab-code {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    min-width: 42px;
+  }
+  .tab-btn .tab-badge {
+    margin-left: auto;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 600;
+  }
+  .tab-badge-pass { background: rgba(34,197,94,0.2); color: var(--pass); }
+  .tab-badge-fail { background: rgba(239,68,68,0.2); color: var(--fail); }
+  .tab-badge-partial { background: rgba(245,158,11,0.2); color: var(--partial); }
+  .tab-badge-none { background: rgba(107,114,128,0.15); color: var(--not-tested); }
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 32px;
+  }
+  .screen-header {
+    margin-bottom: 20px;
+  }
+  .screen-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .screen-header h2 .code {
+    color: var(--accent);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    margin-right: 8px;
+  }
+  .screen-progress {
+    margin-top: 8px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .screen-progress-bar {
+    height: 100%;
+    transition: width 0.3s;
+    border-radius: 2px;
+  }
+  .test-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .test-table th {
+    background: var(--header-bg);
+    color: white;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 12px;
+    text-align: left;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .test-table th:first-child { border-radius: 8px 0 0 0; width: 40px; text-align: center; }
+  .test-table th:nth-child(2) { }
+  .test-table th:nth-child(3) { width: 140px; text-align: center; }
+  .test-table th:last-child { border-radius: 0 8px 0 0; width: 240px; }
+  .test-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    vertical-align: middle;
+  }
+  .test-table tr:nth-child(even) td { background: var(--surface-alt); }
+  .test-table tr:hover td { background: rgba(74,108,247,0.08); }
+  .test-table td:first-child {
+    text-align: center;
+    color: var(--text-muted);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+  }
+  .status-group {
+    display: flex;
+    gap: 4px;
+    justify-content: center;
+  }
+  .status-btn {
+    width: 30px;
+    height: 28px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.1s;
+  }
+  .status-btn:hover { border-color: var(--text-muted); }
+  .status-btn.active-pass { background: var(--pass); color: white; border-color: var(--pass); }
+  .status-btn.active-fail { background: var(--fail); color: white; border-color: var(--fail); }
+  .status-btn.active-partial { background: var(--partial); color: white; border-color: var(--partial); }
+  .status-btn.active-not { background: var(--not-tested); color: white; border-color: var(--not-tested); }
+  .comment-input {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .comment-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .legend {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 0 32px 0 0;
+  }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  @media (max-width: 900px) {
+    .tab-sidebar { width: 60px; min-width: 60px; }
+    .tab-btn span:not(.tab-code) { display: none; }
+    .tab-btn .tab-badge { display: none; }
+    .content { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1><span>PalletIQ</span> Manual E2E Test Checklist</h1>
+  <div class="header-meta">
+    <div><label>Tester</label><br><input type="text" id="tester" placeholder="Name"></div>
+    <div><label>Date</label><br><input type="date" id="testDate"></div>
+    <div><label>Version</label><br><input type="text" id="version" placeholder="e.g. 1.8.12"></div>
+  </div>
+</div>
+<div class="toolbar">
+  <button class="btn btn-primary" onclick="exportJSON()">Export Results (JSON)</button>
+  <button class="btn btn-secondary" onclick="markAllScreen('pass')">All ✓ (this screen)</button>
+  <button class="btn btn-secondary" onclick="markAllScreen('not_tested')">All — (this screen)</button>
+  <button class="btn btn-danger" onclick="resetAll()">Reset All</button>
+  <div class="legend">
+    <span><span class="dot dot-pass"></span> Works</span>
+    <span><span class="dot dot-fail"></span> Fail</span>
+    <span><span class="dot dot-partial"></span> Partial</span>
+    <span><span class="dot dot-not"></span> Not Tested</span>
+  </div>
+  <div class="stats" id="globalStats"></div>
+</div>
+<div class="layout">
+  <div class="tab-sidebar" id="tabSidebar"></div>
+  <div class="content" id="content"></div>
+</div>
+
+<script>
+const SCREENS = [
+  ["LOGIN", "Login / Authentication", [
+    "App opens to /login with no prior session restored",
+    "ZnumPad: leading 'z' cannot be backspaced past",
+    "OK button disabled until at least one char beyond 'z' prefix",
+    "zNumber input capped at 7 total characters",
+    "Nonexistent zNumber: error tone, 'zNumber not found', field resets to 'z'",
+    "Valid zNumber: navigates to /pin, 'Welcome: {firstName}' displayed",
+    "PIN: 4 digits auto-submit on 4th digit, no separate OK tap",
+    "Incorrect PIN: error tone, 'Incorrect PIN', PIN clears, name stays",
+    "Correct PIN: navigates to Home with replace:true (Back can't return to PIN)",
+    "Direct nav to /pin with no route state: redirects to /login",
+    "Back button on PIN screen: returns to /login with fresh entry",
+    "Idle timeout fires after 15 minutes, logs out to /login",
+    "Header Logout button: clears token/user, navigates to /login",
+    "Wake Database button: countdown timer, 'Database ready' or error",
+    "Reseed Test Data button: status text and completion summary",
+    "Dev-tools styled amber, never touch the login message bar",
+    "Field edit after error immediately clears the error message"
+  ]],
+  ["PIN", "PIN Entry", [
+    "PIN screen shows worker's first name from login",
+    "4-digit entry with auto-submit on 4th digit",
+    "Incorrect PIN clears PIN field but keeps worker name",
+    "Correct PIN navigates to Home (replace:true)",
+    "Back button returns to Login with fresh zNumber entry",
+    "Direct navigation to /pin without state redirects to /login"
+  ]],
+  ["HOME", "Home Screen Navigation", [
+    "6-column grid renders: Production, GPM, Inventory, Location, Container, Reporting",
+    "Welcome info message 'Signed in as {name}' on mount",
+    "PIP button navigates to /pull",
+    "SDP button navigates to /put/directed",
+    "MNP button navigates to /put/manual",
+    "ELA button navigates to /empty/aisle",
+    "ELZ button navigates to /empty/zone",
+    "STG button navigates to /stage",
+    "PII button navigates to /pallet",
+    "IID button navigates to /item",
+    "PAR button navigates to /pallet/reinstate",
+    "LII button navigates to /location",
+    "WLH button navigates to /hold",
+    "ISI button navigates to /storage-inquiry",
+    "SAR button navigates to /staged-aisle",
+    "IRP button navigates to /reporting/individual",
+    "CII button navigates to /container",
+    "PRQ button navigates to /reporting/pull-request",
+    "Unbuilt function buttons (OCC, LRP, WTP) show info message, no nav",
+    "Every button shows jump code badge and function name"
+  ]],
+  ["PIP", "Pallet ID Pull", [
+    "Pull Function dropdown defaults to CA (Carton Air)",
+    "Valid printed container scan: blue wash, pull data populates",
+    "Bottom section renders with blank placeholders before any scan",
+    "Mismatched pull function scan: 'Wrong function' error, red wash",
+    "Nonexistent container scan: 'Label not found' error, red wash",
+    "PULLED/CANCELED/PURGED container: 'Invalid status' error",
+    "Pallet ID / UPC / Location fields disabled until CID is valid",
+    "Correct Pallet ID verification: container marked PULLED, quantities deducted, history updated",
+    "Mismatched Pallet ID: 'Incorrect Pallet ID', red wash",
+    "Mismatched UPC: 'Invalid UPC', red wash",
+    "Mismatched Location (aisle+bin): 'Invalid Location', all 3 boxes red",
+    "FP: level-only mismatch opens Level Correction popup",
+    "Level Correction: corrected level + confirm = pull succeeds",
+    "Level Correction: cancel = treated as invalid Location",
+    "Locked Aisle box rejects scan with different aisle segment",
+    "Hold button with current+previous locations: picker popup with both options",
+    "Change Pull Function mid-verification: 'Label not verified' warning, fields clear",
+    "Demo footer: Valid Label, Label by Status, Invalid Label buttons work",
+    "Success message persists through next label scan"
+  ]],
+  ["SDP", "System Directed Put", [
+    "Valid Aisle entry: freight-type badges appear beneath Aisle field",
+    "Nonexistent Aisle: error, field clears and refocuses, no badges",
+    "Storage Code and Zone override fields hidden from Worker role",
+    "Size override available to every role",
+    "Valid Put Pending Pallet scan: SDPVerifyPutModal opens with directed location in red",
+    "Pallet ID field stays disabled until Aisle is set",
+    "Nonexistent Pallet ID: 'Pallet not found' error, red wash",
+    "Pallet with no cartons: 'Invalid Pallet: No Cartons'",
+    "Canceled pallet: 'Invalid Pallet: Canceled'",
+    "Pallet blocked by pending pull: 'Invalid Pallet: Pull Pending'",
+    "Aisle with no eligible locations: 'No eligible locations' error",
+    "Already-stored pallet: 'directing as move' note",
+    "Verify-Put Modal: correct confirm location scan = pallet stored, modal closes",
+    "Verify-Put Modal: wrong confirm location = 'Wrong location' error",
+    "Unassign button: reservation released, modal closes, Aisle/overrides kept, PID cleared",
+    "Hold Location button: LockedHoldConfirmDialog opens with Hold Both / reason 70",
+    "Hold Location confirm: reservation cleared, screen resets",
+    "Hold Location cancel: return to Verify-Put Modal untouched",
+    "Hand Put (XS): Exists Elsewhere button appears for IM+ with same-DPCI match",
+    "Exists Elsewhere hidden from Worker role",
+    "Exists Elsewhere pick: retarget (not immediate complete), Cancel/Return to Original appear",
+    "15-second poll detects reservation expiry: modal closes with warning, full reset",
+    "Back/Home/Jump/Logout disabled while reservation active (nav-locked)",
+    "Consolidation timer: 15-minute expiry (not 5-minute)",
+    "Consolidation: Cancel button labeled 'Unassign'",
+    "Demo footer: Valid Pallet ID, Pallet ID by Status, Invalid Pallet ID buttons work"
+  ]],
+  ["MNP", "Manual Put", [
+    "Single Scan Pallet ID field auto-focused on mount",
+    "Valid pallet scan: pallet data displays, MNP_SCAN logged unconditionally",
+    "Nonexistent pallet: 'Pallet not found', red wash, MNP_SCAN still logged",
+    "Pallet with no cartons: error with red wash, value kept",
+    "Already-stored pallet: info message 'proceeding as move'",
+    "Valid destination Aisle+Bin: Level Modal opens",
+    "Nonexistent destination: 'Location not found', boxes wash red",
+    "Level Modal: enter level + confirm = put succeeds (no gates)",
+    "Contraction gate: Worker hard-blocked; IM+ sees confirmation popup and can proceed",
+    "Hold gate: HOLD_IN/HOLD_BOTH blocks Worker, IM+ can acknowledge; HOLD_PERM blocks all",
+    "Occupied/Staged gate: same-DPCI offers Combine (IM+ only) or Cancel",
+    "Occupied/Staged gate: different DPCI offers Proceed Anyway / Place Hold Both & Cancel / Cancel",
+    "Consolidate (IM+, same-DPCI Combine): incoming zeroed, occupant quantities increased",
+    "Cancel Put: return to ready state, MNP_CANCEL logged",
+    "Abandonment via nav-away or idle-timeout fires MNP_CANCEL best-effort",
+    "Hold quick-action for pallet's current location: HoldPanel opens, no default type/reason",
+    "Demo footer: Pallet ID Demo Scanner (ready) and Location ID Demo Scanner (pallet_scanned)"
+  ]],
+  ["PII", "Pallet ID Info", [
+    "Navigate to /pallet: Pallet ID field auto-focuses",
+    "Navigate via ?id=<pid>: pallet loads immediately without auto-focus",
+    "Valid pallet ID: read-only Loaded state with two-column layout",
+    "Nonexistent pallet ID: 'Pallet not found', error tone, red wash",
+    "'Go to Location ID' button present (disabled if no location); navigates to /location?id=",
+    "Edit button visible only for IM+ roles; Worker never sees it",
+    "Edit mode (IM+): fields seeded from loaded pallet with 'Current: {value}' indicators",
+    "Save button enables only when a parsed value actually differs",
+    "Save without Reason Code: 'A reason code is required' block",
+    "Save with valid changes: success message, re-fetch, return to Loaded",
+    "Expiration 1-3 months out: EXPIRATION_NEEDS_CONFIRM popup",
+    "Expiration under 1 month: 'Expiration Date must be at least 1 month out' error",
+    "VCP/SSP ratio validation: SSP must divide evenly into VCP",
+    "SSPs on Pallet cap: must be less than one full carton's worth",
+    "Cancel in Edit mode: discard changes, return to Loaded",
+    "Scan new pallet while in Edit mode: unsaved changes discarded silently",
+    "Session persistence: navigate away and back, last-loaded pallet restores read-only",
+    "Demo footer: Valid Pallet ID, Pallet ID by Status, Invalid Pallet ID buttons work"
+  ]],
+  ["IID", "Item ID Lookup", [
+    "Navigate to /item: Dept box auto-focuses",
+    "Dept(3) -> Class(2) -> Item(4): auto-advance and auto-resolve",
+    "UPC entry + confirm: item loads, DPCI boxes backfill",
+    "DPCI entry: UPC field clears (asymmetric behavior)",
+    "Nonexistent DPCI: 'Item not found', red wash on DPCI group",
+    "Nonexistent UPC: 'Item not found', red wash on UPC",
+    "Navigate via ?dpci= or ?upc=: pre-population and auto-resolve",
+    "Read-only fields display: DPCI, UPC, Name, Short Desc, Desc, Retail, Cost, Weight, Storage, Conveyable",
+    "'View Storage Locations' navigates to ISI with ?dpci=",
+    "'Reinstate Pallet' button visible only for IM+ roles",
+    "'Reinstate Pallet' (IM+): navigates to PAR with ?dpci=",
+    "Demo footer: Valid DPCI, DPCI by Filter, Invalid DPCI; relabel to UPC when UPC focused"
+  ]],
+  ["PAR", "Pallet Reinstate", [
+    "Navigate as Worker: 'Access Denied', no form, no demo buttons",
+    "Navigate as IM+: full form renders with all fields visible",
+    "Valid DPCI: Description populates, UPC clears",
+    "Valid UPC: DPCI boxes backfill, Description populates",
+    "Invalid DPCI: red wash on DPCI group, 'DPCI not found' error",
+    "VCP/SSP with SSP not dividing VCP: group wash, 'SSP must divide evenly into VCP'",
+    "Auto-advance chain: DPCI/UPC -> VCP -> SSP -> Size -> Cartons -> SSPs -> (Exp) -> Location",
+    "Size is mandatory unless Location entered (then disabled/inherited)",
+    "Single Pallet / Multiple Pallets mode toggle: appropriate fields appear",
+    "Single Pallet: Location per-box validation (Aisle/Bin/Level existence)",
+    "Occupied/on-hold/contracted location: amber inline flag + warn-then-allow at Create",
+    "Storage Code mismatch (item vs location): warning, not block",
+    "Expiration Month out of 1-12: individual box wash",
+    "Too-soon Expiration Date: group wash and error",
+    "Expiration Date required when item's requiresExpirationDate is true",
+    "Create Pallet: confirm dialog with 5-line layout",
+    "Confirm creation: success message, form clears, Reinstate Log entry added",
+    "Multiple Pallets mode: Location disabled, N+1 pallet rows created",
+    "Demo footer: Item Demo Scanner and Location Demo Scanner work"
+  ]],
+  ["LII", "Location ID Info", [
+    "Navigate to /location: Aisle box auto-focuses",
+    "Aisle(3) + Bin(3) + Level(2): auto-advance and location loads",
+    "Full 8-digit barcode scan: immediate resolve regardless of focused box",
+    "Navigate via ?id=: pre-population and auto-resolve",
+    "Nonexistent location: 'Location not found', error tone, boxes clear and remount",
+    "Detail displays: Location ID, Aisle, Bin, Level, Zone, Size, Storage Code, Status, Hold",
+    "Pallet summary always renders with 'PALLET x/y' indicator (0/0 if unoccupied)",
+    "Multi-occupant: Next/Prev buttons cycle through occupants",
+    "CONTRACTED badge renders inline next to Status when contraction: true",
+    "'Go to Pallet ID' navigates to /pallet?id=<pid>",
+    "'Hold' navigates to /hold?id=<8-digit location id>",
+    "Session persistence: navigate away and back, last-loaded location restores",
+    "Demo footer: Valid Location, Location by Filter, Invalid Location buttons work"
+  ]],
+  ["WLH", "Warehouse Location Hold", [
+    "Single Location / Range toggle visible only for IM+; Worker locked to Single",
+    "Single Location mode: Location indicator + HoldPanel render with '---' placeholders",
+    "Valid location entry: indicator and HoldPanel populate with live hold state",
+    "Nonexistent location: 'Location not found', red group wash",
+    "Hold Type 2x2 grid: button matching current hold type is disabled",
+    "No Hold Type placeable while existing hold can't be removed by caller's role",
+    "Select Hold Type + Reason Code + Confirm Hold: hold placed",
+    "Different hold already exists: 'Replace existing hold?' confirmation dialog",
+    "Remove Hold: hold removed, no reason code required",
+    "Role gating: Worker = Hold Both only; Hold In/Out = IM+; Hold Perm = Lead+",
+    "Hold Log records each action in both modes",
+    "Range mode (IM+): Aisle, Start/End Bin, optionally Start/End Level",
+    "Review Hold disabled when Start Bin > End Bin",
+    "Review Hold: ConfirmDialog shows location count and range details",
+    "Confirm Range Place: success message and per-bucket breakdown in Hold Log",
+    "Range Release with Release Level gating (Perm clears all; Both clears In/Out; etc.)",
+    "Per-bucket role gating on Range Release",
+    "Reason Code uses shared ReasonCodeField with department/role prefix",
+    "Session persistence: navigate away and back, last single-location id restores"
+  ]],
+  ["SAR", "Staged Aisle Report", [
+    "Both columns load with 'Loading...' then populate",
+    "'Most Staged' sorted descending by staged count",
+    "'Staged Longest' sorted descending by age",
+    "Each row shows Aisle id, freight-type badges, and metric",
+    "Tap row to select: Directed Put and Stage Aisle buttons enable with aisle number",
+    "Tap already-selected row: deselects, buttons disable",
+    "Selection in one column reflects in the other for same aisle",
+    "Directed Put button navigates to SDP with aisle pre-populated",
+    "Stage Aisle button navigates to STG with aisle pre-populated",
+    "Zero staged aisles: both columns show 'No staged locations in system'",
+    "No auto-refresh; must reopen to see updated data",
+    "No role gating; all roles see identical report"
+  ]],
+  ["ISI", "Item Storage Inquiry", [
+    "Navigate to /storage-inquiry: Dept box auto-focuses",
+    "Valid DPCI via Dept/Class/Item: item locations display sorted by aisle/bin/level",
+    "Valid UPC: locations display, DPCI boxes backfill",
+    "Nonexistent DPCI: 'Item not found', red wash on DPCI group",
+    "Item found with zero locations: 'No locations currently storing this item'",
+    "Short Description renders once above results",
+    "Tap result row to select: 'Go to Location ID' and 'Go to Pallet ID' buttons appear",
+    "Tap same row again: deselects, buttons hidden",
+    "'Go to Location ID' navigates to /location?id=",
+    "'Go to Pallet ID' navigates to /pallet?id=",
+    "Navigate via ?dpci= or ?upc=: pre-population and auto-resolve",
+    "Session persistence: navigate away and back, last search restores with selection",
+    "Sticky header row stays visible while scrolling results",
+    "Demo footer: Valid DPCI, DPCI by Filter, Invalid DPCI; relabel to UPC when UPC focused"
+  ]],
+  ["ELA", "Empty Locations by Aisle", [
+    "No filter: idle prompt 'Enter a Storage Code...'",
+    "Valid Storage Code: query auto-runs, 'Displaying {code}: {description}' banner",
+    "Invalid Storage Code: 'Invalid Storage Code' error, red wash, no query",
+    "Valid Size: results re-sort client-side by that size's empty count",
+    "Invalid Size: 'Invalid Size' error, no query",
+    "Size is a display/sort control, not a query filter (all aisles/sizes still shown)",
+    "Zero-but-exists cells render as blue-washed 0(0), not blank",
+    "Tap column header: sorting toggles direction; ascending pushes zeros to bottom",
+    "Tap Size column header: that size value fills the Size field",
+    "Tap row to select: View Zone Map and Stage Aisle buttons enable",
+    "View Zone Map navigates to ELZ with aisle and storageCode",
+    "Stage Aisle navigates to STG with aisle, storageCode, and size",
+    "Zero-result query: 'No empty or staged locations found' message",
+    "Session persistence: navigate away and back, filter and selection restore"
+  ]],
+  ["ELZ", "Empty Locations by Zone", [
+    "No aisle: idle prompt 'Enter an Aisle to view the zone map'",
+    "Valid Aisle: grid loads with all 8 zone/side columns (unfiltered by Storage Code)",
+    "Nonexistent Aisle: 'Invalid Aisle' error with red wash",
+    "Optional Storage Code: zone summary panel narrows to that code; grid stays unfiltered",
+    "Invalid Storage Code: error message; code dropped but grid still loads",
+    "Contracted cells render highlighted red in the grid",
+    "Contracted locations excluded from zone summary panel counts",
+    "Each column fills full height with entries weighted by Size",
+    "Zone summary shows one column per Storage Code, badges sorted largest Size first",
+    "Stage Aisle navigates to STG with aisle and storageCode",
+    "Navigate from ELA's View Zone Map: aisle and storageCode pre-populate",
+    "Session persistence: navigate away and back, last-viewed aisle restores"
+  ]],
+  ["STG", "Stage Aisle", [
+    "Three stack boxes (On Deck, Next, Staging) and Master Control render",
+    "Master Control Aisle/Storage Code/Size: all three stacks live-inherit values",
+    "Storage Code validates against codes narrowed to current Aisle",
+    "Arm per-field override toggle: field becomes editable, pre-filled, auto-focused",
+    "Disarm override: field reverts to inherited display",
+    "Staging Quantity filled: Locations panel fetches and shows destination bubbles",
+    "Dynamic bubble sizing (1/2/3 columns based on count)",
+    "Fewer locations than Quantity: red 'No Location' shortfall bubbles",
+    "STAGE button: locations marked STAGED, log entry written, queue compacts forward",
+    "Queue compaction: Next/On Deck slide into Staging; empty Staging inherits values",
+    "Tap location bubble: reject/hold popup with default reason W70",
+    "Confirm rejection: Hold Both placed, new suggestion fetched",
+    "Unstage Aisle button visible only for IM+",
+    "Unstage Aisle (IM+): modal lists freight types with toggles and quantity fields",
+    "Apply Unstage/Restage: locations cleared and restaged per active rows",
+    "Live Info Panel: ELZ format when Aisle present; ELA table when only Storage Code",
+    "Tap row in ELA-format table: commits Aisle to Master Control",
+    "Master Control Zone: staging begins in that zone",
+    "Invalid Storage Code/Size/Aisle: value stays, red wash, error message",
+    "Clear Forks clears all three stacks including Zone/zoneOverride",
+    "Session persistence via StagingContext across navigation"
+  ]],
+  ["IRP", "Individual Reporting", [
+    "All 9 production functions listed on open",
+    "Bulk (BK) and Breakpack (BKP) permanently greyed and non-tappable",
+    "Functions with activity sort by first-started time; inactive follow in fixed order",
+    "Each active function row shows correct field set (counts, rates, hours, % to goal)",
+    "Shift-wide time indicator: earliest assignment start through current time",
+    "Tap active function row: navigates to hour-by-hour zoom-in view",
+    "Zoom-in view: only assigned clock-hours listed (no blank rows)",
+    "Back in zoom-in view: returns to summary",
+    "Data scoped to logged-in worker only (no way to view another worker)",
+    "No auto-refresh; re-entering triggers fresh pull",
+    "API failure: 'Unable to load today\\'s data' fallback"
+  ]],
+  ["PRQ", "Pull Request", [
+    "Navigate to /reporting/pull-request via Home button or jump code PRQ",
+    "Empty state: prompt displays until Aisle + Status are filled",
+    "Aisle field: 3-digit numpad entry, existence check via useAisleField",
+    "End Aisle field: validates higher than Start Aisle, shows error if not",
+    "Workstation field: entering clears Aisle fields (mutual exclusion)",
+    "Aisle entry clears Workstation field (mutual exclusion)",
+    "Status dropdown: only Available, Printed, Verified options",
+    "Live filtering: results populate as soon as Aisle + Status are valid",
+    "L1 summary: rows grouped by Batch Date × Pull Function",
+    "L1 sort: Batch Date ascending, then function order CA → CF → FP → BK",
+    "L1 CA/CF/FP row: Cartons, Locations, Density fields display",
+    "L1 BK row: Full Pallets, Pallet Density, Loose Cartons, Carton Density, Locations",
+    "Select-then-zoom-in: tap highlights row, Zoom In button or double-tap drills",
+    "L1 → L2 (range/workstation): per-aisle breakdown shows for selected batch/function",
+    "L1 → L3 (single aisle): skips L2, goes directly to location-level",
+    "L2 per-aisle: same field format as L1, scoped to one aisle",
+    "L2 → L3: zoom into selected aisle row",
+    "L3 location-level: rows show Aisle-Bin-Level with Cartons/Pallets/SSPs",
+    "L3 additional filters: Bin Start, Bin End, Level",
+    "L3 sort: Aisle, Bin, Level ascending",
+    "Back button: returns to previous level, clears selection",
+    "Zoom In button: disabled when no row selected",
+    "Summary line updates at every level showing current scope",
+    "Pull detail popup: opens on L3 zoom-in",
+    "Popup header: tappable Location → LII, DPCI → IID, Pallet ID → PII",
+    "Popup pull metadata: pull type, batch date, pull quantity",
+    "Popup container list: each CID with status badge and quantity",
+    "Tap container CID: immediate navigation to CII",
+    "Back from CII returns to PRQ popup",
+    "Session persistence: filters/level survive navigate-away and back",
+    "No data: 'No pull data found' message at each level"
+  ]],
+  ["CII", "Container ID Inquiry", [
+    "Navigate to /container: Container ID field renders, no persistent numpad",
+    "Numpad opens on field focus, dismisses on blur/lookup",
+    "Valid Full Case (91) CID: detail loads with pull info, quantities, pallet link",
+    "Valid Overpack (92) CID: detail loads with open/closed state, contents list",
+    "Valid SSP Pull Master (93) CID: detail loads with children list, cascade cancel info",
+    "Valid SSP Unit (94) CID: read-only detail with source master link",
+    "Valid Stray Each (95) CID: detail loads with destination, found-by info",
+    "Compressed CID input expanded correctly to canonical 35-digit form",
+    "Nonexistent CID: error tone, 'Container not found', red wash on field",
+    "Type label and status badge render in header next to CID field",
+    "Event log (right column) populates with timestamped entries",
+    "Event log shows reason codes, user names, child CID links, store/qty changes",
+    "Tap DPCI link: navigates to IID with dpci param",
+    "Tap Pallet ID link: navigates to PII with pid param",
+    "Tap Location link: navigates to LII with loc param",
+    "Tap child/source CID link: reloads CII with that CID",
+    "Cancel button (Full Case, IM+): visible only for AVAILABLE/VERIFIED status",
+    "Cancel modal: ReasonCodeField (CONTAINER_CANCEL domain), optional note, confirm flow",
+    "Cancel SSP Master (IM+): cascade warning with PENDING child count",
+    "Force Close overpack (IM+): visible when open and not purged",
+    "Reopen overpack (IM+): visible when closed and not purged",
+    "Overpack action modal: ReasonCodeField (OVERPACK_STATUS domain), confirm flow",
+    "Reassign stray each (IM+): visible when status is PENDING",
+    "Reassign modal: store selector excludes current store, STRAY_REASSIGN domain",
+    "All action buttons hidden from Worker role",
+    "Success messages display via MessageBar after actions",
+    "Error messages display via MessageBar on action failure",
+    "Session persistence: navigate away and back, last-loaded container restores",
+    "Demo scanner bar provides sample CIDs for all five container types",
+    "Re-scan/re-type CID while loaded: loads new container without nav-away"
+  ]],
+  ["LOG", "Activity Log Overlay", [
+    "Tap 'Activity' in Header on any authenticated screen: overlay opens",
+    "Overlay shows 'Loading...' then populates newest-first",
+    "Entries scoped to logged-in worker's own zNumber only",
+    "12-hour rolling window from stored timestamps",
+    "Hidden action types (RESERVE, MNP_SCAN, RES_TMOUT, STAGE) filtered out",
+    "Each entry: bold red function tag, timestamp, color-coded detail lines",
+    "Tap Pallet ID / Location ID / DPCI token: navigates to PII/LII/IID, overlay closes",
+    "Tap Close or dimmed backdrop: overlay dismisses, underlying screen unchanged",
+    "Zero entries: 'No activity in the last 12 hours'",
+    "API failure: 'Couldn\\'t load activity -- please try again'",
+    "Activity button disabled when underlying screen has nav lock (e.g., SDP reservation)"
+  ]],
+  ["SHARED", "Shared Chrome / Cross-Screen", [
+    "Header renders on all authenticated screens with correct screen title",
+    "Back button navigates to previous screen",
+    "Home button navigates to / (Home)",
+    "Jump code entry + confirm navigates to correct screen",
+    "Logout button clears session and navigates to /login",
+    "Idle timeout (15 min) fires on all screens",
+    "Numpad panel opens/closes correctly on field focus/blur",
+    "Keyboard panel opens/closes correctly on text fields",
+    "ScaleToFit: app scales to fit viewport at 1366x1024",
+    "Demo Scanner Bar: all 3 buttons (Valid/by-Filter/Invalid) work per screen",
+    "Error tone plays on all validation errors across screens",
+    "Success tone plays on successful operations",
+    "Role gating consistent across all screens (Worker vs IM vs Lead)"
+  ]]
+];
+
+const STATUS_MAP = {
+  'pass': { sym: '✓', cls: 'active-pass', label: 'Works' },
+  'fail': { sym: '✗', cls: 'active-fail', label: "Doesn't Work" },
+  'partial': { sym: '?', cls: 'active-partial', label: 'Partial' },
+  'not_tested': { sym: '—', cls: 'active-not', label: 'Not Tested' }
+};
+
+let state = {};
+let activeTab = 0;
+
+function initState() {
+  state = {
+    tester: '',
+    date: '',
+    version: '',
+    screens: SCREENS.map(([code, name, items]) => ({
+      code, name,
+      items: items.map(text => ({ text, status: 'not_tested', comment: '' }))
+    }))
+  };
+}
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem('palletiq-test-checklist');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.screens && parsed.screens.length === SCREENS.length) {
+        state = parsed;
+        SCREENS.forEach(([code, name, items], si) => {
+          if (state.screens[si].items.length !== items.length) {
+            state.screens[si].items = items.map((text, ii) => {
+              const old = state.screens[si].items[ii];
+              return old && old.text === text ? old : { text, status: 'not_tested', comment: '' };
+            });
+          }
+        });
+        return;
+      }
+    }
+  } catch {}
+  initState();
+}
+
+function saveState() {
+  state.tester = document.getElementById('tester').value;
+  state.date = document.getElementById('testDate').value;
+  state.version = document.getElementById('version').value;
+  try { localStorage.setItem('palletiq-test-checklist', JSON.stringify(state)); } catch {}
+}
+
+function renderSidebar() {
+  const el = document.getElementById('tabSidebar');
+  el.innerHTML = SCREENS.map(([code, name], i) => {
+    const screen = state.screens[i];
+    const total = screen.items.length;
+    const pass = screen.items.filter(x => x.status === 'pass').length;
+    const fail = screen.items.filter(x => x.status === 'fail').length;
+    let badgeCls = 'tab-badge-none', badgeText = `0/${total}`;
+    if (fail > 0) { badgeCls = 'tab-badge-fail'; badgeText = `${fail} fail`; }
+    else if (pass === total) { badgeCls = 'tab-badge-pass'; badgeText = 'All ✓'; }
+    else if (pass > 0) { badgeCls = 'tab-badge-partial'; badgeText = `${pass}/${total}`; }
+    return `<button class="tab-btn ${i === activeTab ? 'active' : ''}" onclick="switchTab(${i})">
+      <span class="tab-code">${code}</span>
+      <span>${name}</span>
+      <span class="tab-badge ${badgeCls}">${badgeText}</span>
+    </button>`;
+  }).join('');
+}
+
+function renderContent() {
+  const screen = state.screens[activeTab];
+  const pass = screen.items.filter(x => x.status === 'pass').length;
+  const fail = screen.items.filter(x => x.status === 'fail').length;
+  const partial = screen.items.filter(x => x.status === 'partial').length;
+  const total = screen.items.length;
+  const pct = total ? Math.round((pass / total) * 100) : 0;
+  const barColor = fail > 0 ? 'var(--fail)' : pass === total ? 'var(--pass)' : 'var(--accent)';
+
+  let html = `<div class="screen-header">
+    <h2><span class="code">${screen.code}</span>${screen.name}</h2>
+    <div class="screen-progress"><div class="screen-progress-bar" style="width:${pct}%;background:${barColor}"></div></div>
+  </div>
+  <table class="test-table">
+    <thead><tr><th>#</th><th>Test Item</th><th>Status</th><th>Comments</th></tr></thead>
+    <tbody>`;
+
+  screen.items.forEach((item, i) => {
+    const btns = Object.entries(STATUS_MAP).map(([key, { sym, cls }]) =>
+      `<button class="status-btn ${item.status === key ? cls : ''}" onclick="setStatus(${i},'${key}')" title="${STATUS_MAP[key].label}">${sym}</button>`
+    ).join('');
+    html += `<tr>
+      <td>${i + 1}</td>
+      <td>${escapeHtml(item.text)}</td>
+      <td><div class="status-group">${btns}</div></td>
+      <td><input class="comment-input" value="${escapeHtml(item.comment)}" onchange="setComment(${i},this.value)" placeholder="Notes..."></td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  document.getElementById('content').innerHTML = html;
+}
+
+function renderGlobalStats() {
+  let pass = 0, fail = 0, partial = 0, notTested = 0;
+  state.screens.forEach(s => s.items.forEach(item => {
+    if (item.status === 'pass') pass++;
+    else if (item.status === 'fail') fail++;
+    else if (item.status === 'partial') partial++;
+    else notTested++;
+  }));
+  const total = pass + fail + partial + notTested;
+  document.getElementById('globalStats').innerHTML =
+    `<span class="stat"><span class="dot dot-pass"></span>${pass}</span>` +
+    `<span class="stat"><span class="dot dot-fail"></span>${fail}</span>` +
+    `<span class="stat"><span class="dot dot-partial"></span>${partial}</span>` +
+    `<span class="stat"><span class="dot dot-not"></span>${notTested}</span>` +
+    `<span style="color:var(--text)">${total} total</span>`;
+}
+
+function render() {
+  renderSidebar();
+  renderContent();
+  renderGlobalStats();
+}
+
+function switchTab(i) {
+  activeTab = i;
+  render();
+}
+
+function setStatus(itemIdx, status) {
+  state.screens[activeTab].items[itemIdx].status = status;
+  saveState();
+  render();
+}
+
+function setComment(itemIdx, text) {
+  state.screens[activeTab].items[itemIdx].comment = text;
+  saveState();
+}
+
+function markAllScreen(status) {
+  state.screens[activeTab].items.forEach(item => item.status = status);
+  saveState();
+  render();
+}
+
+function resetAll() {
+  if (!confirm('Reset ALL screens to "Not Tested"? This cannot be undone.')) return;
+  state.screens.forEach(screen => screen.items.forEach(item => {
+    item.status = 'not_tested';
+    item.comment = '';
+  }));
+  document.getElementById('tester').value = '';
+  document.getElementById('testDate').value = '';
+  document.getElementById('version').value = '';
+  saveState();
+  render();
+}
+
+function exportJSON() {
+  saveState();
+  const output = {
+    exportedAt: new Date().toISOString(),
+    tester: state.tester,
+    date: state.date,
+    version: state.version,
+    summary: {
+      total: 0, pass: 0, fail: 0, partial: 0, not_tested: 0
+    },
+    screens: state.screens.map(screen => {
+      const summary = { total: screen.items.length, pass: 0, fail: 0, partial: 0, not_tested: 0 };
+      const items = screen.items.map(item => {
+        summary[item.status]++;
+        return { text: item.text, status: item.status, comment: item.comment };
+      });
+      Object.keys(summary).forEach(k => { if (k !== 'total') output.summary[k] += summary[k]; });
+      output.summary.total += summary.total;
+      return { code: screen.code, name: screen.name, summary, items };
+    })
+  };
+  const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `palletiq-test-results-${state.version || 'draft'}-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Init
+loadState();
+document.getElementById('tester').value = state.tester || '';
+document.getElementById('testDate').value = state.date || new Date().toISOString().slice(0, 10);
+document.getElementById('version').value = state.version || '';
+['tester', 'testDate', 'version'].forEach(id =>
+  document.getElementById(id).addEventListener('input', saveState)
+);
+render();
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataRow } from '../components/shared/DataRow';
+import { ItemDescription } from '../components/shared/ItemDescription';
 import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { PALLET_ID_SIZE_PRESETS } from '../components/shared/PalletIdField';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
@@ -20,8 +21,9 @@ import { useDpciFields } from '../lib/useDpciFields';
 import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useTabOrder } from '../lib/useTabOrder';
-import { checkSspCap, checkVcpSspRatio } from '../lib/vcpSspValidation';
 import { RecordActivityPanel } from '../components/shared/RecordActivityPanel';
+import { LooseSspsField, type LooseSspsFieldHandle } from '../components/shared/LooseSspsField';
+import { VcpSspFields, type VcpSspFieldsHandle } from '../components/shared/VcpSspFields';
 
 /** Formats a location object as its canonical 8-digit id (Aisle+Bin+Level). */
 function location8(loc: { aisle: number; bin: number; level: number }): string {
@@ -46,28 +48,13 @@ function toDateInputValue(iso: string | null): string {
 }
 
 /**
- * Client-side mirror of `PATCH /api/pallets/:id`'s own VCP/SSP checks — direct instruction:
- * flag a warning immediately on defocus without blocking further editing (the server
- * re-validates authoritatively at Save time regardless, via the exact same rule). Returns
- * the warning text, or null if the given values are fine (or not yet resolvable, e.g. SSP
- * not entered yet — never warns on an incomplete field). The underlying rules are shared
- * with PAR (Feature 10, issue #164 — `checkVcpSspRatio`/`checkSspCap`); this wrapper just
- * owns PII's own message wording, which differs slightly from PAR's own text.
- */
-function vcpSspWarning(vcpStr: string, sspStr: string, sspsStr: string): string | null {
-  const { ratioInvalid, sspPerCarton } = checkVcpSspRatio(vcpStr, sspStr);
-  if (ratioInvalid) return 'SSP must divide evenly into VCP';
-  if (checkSspCap(sspPerCarton, sspsStr)) return 'SSPs on Pallet must be less than a full carton (VCP ÷ SSP)';
-  return null;
-}
-
-/**
  * Wires a numpad field to an Edit-mode string state slot — syncs the field's displayed
  * value from `value` (e.g. when entering Edit mode, or a sibling field's change indirectly
  * affects it), and commits back into state (trimmed) via `setValue` on confirm, dismissing
  * the numpad panel. `onCommit` (if given) fires with the freshly-committed value straight
- * after — used by VCP/SSP/SSPs-on-Pallet to run `vcpSspWarning` immediately on defocus.
- * Shared by every numpad-driven box in PII's Edit mode (DPCI/VCP/SSP/Cartons/SSPs/Pallets),
+ * after — used by downstream fields for revalidation on defocus.
+ * Shared by every numpad-driven box in PII's Edit mode (DPCI/Cartons/Pallets — VCP/SSP
+ * and SSPs on Pallet now use their own shared components),
  * per direct instruction that all of them should open the numpad rather than a native input.
  */
 function useEditField(
@@ -79,10 +66,8 @@ function useEditField(
   const field = useNumpadField('numpad', opts?.maxLength, opts?.padOnSubmit);
   useEffect(() => { field.set(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Not memoized — always closes over the current render's `value`/`setValue`/`onCommit`,
-   *  which matters here since `onCommit` needs fresh sibling-field values (see vcpEdit/
-   *  sspEdit/sspsEdit below); a fresh function identity per render is harmless for a plain
-   *  onClick handler like this. */
+  /** Not memoized — always closes over the current render's `value`/`setValue`/`onCommit`;
+   *  a fresh function identity per render is harmless for a plain onClick handler. */
   function focus() {
     field.focus((v) => {
       const trimmed = v.trim();
@@ -146,30 +131,15 @@ export function PIIPage() {
   screenStateRef.current = screenState;
 
   // Edit-mode field values, seeded from the loaded pallet on entering edit mode.
-  const [editVcp, setEditVcp] = useState('');
-  const [editSsp, setEditSsp] = useState('');
+  const vcpSspRef = useRef<VcpSspFieldsHandle>(null);
+  const [vcpSspState, setVcpSspState] = useState({ vcpValue: '', sspValue: '', sspPerCarton: null as number | null, invalid: false });
   const [editCartons, setEditCartons] = useState('');
-  const [editSSPs, setEditSSPs] = useState('');
+  const sspsRef = useRef<LooseSspsFieldHandle>(null);
+  const [sspsState, setSspsState] = useState({ value: '', invalid: false });
   const [editPallets, setEditPallets] = useState('');
   const [editExpirationDate, setEditExpirationDate] = useState('');
   const [reasonCode, setReasonCode] = useState('');
   const [saving, setSaving] = useState(false);
-  // Red-wash invalid state (App-Wide item 9, v1.7.0) — VCP/SSP is a cross-validated pair,
-  // same group-wash treatment as PAR's own VCP/SSP (a rule that needs both values at once,
-  // not attributable to either field alone).
-  const [vcpSspInvalid, setVcpSspInvalid] = useState(false);
-
-  /** Runs `vcpSspWarning` against whatever the three fields currently hold and, if it finds
-   *  a problem, warns immediately (non-blocking — Save's own server-side check is still the
-   *  one that actually blocks, per direct instruction) and washes VCP/SSP red. */
-  const checkVcpSspWarning = useCallback((vcp: string, ssp: string, ssps: string) => {
-    const warning = vcpSspWarning(vcp, ssp, ssps);
-    setVcpSspInvalid(!!warning);
-    if (warning) {
-      playAlert('warning');
-      setMessage({ type: 'warning', text: warning });
-    }
-  }, [setMessage]);
 
   // Every Edit-mode box is numpad-driven, including Expiration Date (v1.7.0 — rebuilt as
   // the same Month/Day/Year chain PAR uses, replacing the native `<input type="date">` this
@@ -194,10 +164,7 @@ export function PIIPage() {
       setMessage({ type: 'error', text: 'DPCI not found' });
     }, [setMessage]),
   });
-  const vcpEdit = useEditField(editVcp, setEditVcp, { onCommit: (v) => checkVcpSspWarning(v, editSsp, editSSPs) });
-  const sspEdit = useEditField(editSsp, setEditSsp, { onCommit: (v) => checkVcpSspWarning(editVcp, v, editSSPs) });
   const cartonsEdit = useEditField(editCartons, setEditCartons);
-  const sspsEdit = useEditField(editSSPs, setEditSSPs, { onCommit: (v) => checkVcpSspWarning(editVcp, editSsp, v) });
   const palletsEdit = useEditField(editPallets, setEditPallets);
   // Set when the server rejects a save with EXPIRATION_NEEDS_CONFIRM (the date is 1-3
   // months out) — showing the confirm popup below; confirming re-submits the exact same
@@ -287,10 +254,10 @@ export function PIIPage() {
     { fieldId: dpciFields.deptField.fieldId, activate: dpciFields.focusDeptField, enabled: isEdit },
     { fieldId: dpciFields.classField.fieldId, activate: dpciFields.focusClassField, enabled: isEdit },
     { fieldId: dpciFields.itemField.fieldId, activate: dpciFields.focusItemField, enabled: isEdit },
-    { fieldId: vcpEdit.field.fieldId, activate: vcpEdit.focus, enabled: isEdit },
-    { fieldId: sspEdit.field.fieldId, activate: sspEdit.focus, enabled: isEdit },
+    { fieldId: vcpSspRef.current?.vcpFieldId ?? '', activate: () => vcpSspRef.current?.focusVcp(), enabled: isEdit },
+    { fieldId: vcpSspRef.current?.sspFieldId ?? '', activate: () => vcpSspRef.current?.focusSsp(), enabled: isEdit },
     { fieldId: cartonsEdit.field.fieldId, activate: cartonsEdit.focus, enabled: isEdit },
-    { fieldId: sspsEdit.field.fieldId, activate: sspsEdit.focus, enabled: isEdit },
+    { fieldId: sspsRef.current?.fieldId ?? '', activate: () => sspsRef.current?.focus(), enabled: isEdit },
     { fieldId: palletsEdit.field.fieldId, activate: palletsEdit.focus, enabled: isEdit },
     { fieldId: monthField.fieldId, activate: focusMonthField, enabled: isEdit },
     { fieldId: dayField.fieldId, activate: focusDayField, enabled: isEdit },
@@ -301,16 +268,14 @@ export function PIIPage() {
   function enterEditMode() {
     if (!pallet) return;
     dpciFields.setFromDpci(fmtDpci(pallet.dpci));
-    setEditVcp(String(pallet.vcp));
-    setEditSsp(String(pallet.ssp));
     setEditCartons(String(pallet.currentCartons));
-    setEditSSPs(String(pallet.currentSSPs));
+    sspsRef.current?.set(String(pallet.currentSSPs));
     setEditPallets(String(pallet.currentPallets));
     setEditExpirationDate(toDateInputValue(pallet.expirationDate));
     expirationFields.setFromIso(toDateInputValue(pallet.expirationDate));
     setReasonCode('');
     setExpirationConfirmPending(false);
-    setVcpSspInvalid(false);
+    vcpSspRef.current?.set(String(pallet.vcp), String(pallet.ssp));
     setScreenState('edit');
   }
 
@@ -338,13 +303,13 @@ export function PIIPage() {
         (dept !== pallet.dpci.dept || cls !== pallet.dpci.class || itm !== pallet.dpci.item)) {
       body.dpci = { dept, class: cls, item: itm };
     }
-    const vcp = parseInt(editVcp, 10);
+    const vcp = parseInt(vcpSspState.vcpValue, 10);
     if (!isNaN(vcp) && vcp !== pallet.vcp) body.vcp = vcp;
-    const ssp = parseInt(editSsp, 10);
+    const ssp = parseInt(vcpSspState.sspValue, 10);
     if (!isNaN(ssp) && ssp !== pallet.ssp) body.ssp = ssp;
     const cartons = parseInt(editCartons, 10);
     if (!isNaN(cartons) && cartons !== pallet.currentCartons) body.currentCartons = cartons;
-    const ssps = parseInt(editSSPs, 10);
+    const ssps = parseInt(sspsState.value, 10);
     if (!isNaN(ssps) && ssps !== pallet.currentSSPs) body.currentSSPs = ssps;
     const pallets = parseInt(editPallets, 10);
     if (!isNaN(pallets) && pallets !== pallet.currentPallets) body.currentPallets = pallets;
@@ -353,7 +318,7 @@ export function PIIPage() {
     }
 
     return body;
-  }, [pallet, dpciFields.deptField.value, dpciFields.classField.value, dpciFields.itemField.value, editVcp, editSsp, editCartons, editSSPs, editPallets, editExpirationDate]);
+  }, [pallet, dpciFields.deptField.value, dpciFields.classField.value, dpciFields.itemField.value, vcpSspState.vcpValue, vcpSspState.sspValue, editCartons, sspsState.value, editPallets, editExpirationDate]);
 
   const hasChanges = Object.keys(changedFields).length > 0;
 
@@ -384,6 +349,8 @@ export function PIIPage() {
         return;
       }
       playAlert('error');
+      if (code === 'INVALID_VCP_SSP_RATIO') vcpSspRef.current?.markInvalid();
+      if (code === 'SSPS_EXCEED_CARTON') sspsRef.current?.markInvalid();
       const text = code === 'EXPIRATION_TOO_SOON'
         ? 'Expiration Date must be at least 1 month out'
         : code === 'INVALID_VCP_SSP_RATIO'
@@ -452,14 +419,23 @@ export function PIIPage() {
                 </div>
                 <CurrentValue>{fmtDpci(pallet.dpci)}</CurrentValue>
               </div>
-              <DataRow label="Description">{pallet.descShort}</DataRow>
+              <ItemDescription value={pallet.descShort} />
               <div className="flex items-center gap-3 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">VCP / SSP</span>
-                <div className={`flex items-center gap-3 rounded-[10px] ${vcpSspInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
-                  <EditBox value={vcpEdit.field.value} active={vcpEdit.field.isActive} onFocus={vcpEdit.focus} width="w-[90px]" />
-                  <span className="text-[#555]">/</span>
-                  <EditBox value={sspEdit.field.value} active={sspEdit.field.isActive} onFocus={sspEdit.focus} width="w-[90px]" />
-                </div>
+                <VcpSspFields
+                  ref={vcpSspRef}
+                  onChange={setVcpSspState}
+                  setMessage={setMessage}
+                  playAlert={playAlert}
+                  boxClass="h-[44px] px-3 rounded-[8px]"
+                  valueClass="text-[20px]"
+                  caretClass="w-[2px] h-[20px]"
+                  centered
+                  vcpWidth="w-[90px]"
+                  sspWidth="w-[90px]"
+                  separator={<span className="text-[#555]">/</span>}
+                  wrapperClass="flex items-center gap-3"
+                />
                 <CurrentValue>{pallet.vcp}/{pallet.ssp}</CurrentValue>
               </div>
               <div className="flex items-center gap-3 py-2 border-b border-[#1A1A1A]">
@@ -469,7 +445,18 @@ export function PIIPage() {
               </div>
               <div className="flex items-center gap-3 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">SSPs on Pallet</span>
-                <EditBox value={sspsEdit.field.value} active={sspsEdit.field.isActive} onFocus={sspsEdit.focus} />
+                <LooseSspsField
+                  ref={sspsRef}
+                  sspPerCarton={vcpSspState.sspPerCarton}
+                  onChange={setSspsState}
+                  setMessage={setMessage}
+                  playAlert={playAlert}
+                  width="w-[140px]"
+                  boxClass="h-[44px] px-3 rounded-[8px]"
+                  valueClass="text-[20px]"
+                  caretClass="w-[2px] h-[20px]"
+                  centered
+                />
                 <CurrentValue>{pallet.currentSSPs}</CurrentValue>
               </div>
               <div className="flex items-center gap-3 py-2 border-b border-[#1A1A1A]">
@@ -510,7 +497,7 @@ export function PIIPage() {
             <div className="flex gap-8">
               <div className="flex-1 flex flex-col">
                 <DataRow label="DPCI"><LiveId type="dpci" id={fmtDpci(pallet.dpci)} /></DataRow>
-                <DataRow label="Description">{pallet.descShort}</DataRow>
+                <ItemDescription value={pallet.descShort} />
                 <DataRow label="UPC"><LiveId type="upc" id={pallet.upc} /></DataRow>
                 <DataRow label="VCP / SSP">
                   {pallet.vcp} / {pallet.ssp}
