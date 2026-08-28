@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.9.0 — 2026-08-28](#190--2026-08-28)
 - [1.8.13 — 2026-08-28](#1813--2026-08-28)
 - [1.8.12 — 2026-08-26](#1812--2026-08-26)
 - [1.8.11 — 2026-08-21](#1811--2026-08-21)
@@ -71,23 +72,11 @@ issue still ships in its own smaller version along the way (matching this projec
 usual one-screen/one-fix cadence); the milestone version number just marks the point
 where everything listed under it has actually landed.
 
-### v1.9.0 — IRP, PRQ, CII + open-issue cleanup
+### v1.9.0 — IRP, PRQ, CII + open-issue cleanup — **SHIPPED 2026-08-28**
 
-- **IRP — Individual Reporting.** Built (`DevNotes/Logs/V1.7/version-1_7_1.md`), pending
-  ship. Personal productivity dashboard for the logged-in worker: pull/put performance
-  by function (units, units/hour, time in function, goal progress), or a staging summary
-  for GPMers. Leads/Managers get a separate cross-worker reporting screen; IRP always
-  shows only the logged-in user's own data.
-- **PRQ — Pull Request.** Built (v1.8.10, API v1.2.3). Progressive 3-level drill-down
-  reporting screen: summary by batchDate × pullFunction → per-aisle breakdown →
-  per-location detail with pull popup. Container quantity split (cartonQuantity/
-  palletQuantity) shipped as a prerequisite.
-- **CII — Container ID Inquiry.** Built (v1.8.9, API v1.2.2). Five container type views
-  (Full Case, Overpack, SSP Pull Master, SSP Unit, Stray Each), CID format parsing,
-  event log, action modals (Cancel, Force Close, Reopen, Reassign Destination).
-- Most currently open issues target this milestone too: #100, #99, #96, #95, #94, #93,
-  #92, #91, #86, #85, #84, #83. (#89 is held for v1.10.0 instead, since it explicitly
-  depends on Bulk Pull shipping — see below. #90 isn't assigned to a milestone yet.)
+All three major features landed across v1.8.9–v1.8.13. Nearly all targeted open issues
+closed; #84 (reason codes as a database table) remains open — deferred pending a product
+conversation. See the [1.9.0 version entry](#190--2026-08-28) below for the full summary.
 
 ### v1.10.0 — Bulk Pull + OCC
 
@@ -135,21 +124,12 @@ yet designed.
 
 ### Not yet assigned to a milestone
 
-- **Per-record audit trail (PII/LII).** Designed
-  ([#90](https://github.com/BobbyJoeCool/PalletIQ/issues/90),
-  `DevNotes/DesignPrompts/Feature-15-Per-Record-Audit-Trail.md`) — inline expandable panel
-  on PII and LII showing last 30 days of `ActivityLog` entries. CII's audit trail deferred
-  to whichever issue builds CII.
 - **VCP/SSP shared component** ([#165](https://github.com/BobbyJoeCool/PalletIQ/issues/165)).
   Designed (`DevNotes/DesignPrompts/Feature-11-VcpSsp-Shared-Component.md`) — PAR + PII
   full parity. Build before #167.
 - **Loose SSPs shared component** ([#167](https://github.com/BobbyJoeCool/PalletIQ/issues/167)).
   Designed (`DevNotes/DesignPrompts/Feature-12-LooseSsps-Shared-Component.md`) — standalone
   component consuming `sspPerCarton` from #165. Depends on #165.
-- **IRP totals row + downtime** ([#133](https://github.com/BobbyJoeCool/PalletIQ/issues/133)).
-  Designed (`DevNotes/DesignPrompts/Feature-13-IRP-Totals-Row-Downtime.md`) — weighted
-  %-to-goal, `Downtime` model with function-specific vs. general kinds, `prodFunction`
-  flag on `ProdGoal`. Desktop downtime-entry UI is a separate future issue.
 - **Printer shared component** ([#168](https://github.com/BobbyJoeCool/PalletIQ/issues/168)).
   Designed (`DevNotes/DesignPrompts/Feature-14-Printer-Shared-Component.md`) — `Printer`
   table, PAR-only for now.
@@ -162,17 +142,11 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Major/Important
 
-- [#92](https://github.com/BobbyJoeCool/PalletIQ/issues/92) — MNP: `manualConfirm` doesn't check the destination location for a hold
-- [#86](https://github.com/BobbyJoeCool/PalletIQ/issues/86) — `placePallet` clears a pallet's old location to EMPTY without checking for a second occupant pallet (MNP/SDP)
-- [#85](https://github.com/BobbyJoeCool/PalletIQ/issues/85) — SDP: most of the Pallet ID Directed Put e2e flow fails — demo scans land in the Aisle field instead
 - [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) — Reason codes should be a database table with per-department/role restrictions (needs a product conversation first)
-- [#83](https://github.com/BobbyJoeCool/PalletIQ/issues/83) — MNP/SDP: scanning an unknown Pallet ID crashes with 500 instead of 404
 
 ### Minor
 
-- [#95](https://github.com/BobbyJoeCool/PalletIQ/issues/95) — Status bar: error message persists after a subsequent successful scan
-- [#93](https://github.com/BobbyJoeCool/PalletIQ/issues/93) — SDP: Reservation confirm/unassign and the expiry timer can race on the same row
-- [#91](https://github.com/BobbyJoeCool/PalletIQ/issues/91) — ELA/ELZ: empty-location counts include held/contracted locations
+No issues currently open in this category.
 
 ### Nice-to-have/Cosmetic
 
@@ -180,18 +154,48 @@ No issues currently open in this category.
 
 ### Needs Triage
 
-- [#99](https://github.com/BobbyJoeCool/PalletIQ/issues/99) — STG: per-pallet override of master control values (size/aisle/storage code)
-- [#96](https://github.com/BobbyJoeCool/PalletIQ/issues/96) — Add a generic status-timer/expiration mechanism for status-bearing tables, with an overdue-records report
-- [#94](https://github.com/BobbyJoeCool/PalletIQ/issues/94) — Harden Pallet CA_PULL_PEND/FP_PULL_PEND status coupling before a real label-creation endpoint ships
-- [#89](https://github.com/BobbyJoeCool/PalletIQ/issues/89) — PII Edit Mode will need per-pallet-vs-partial quantity editing once Bulk Pull ships (targets v1.10.0)
-- [#88](https://github.com/BobbyJoeCool/PalletIQ/issues/88) — Bad Contraction data: every RS/RF/BS location, plus some HS locations on Levels 2-9, incorrectly flagged as contracted — **worth re-checking**: the aisle-renumbering work (v1.7.3) rewrote the contraction logic entirely and preserved BS/RF/RS's existing level-1 exemption, which may already resolve this; not closed here since that work wasn't done under this issue number
+No issues currently open in this category.
 
 ### Distant Future
 
-- [#29](https://github.com/BobbyJoeCool/PalletIQ/issues/29) — Warehousing Menu restructure — add Inbound, Outbound, ICQA, and Manager menus
+No issues currently open in this category.
 
-See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
-screen(s) each one touches.
+---
+
+## [1.9.0] — 2026-08-28
+
+**Milestone release** — marks the completion of the three major features targeted for the
+v1.9.0 roadmap milestone: **IRP** (Individual Rate of Productivity), **PRQ** (Pull Request
+Query), and **CII** (Container ID Inquiry), plus the open-issue cleanup that accompanied
+them.
+
+These features shipped incrementally across v1.8.9–v1.8.13:
+
+- **v1.8.9** — CII core (container inquiry, event log, IM+ actions: cancel, force-close,
+  reopen, reassign). API v1.2.2.
+- **v1.8.10** — PRQ (pull request summary + detail drill-down, container quantity split).
+  API v1.2.3.
+- **v1.8.11** — CII completion (Overpack/SSP/Stray Each event synthesis, per-record audit
+  trail #90), IRP ship (#133 totals row, #197 shift-aware bucketing, #198 FP/RP/HP
+  aggregation). API v1.2.4.
+- **v1.8.12** — Shared components (#165 VcpSspFields, #167 LooseSspsField, #172
+  ItemDescription), Tab/Back Tab navigation (#199), CII demo scanner polish.
+  API v1.2.5.
+- **v1.8.13** — E2E test fixes (#202–#207), Home button DPCI navigation fix (#184),
+  consolidation role-gate removal (#204). API v1.2.6.
+
+### 1.9.0 — Also in this version
+
+- **IRP demo seed data** (#208) — 7 new IRP showcase workers (`z001p01`–`z001p04`,
+  `z001p10`–`z001p12`) with realistic `FunctionAssignment` and `ActivityLog` data spanning
+  5 production functions (CA, CF, FP, RP, HP), including multi-function splits and an
+  unassigned-time edge case that drives the totals row past 100%.
+
+### 1.9.0 — Open-issue cleanup
+
+Nearly all issues targeted for this milestone are now closed. The sole remaining open
+issue is [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) (reason codes as a
+database table) — deferred pending a product conversation, not blocking any current work.
 
 ---
 
