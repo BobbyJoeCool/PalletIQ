@@ -921,6 +921,179 @@ function applyStaging(locations: LocationRow[]): StagedLocation[] {
   return staged
 }
 
+// ─── IRP showcase workers (#208) ─────────────────────────────────────────────
+
+interface IrpWorkerProfile {
+  zNumber: string
+  firstName: string
+  lastName: string
+  /** Each entry: functionCode, assigned hours (0 = no assignment), target % to goal. */
+  functions: { code: string; hours: number; pctGoal: number }[]
+}
+
+const IRP_WORKERS: IrpWorkerProfile[] = [
+  { zNumber: 'z001p01', firstName: 'Aiden',    lastName: 'Torres',    functions: [{ code: 'CA', hours: 10, pctGoal: 0.90 }] },
+  { zNumber: 'z001p02', firstName: 'Brianna',  lastName: 'Nguyen',    functions: [{ code: 'FP', hours: 10, pctGoal: 1.20 }] },
+  { zNumber: 'z001p03', firstName: 'Carlos',   lastName: 'Mendez',    functions: [{ code: 'RP', hours: 10, pctGoal: 1.20 }] },
+  { zNumber: 'z001p04', firstName: 'Danielle', lastName: 'Park',      functions: [{ code: 'HP', hours: 10, pctGoal: 0.80 }] },
+  { zNumber: 'z001p10', firstName: 'Jordan',   lastName: 'Whitfield', functions: [{ code: 'CF', hours: 4, pctGoal: 0.80 }, { code: 'CA', hours: 6, pctGoal: 1.30 }] },
+  { zNumber: 'z001p11', firstName: 'Keisha',   lastName: 'Bryant',    functions: [{ code: 'HP', hours: 8, pctGoal: 1.00 }, { code: 'CA', hours: 2, pctGoal: 1.20 }] },
+  // Worker 12: FP 10h at ~90%, PLUS ~80 RP puts with NO FunctionAssignment for RP.
+  { zNumber: 'z001p12', firstName: 'Luis',     lastName: 'Reyes',     functions: [{ code: 'FP', hours: 10, pctGoal: 0.90 }, { code: 'RP', hours: 0, pctGoal: 0 }] },
+]
+
+/** Goal rates (must match PROD_GOALS above). */
+const GOAL_RATE: Record<string, number> = { CA: 180, CF: 180, FP: 30, RP: 45, HP: 60 }
+/** ActionType per function code. */
+const FUNC_ACTION: Record<string, string> = { CA: 'PULL', CF: 'PULL', FP: 'PULL', RP: 'PUT', HP: 'PUT' }
+
+/**
+ * Builds Users, FunctionAssignments, and ActivityLog rows for the 7 IRP showcase workers
+ * (#208). Each worker's activity log entries are spread across their assigned hours with
+ * realistic timestamps. FK references cycle through the first `refCount` items from the
+ * ITEMS array and use a fixed set of location coordinates.
+ *
+ * Worker 12's RP entries (80 puts, no assignment) are the key edge case: IRP sees activity
+ * without hours, producing a non-zero "hours of work" contribution to the totals row with
+ * zero denominator hours — making weighted total % to goal exceed 100%.
+ */
+function buildIrpSeedData(pinHash: string) {
+  const now = new Date()
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const HOUR = 3_600_000
+  const assignedByZ = 'z002p23' // Marcus Webb (Lead)
+
+  // FK reference pools — reuse items/locations freely, IRP only counts rows.
+  const refItems = ITEMS.slice(0, 20).map(i => ({ dept: i.dept, class: i.class, item: i.item }))
+  const refLocations = [
+    { aisle: 300, bin: 1, level: 1 }, { aisle: 300, bin: 2, level: 1 },
+    { aisle: 301, bin: 5, level: 2 }, { aisle: 302, bin: 10, level: 3 },
+    { aisle: 303, bin: 15, level: 1 }, { aisle: 304, bin: 20, level: 2 },
+    { aisle: 305, bin: 25, level: 1 }, { aisle: 306, bin: 30, level: 3 },
+    { aisle: 100, bin: 1, level: 1 }, { aisle: 101, bin: 5, level: 2 },
+    { aisle: 110, bin: 10, level: 1 }, { aisle: 111, bin: 15, level: 2 },
+    { aisle: 310, bin: 1, level: 1 }, { aisle: 311, bin: 5, level: 2 },
+    { aisle: 312, bin: 10, level: 1 }, { aisle: 313, bin: 15, level: 3 },
+  ]
+
+  const users = IRP_WORKERS.map(w => ({
+    zNumber: w.zNumber,
+    firstName: w.firstName,
+    lastName: w.lastName,
+    pinHash,
+    role: 'WORKER' as const,
+    departmentId: 'WHS',
+  }))
+
+  const assignments: {
+    workerZ: string; functionCode: string; date: Date
+    startTime: Date; endTime: Date; assignedByZ: string
+  }[] = []
+
+  const activityRows: {
+    userId: string; actionType: string; functionCode: string; timestamp: Date
+    palletId: null; locationAisle: number; locationBin: number; locationLevel: number
+    dept: number; class: number; item: number; details: string | null
+  }[] = []
+
+  for (const worker of IRP_WORKERS) {
+    let shiftCursor = todayMidnight.getTime() + 6 * HOUR // shift starts at 6 AM
+
+    for (const fn of worker.functions) {
+      const rate = GOAL_RATE[fn.code]
+      const action = FUNC_ACTION[fn.code]
+      if (!rate || !action) continue
+
+      // Build FunctionAssignment (skip if hours === 0, e.g. worker 12's RP)
+      if (fn.hours > 0) {
+        const startTime = new Date(shiftCursor)
+        const endTime = new Date(shiftCursor + fn.hours * HOUR)
+        assignments.push({
+          workerZ: worker.zNumber,
+          functionCode: fn.code,
+          date: todayMidnight,
+          startTime,
+          endTime,
+          assignedByZ,
+        })
+      }
+
+      // Calculate target count
+      let targetCount: number
+      if (fn.hours > 0) {
+        targetCount = Math.round(rate * fn.hours * fn.pctGoal)
+      } else {
+        // Worker 12's RP: 80 puts, no assignment
+        targetCount = 80
+      }
+
+      // Build ActivityLog entries spread across the work window
+      const windowStart = shiftCursor
+      const windowDuration = (fn.hours > 0 ? fn.hours : 2) * HOUR // unassigned work: spread across 2h
+      const stepMs = Math.floor(windowDuration / Math.max(targetCount, 1))
+
+      if (action === 'PULL') {
+        // PULL entries need details.pulled with cartons/pallets
+        const isFP = fn.code === 'FP'
+        let remaining = targetCount
+
+        // Generate entries in batches to hit the target count
+        let entryIndex = 0
+        while (remaining > 0) {
+          const ref = refItems[entryIndex % refItems.length]
+          const loc = refLocations[entryIndex % refLocations.length]
+          const jitter = randomInt(-Math.floor(stepMs * 0.3), Math.floor(stepMs * 0.3))
+          const ts = new Date(windowStart + entryIndex * stepMs + jitter)
+
+          if (isFP) {
+            // FP: each entry = 1 pallet pulled, with some cartons
+            const cartons = randomInt(10, 30)
+            activityRows.push({
+              userId: worker.zNumber, actionType: 'PULL', functionCode: fn.code,
+              timestamp: ts, palletId: null,
+              locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
+              dept: ref.dept, class: ref.class, item: ref.item,
+              details: JSON.stringify({ pulled: { pallets: 1, cartons } }),
+            })
+            remaining -= 1
+          } else {
+            // CA/CF: each entry = a batch of cartons pulled
+            const batch = Math.min(remaining, randomInt(3, 8))
+            activityRows.push({
+              userId: worker.zNumber, actionType: 'PULL', functionCode: fn.code,
+              timestamp: ts, palletId: null,
+              locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
+              dept: ref.dept, class: ref.class, item: ref.item,
+              details: JSON.stringify({ pulled: { pallets: 0, cartons: batch } }),
+            })
+            remaining -= batch
+          }
+          entryIndex++
+        }
+      } else {
+        // PUT entries: each row = 1 put (RP counts rows, HP counts rows as locations)
+        for (let i = 0; i < targetCount; i++) {
+          const ref = refItems[i % refItems.length]
+          const loc = refLocations[i % refLocations.length]
+          const jitter = randomInt(-Math.floor(stepMs * 0.3), Math.floor(stepMs * 0.3))
+          const ts = new Date(windowStart + i * stepMs + jitter)
+          activityRows.push({
+            userId: worker.zNumber, actionType: 'PUT', functionCode: fn.code,
+            timestamp: ts, palletId: null,
+            locationAisle: loc.aisle, locationBin: loc.bin, locationLevel: loc.level,
+            dept: ref.dept, class: ref.class, item: ref.item,
+            details: null,
+          })
+        }
+      }
+
+      if (fn.hours > 0) shiftCursor += fn.hours * HOUR
+    }
+  }
+
+  return { users, assignments, activityRows }
+}
+
 /**
  * Builds one ActivityLog STAGE row per staged location (issue #52), with a realistic
  * timestamp instead of "just now" — SAR's oldest-staged-location age otherwise reads as
@@ -1021,7 +1194,8 @@ async function main() {
   await prisma.workstation.createMany({ data: WORKSTATIONS.map(({ id, name }) => ({ id, name })) })
   await prisma.workstationAisle.createMany({ data: WORKSTATION_AISLES })
 
-  // 2. Users
+  // 2. Users (existing 5 + IRP showcase workers)
+  const irpData = buildIrpSeedData(PIN_HASH)
   console.log('Seeding users...')
   await prisma.user.createMany({
     data: [
@@ -1030,6 +1204,7 @@ async function main() {
       { zNumber: 'z002p23', firstName: 'Marcus',  lastName: 'Webb',       pinHash: PIN_HASH, role: 'LEAD',    departmentId: 'WHS' },
       { zNumber: 'z002p22', firstName: 'Sarah',   lastName: 'Okafor',     pinHash: PIN_HASH, role: 'IM',      departmentId: 'WHS' },
       { zNumber: 'z002p21', firstName: 'Tyler',   lastName: 'Hennessey',  pinHash: PIN_HASH, role: 'WORKER',  departmentId: 'INB' },
+      ...irpData.users,
     ],
   })
 
@@ -1115,10 +1290,21 @@ async function main() {
 
   await prisma.container.createMany({ data: containerData })
 
+  // 6. IRP showcase data (#208) — FunctionAssignments + ActivityLog entries for the 7
+  // demo workers. Must come after users (step 2) and items (step 3, for FK refs).
+  console.log('Seeding IRP showcase data (#208)...')
+  await prisma.functionAssignment.createMany({ data: irpData.assignments })
+  console.log(`  FunctionAssignments: ${irpData.assignments.length}`)
+  await insertInChunks('IRP activity log entries', irpData.activityRows, 500,
+    (chunk) => prisma.activityLog.createMany({ data: chunk })
+  )
+
   console.log('Seed complete.')
   console.log(`  Locations: ${locations.length}`)
   console.log(`  Pallets:   ${pallets.length}`)
   console.log(`  Containers: ${containerData.length}`)
+  console.log(`  IRP workers: ${irpData.users.length}`)
+  console.log(`  IRP activity rows: ${irpData.activityRows.length}`)
 }
 
 main()
