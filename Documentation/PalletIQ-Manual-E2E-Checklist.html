@@ -385,9 +385,6 @@ const SCREENS = [
     "Mismatched Pallet ID: 'Incorrect Pallet ID', red wash",
     "Mismatched UPC: 'Invalid UPC', red wash",
     "Mismatched Location (aisle+bin): 'Invalid Location', all 3 boxes red",
-    "FP: level-only mismatch opens Level Correction popup",
-    "Level Correction: corrected level + confirm = pull succeeds",
-    "Level Correction: cancel = treated as invalid Location",
     "Locked Aisle box rejects scan with different aisle segment",
     "Hold button with current+previous locations: picker popup with both options",
     "Change Pull Function mid-verification: 'Label not verified' warning, fields clear",
@@ -905,13 +902,50 @@ function exportJSON() {
       return { code: screen.code, name: screen.name, summary, items };
     })
   };
-  const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `palletiq-test-results-${state.version || 'draft'}-${new Date().toISOString().slice(0,10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  const json = JSON.stringify(output, null, 2);
+  const filename = `palletiq-test-results-${state.version || 'draft'}-${new Date().toISOString().slice(0,10)}.json`;
+
+  // Try the download approach first (works on http/https, usually fails on file://)
+  try {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  } catch (_) { /* fall through to clipboard */ }
+
+  // Always also copy to clipboard as a reliable fallback
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(json).then(() => {
+      alert('JSON copied to clipboard!\n\nFilename: ' + filename + '\n\nPaste into a new file to save.');
+    }).catch(() => {
+      showCopyModal(json, filename);
+    });
+  } else {
+    showCopyModal(json, filename);
+  }
+}
+
+function showCopyModal(json, filename) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:8px;padding:20px;max-width:700px;width:90%;max-height:80vh;display:flex;flex-direction:column;gap:12px';
+  box.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+    <strong style="font-size:16px">Export: ${filename}</strong>
+    <button onclick="this.closest('[style*=fixed]').remove()" style="border:none;background:none;font-size:20px;cursor:pointer">&times;</button>
+  </div>
+  <div style="font-size:13px;color:#555">Select All (Cmd+A) inside the box below, then Copy (Cmd+C). Paste into a new file.</div>
+  <textarea readonly style="flex:1;min-height:300px;font-family:monospace;font-size:11px;padding:8px;border:1px solid #ccc;border-radius:4px;resize:vertical">${json.replace(/</g,'&lt;')}</textarea>`;
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  const ta = box.querySelector('textarea');
+  ta.focus();
+  ta.select();
 }
 
 function escapeHtml(str) {

@@ -4,6 +4,7 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.2.6 — 2026-08-28](#126--2026-08-28)
 - [1.2.5 — 2026-08-26](#125--2026-08-26)
 - [1.2.4 — 2026-08-21](#124--2026-08-21)
 - [1.2.3 — 2026-08-20](#123--2026-08-20)
@@ -12,6 +13,19 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 - [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
+
+---
+
+## [1.2.6] — 2026-08-28
+
+Backend for floor-app's `[1.8.13]` entry — role gate removal for consolidation confirm.
+
+### 1.2.6 — Fixed
+
+- **Consolidation confirm: `requireRole(auth, 'IM')` removed** (#204) — the
+  `resolution === 'consolidate'` branch in the puts handler no longer requires IM+ role.
+  All authenticated roles can now complete a consolidation confirm, matching the client-side
+  change that shows the Exists Elsewhere section to all roles.
 
 ---
 

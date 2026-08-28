@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.8.13 — 2026-08-28](#1813--2026-08-28)
 - [1.8.12 — 2026-08-26](#1812--2026-08-26)
 - [1.8.11 — 2026-08-21](#1811--2026-08-21)
 - [1.8.10 — 2026-08-20](#1810--2026-08-20)
@@ -191,6 +192,43 @@ No issues currently open in this category.
 
 See `DevNotes/Fixes/MASTER-CHECKLIST.md` for these cross-referenced onto the specific
 screen(s) each one touches.
+
+---
+
+## [1.8.13] — 2026-08-28
+
+v1.8.12 manual E2E test fixes + Home button DPCI navigation bug. API v1.2.6.
+
+### 1.8.13 — Fixed
+
+- **Home/Back button DPCI navigation** (#184) — clicking Home or Back while a DPCI field
+  was focused on IID/PAR/ISI/PII changed the URL but didn't re-render the screen. Header's
+  Home and Back buttons now dismiss the input panel (`hidePanel()`) before calling
+  `navigate()`, matching the existing pattern for Jump and Activity. In React Router v7,
+  the route-change cleanup effect's synchronous state updates (clearing the numpad handler)
+  could interfere with the `startTransition`-wrapped navigation commit; dismissing the
+  panel first removes the pending handler before the transition starts.
+- **SDP: invalid aisle clears input** (#203) — the Aisle field's `onNotFound` callback no
+  longer clears the field; the invalid value stays visible with a red wash so the worker
+  can see what didn't match.
+- **SDP: Exists Elsewhere restricted to IM+ role** (#204) — the "Exists Elsewhere" section
+  in the Verify Put modal (and the server-side consolidation-confirm endpoint) were
+  unnecessarily gated to IM+ role. Now visible/accessible to all authenticated roles.
+- **SDP: reservation poll interval too aggressive** (#205) — poll interval changed from
+  15 seconds to 5 minutes (standard mode) to reduce unnecessary server traffic.
+- **SDP: consolidation poll + button label** (#206) — consolidation-mode poll interval set
+  to 15 minutes (was sharing the 15-second standard interval). The no-reservation
+  escape-hatch button now always reads "Unassign" regardless of mode.
+- **STG: ELA/ELZ pre-population fires on every render** (#207) — navigation state
+  consumption now uses a `consumedNavStateRef` to track whether the current nav state has
+  been applied, instead of checking `master.aisle` emptiness (which fails when
+  StagingContext persists a non-empty value from a prior session).
+- **E2E checklist: PIP Level Correction items removed** (#202) — three test items
+  referencing unbuilt Level Correction functionality removed from both the HTML and `.docx`
+  checklist generators.
+- **E2E checklist: JSON export button** — export now works on `file://` protocol via
+  clipboard API fallback + textarea modal fallback (blob URL `<a download>` silently fails
+  on `file://`).
 
 ---
 

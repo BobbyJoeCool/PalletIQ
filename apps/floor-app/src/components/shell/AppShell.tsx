@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FooterDemoProvider } from '../../context/FooterDemoContext';
 import { MessageBarProvider } from '../../context/MessageBarContext';
 import { NavLockProvider, useNavLockContext } from '../../context/NavLockContext';
@@ -51,6 +51,7 @@ const SCANNER_THRESHOLD_MS = 50;
  */
 function ShellInner() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [jumpOpen, setJumpOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const { activePanel, deliverScan, hidePanel, setKeyHandler } = useNumpad();
@@ -116,6 +117,8 @@ function ShellInner() {
     <div className="fixed inset-0 flex flex-col bg-black" onClick={handleBackgroundTap}>
       <Header
         title={title}
+        onHome={() => { hidePanel(); navigate('/'); }}
+        onBack={() => { hidePanel(); navigate(-1); }}
         onJump={() => { hidePanel(); setJumpOpen(true); }}
         onActivity={() => { hidePanel(); setActivityOpen(true); }}
         disableNav={isHome}

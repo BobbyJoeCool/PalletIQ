@@ -1,8 +1,9 @@
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
 interface HeaderProps {
   title: string;
+  onHome: () => void;
+  onBack: () => void;
   onJump: () => void;
   onActivity: () => void;
   disableNav?: boolean;
@@ -24,13 +25,14 @@ interface HeaderProps {
  * the worker can't leave the screen until the transaction resolves.
  *
  * @param title - Screen title displayed centered in the header
+ * @param onHome - Callback to navigate home (dismisses the input panel first)
+ * @param onBack - Callback to navigate back (dismisses the input panel first)
  * @param onJump - Callback to open the HotJump overlay
  * @param onActivity - Callback to open the app-wide activity log overlay
  * @param disableNav - When true, dims and disables Back and Home buttons
  * @param locked - When true, dims and disables Back, Home, Jump, Activity, and Logout
  */
-export function Header({ title, onJump, onActivity, disableNav = false, locked = false }: HeaderProps) {
-  const navigate = useNavigate();
+export function Header({ title, onHome, onBack, onJump, onActivity, disableNav = false, locked = false }: HeaderProps) {
   const { user, logout } = useAuth();
 
   const displayName = user ? `${user.firstName} ${user.lastName.charAt(0)}.` : '';
@@ -47,11 +49,11 @@ export function Header({ title, onJump, onActivity, disableNav = false, locked =
 
   return (
     <header className="shrink-0 flex items-center gap-3 px-6 h-[104px] bg-black border-b border-[#2A2A2A]">
-      <button type="button" onClick={() => navigate(-1)} className={navDisabled ? disabledNavBtn : activeNavBtn}>
+      <button type="button" onClick={onBack} className={navDisabled ? disabledNavBtn : activeNavBtn}>
         ‹ Back
       </button>
 
-      <button type="button" onClick={() => navigate('/')} className={navDisabled ? disabledNavBtn : activeNavBtn}>
+      <button type="button" onClick={onHome} className={navDisabled ? disabledNavBtn : activeNavBtn}>
         ⌂ Home
       </button>
 

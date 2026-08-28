@@ -1765,11 +1765,15 @@ function STGScreen() {
   // Pre-population section. Only applies to Master Control, never the fork/stack slots
   // directly — every stack inherits Master Control's values live unless individually
   // overridden (issue #99), so there's no separate "push to the stacks" step needed
-  // anymore. Only applied once per navigation (route state is consumed, not re-applied on
-  // every render) — Master Control's own empty aisle is used as the "not yet applied" signal.
+  // anymore. Applied once per unique navigation state object (tracked by ref to avoid
+  // re-applying on every render), and always overwrites Master Control's current values
+  // so that stale state from a prior STG session doesn't silently discard the incoming
+  // aisle/storageCode/size.
+  const consumedNavStateRef = useRef<unknown>(null);
   useEffect(() => {
     const state = routerLocation.state as NavState | null;
-    if (!state?.aisle || master.aisle) return;
+    if (!state?.aisle || routerLocation.state === consumedNavStateRef.current) return;
+    consumedNavStateRef.current = routerLocation.state;
     // ELZ only ever supplies storageCode (no Size concept on that screen); ELA supplies
     // both. Apply whichever fields are present rather than requiring both together.
     setMaster({

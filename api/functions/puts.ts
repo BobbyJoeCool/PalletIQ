@@ -2,7 +2,7 @@ import { app } from '../lib/functionsRuntime.js';
 import type { HttpRequest, InvocationContext } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
-import { requireAuth, hasMinRole, requireRole } from '../lib/permissions.js';
+import { requireAuth, hasMinRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { checkPalletEligibility } from '../lib/eligibility.js';
 import { findNextLocation, resolveEffectiveCriteria } from '../lib/zoneLogic.js';
@@ -581,7 +581,6 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     }
 
     if (body.resolution === 'consolidate') {
-      requireRole(auth, 'IM');
       if (!occupant || !matchesDpci) {
         throw Object.assign(new Error('CONSOLIDATE_MISMATCH'), { status: 409 });
       }

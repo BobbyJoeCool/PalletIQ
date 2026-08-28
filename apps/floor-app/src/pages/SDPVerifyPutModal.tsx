@@ -45,10 +45,6 @@ interface SDPVerifyPutModalProps {
   /** Cancel button — the redirected-flow's sibling to Unassign, for once there's no
    *  longer a live reservation to release. */
   onCancelRedirect: () => void;
-  /** True when the current SDP session is in consolidation mode — keeps the escape-hatch
-   *  button labeled "Unassign" even after a redirect flips `hasReservation` to false, for
-   *  consistency and simplicity for the worker (GitHub #198). */
-  consolidating: boolean;
 }
 
 /**
@@ -89,7 +85,7 @@ interface SDPVerifyPutModalProps {
  */
 export function SDPVerifyPutModal({
   directed, loading, locationEntryKey, onLocationConfirm, onLocationActiveChange,
-  onUnassign, onHoldDone, onRedirect, onReturnToOriginal, onCancelRedirect, consolidating,
+  onUnassign, onHoldDone, onRedirect, onReturnToOriginal, onCancelRedirect,
 }: SDPVerifyPutModalProps) {
   const { token, user } = useAuth();
   const { setMessage } = useMessageBar();
@@ -107,20 +103,16 @@ export function SDPVerifyPutModal({
   const isHand = directed.directedLocationSize === 'XS';
   const isAtOriginal = directed.original == null || directed.directedLocation === directed.original.location;
 
-  // Fetches "exists elsewhere" candidates once per pallet, Hand Put + IM+ only — the
-  // button itself only renders once this resolves with at least one match. IM+-gated
-  // because a redirect's own completion (`manual/confirm` with `resolution: 'consolidate'`)
-  // is hard-gated `requireRole(auth, 'IM')` server-side (`api/functions/puts.ts`) — showing
-  // this to a Worker would let them successfully unassign the original reservation and then
-  // hit a 403 when they later try to confirm the redirected location, orphaning the pallet
-  // as `PUT_PENDING` with no reservation. Matches this screen's existing convention
-  // (Storage/Zone/Consolidating are IM+-only too).
+  // Fetches "exists elsewhere" candidates once per pallet, Hand Put only — the
+  // button itself only renders once this resolves with at least one match.
+  // All roles see this (the server-side consolidate resolution is also open to
+  // all roles as of the same change).
   //
   // Keyed on the DPCI alone (not on `directedLocation`, which now changes as the worker
   // toggles between candidates/original) — the current target is excluded client-side at
   // render time instead, so toggling doesn't re-fire this fetch.
   useEffect(() => {
-    if (!isHand || !isIM) return;
+    if (!isHand) return;
     let cancelled = false;
     (async () => {
       try {
@@ -274,7 +266,7 @@ export function SDPVerifyPutModal({
                   disabled={loading}
                   className="h-[72px] px-6 rounded-[12px] font-ui text-[20px] font-semibold transition-colors disabled:opacity-40 bg-[#554400] hover:bg-[#665500] text-white"
                 >
-                  {consolidating ? 'Unassign' : 'Cancel'}
+                  Unassign
                 </button>
                 {/* Two-line label (same convention as the entry-state "Applying
                     Constraints" bubble) rather than fighting a single line for width —
@@ -295,10 +287,9 @@ export function SDPVerifyPutModal({
           </div>
         </div>
 
-        {/* Hand Put + IM+ only (see the fetch effect's own comment for why) — shown once
-            the "exists elsewhere" fetch above resolves with at least one same-DPCI XS
-            match other than whatever's currently targeted. */}
-        {isHand && isIM && existsElsewhere.some((e) => e.locationId !== directed.directedLocation) && (
+        {/* Hand Put only — shown once the "exists elsewhere" fetch resolves with at
+            least one same-DPCI XS match other than whatever's currently targeted. */}
+        {isHand && existsElsewhere.some((e) => e.locationId !== directed.directedLocation) && (
           <button
             type="button"
             onClick={() => setExistsOpen(true)}

@@ -207,7 +207,6 @@ export function SDPPage() {
     }, [clearMessage]),
     onNotFound: useCallback((aisle) => {
       playAlert('error');
-      aisleFields.clear();
       aisleFields.focusField();
       setMessage({ type: 'error', text: `Aisle ${aisle} does not exist` });
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -302,20 +301,19 @@ export function SDPPage() {
   // ── Polling (reservation timeout detection) ─────────────────────────────────
 
   /**
-   * Starts a 15-second polling interval that proactively detects server-side reservation
-   * expiry (the timer-triggered `clearExpiredReservations` Azure Function, which runs
-   * every minute and clears anything older than 5 minutes) — rather than only surfacing
-   * it reactively the next time the worker tries to confirm/unassign/block and gets a
-   * NOT_FOUND back. Polls `GET /api/locations/{id}` for the directed location itself
-   * (already-public, existing infrastructure — no dedicated reservation-status endpoint
-   * needed) and treats a status other than `RESERVED` as expiry, since that's exactly
-   * what the timer function resets it to on clearing a reservation. Reads the current
-   * reservation from `directedRef` each tick rather than closing over the value passed
-   * in, so it always checks whichever reservation is actually active if Blocked Put
-   * re-directs to a new one without a stop/restart in between.
+   * Polls for server-side reservation expiry (the timer-triggered
+   * `clearExpiredReservations` Azure Function clears reservations past their
+   * statusExpiry) — rather than only surfacing it reactively the next time
+   * the worker tries to confirm/unassign/block and gets a NOT_FOUND back.
+   * Interval matches the reservation's own lifetime: 5 minutes for a normal
+   * put, 15 minutes for a consolidation. Polls `GET /api/locations/{id}` and
+   * treats a status other than `RESERVED` as expiry. Reads the current
+   * reservation from `directedRef` each tick rather than closing over the
+   * value passed in.
    */
-  function startPolling(reservationId: number) {
+  function startPolling(reservationId: number, isConsolidating: boolean) {
     stopPolling();
+    const interval = isConsolidating ? 15 * 60_000 : 5 * 60_000;
     pollIntervalRef.current = setInterval(async () => {
       const d = directedRef.current;
       if (!d || d.reservationId !== reservationId) return;
@@ -331,7 +329,7 @@ export function SDPPage() {
         // A transient network hiccup shouldn't reset the screen — the next successful
         // poll (or the worker's own next action) will catch a real expiry.
       }
-    }, 15_000);
+    }, interval);
   }
 
   /** Clears the polling interval if one is running. Called on confirmed put, unassign, block, or unmount. */
@@ -403,7 +401,7 @@ export function SDPPage() {
       // alreadyStored branch below immediately overwrites this with its own info/warning
       // message when it applies, so this is a no-op flicker in that case, not a conflict.
       clearMessage();
-      startPolling(result.reservationId);
+      startPolling(result.reservationId, consolidatingRef.current);
       setHistory(h => [{
         reservationId: result.reservationId,
         palletId: result.pallet.id,
@@ -800,6 +798,7 @@ export function SDPPage() {
               active={aisleFields.field.isActive}
               locked={locked}
               size="large"
+              invalid={aisleFields.invalid}
             />
             {/* Freight-type badges for the resolved aisle (issue #169) — aisle-wide totals,
                 not broken out by zone (SDP has no zone concept of its own), same column-by-
@@ -981,7 +980,6 @@ export function SDPPage() {
             onRedirect={handleRedirect}
             onReturnToOriginal={handleReturnToOriginal}
             onCancelRedirect={handleCancelRedirect}
-            consolidating={consolidating}
           />
         )}
 
