@@ -2,6 +2,22 @@
 
 A warehouse inventory/pallet-tracking system, built as a portfolio piece from 20 years of real warehouse operations and retail management experience — see [`apps/floor-app/README.md`](apps/floor-app/README.md) for the full story of why this exists and what it does.
 
+## Screenshots
+
+*The floor app running against seeded demo data, at the 1366×1024 tablet resolution it's built for.*
+
+![Home screen: function tiles grouped by Production, GPM, Inventory, Location, Container, and Reporting](Documentation/screenshots/home.png)
+
+| Pallet ID Info: every field of a pallet, with tappable links | Location ID Info: what's stored at a location |
+|---|---|
+| ![Pallet ID Info](Documentation/screenshots/pallet.png) | ![Location ID Info](Documentation/screenshots/location.png) |
+| **Empty Locations by Zone: a visual aisle map for staging** | **Empty Locations by Aisle: open slots by storage code and size** |
+| ![Empty Locations by Zone](Documentation/screenshots/empty-zone.png) | ![Empty Locations by Aisle](Documentation/screenshots/empty-aisle.png) |
+| **Pallet ID Pull: on-screen numpad, scan-first input** | **Individual Reporting: a worker's productivity against goal** |
+| ![Pallet ID Pull](Documentation/screenshots/pull.png) | ![Individual Reporting](Documentation/screenshots/report-individual.png) |
+| **Login: badge scan or zNumber + PIN** | |
+| ![Login screen](Documentation/screenshots/login.png) | |
+
 This repository is a **monorepo of independently-versioned pieces**, each with its own `package.json` and `CHANGELOG.md`:
 
 | Piece | What it is | Own docs |

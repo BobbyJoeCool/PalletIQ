@@ -1,5 +1,9 @@
 # PalletIQ
 
+![PalletIQ home screen](../../Documentation/screenshots/home.png)
+
+*More screenshots in the [repository README](../../README.md#screenshots).*
+
 ## Table of Contents
 
 - [Why This Exists](#why-this-exists)
