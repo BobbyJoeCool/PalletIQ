@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import helmet from 'helmet';
 
 /**
  * Drop-in replacement for the `@azure/functions` v4 programming model, built on a real
@@ -61,6 +62,7 @@ const context: InvocationContext = {
 };
 
 const expressApp = express();
+expressApp.use(helmet());
 expressApp.use(express.json({ limit: '5mb' }));
 
 /**
