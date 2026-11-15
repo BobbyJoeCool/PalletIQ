@@ -9,7 +9,7 @@ import { sideOf } from '../lib/zoneLogic.js';
 import { whereAcceptsPut, countsAsOpenCapacity, HOLD_PLACE_MIN_ROLE, HOLD_REMOVE_MIN_ROLE, holdTransition, isHoldCategory, resolveRangePlace, resolveRangeRelease, type HoldCategory, type RangePlaceOutcome } from '../lib/locationPolicy.js';
 import { formatDpci } from '../lib/dpci.js';
 import type { Role } from '../lib/jwt.js';
-import { clearLocation } from '../lib/logicGate.js';
+import { applyRangeHoldBucket, applyRangeReleaseBucket, placeHold as placeHoldAt, removeHold as removeHoldAt } from '../lib/logicGate.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
 
 // Canonical ascending size order (mirrors SIZES in src/pages/ELAPage.tsx and STGPage.tsx).
@@ -569,10 +569,7 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
 
   let placed = 0, upgraded = 0, blocked = 0;
   const breakdown: { existing: HoldCategory | null; next: HoldCategory; outcome: RangePlaceOutcome; count: number }[] = [];
-  // RESERVED locations whose hold actually lands (placed/upgraded, never blocked) — collected
-  // before each bucket's write, since the write changes `holdCategory` and would make the
-  // bucket's own filter stop matching them afterward. Cleared through the Logic Gate below.
-  const reservedToClear: { aisle: number; bin: number; level: number }[] = [];
+  let reservationsCleared = 0;
   for (const { existing, count } of buckets) {
     const { next, outcome } = resolveRangePlace(body.holdType, existing);
     breakdown.push({ existing, next, outcome, count });
@@ -580,22 +577,13 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
       blocked += count;
       continue;
     }
+    // Logic Gate applyRangeHoldBucket (#211): sets the bucket's hold and clears any RESERVED
+    // location's reservation (forced EMPTY, #209) in one transaction.
     const bucketWhere = { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing };
-    reservedToClear.push(...await prisma.location.findMany({
-      where: { ...bucketWhere, status: 'RESERVED' },
-      select: { aisle: true, bin: true, level: true },
-    }));
-    await prisma.location.updateMany({ where: bucketWhere, data: { holdCategory: next } });
+    reservationsCleared += (await applyRangeHoldBucket(bucketWhere, next)).reservationsCleared;
     if (outcome === 'upgraded') upgraded += count; else placed += count;
   }
   const total = placed + upgraded + blocked;
-
-  // CLEAR_LOCATION (Logic Gate — #149), forced to EMPTY — the same side effect the
-  // single-location placeHold path applies (issue #209: the range path previously left
-  // each RESERVED location's status and Reservation row live underneath the new hold).
-  for (const loc of reservedToClear) {
-    await clearLocation({ ...loc, overrideRevert: 'EMPTY' });
-  }
 
   await writeLog({
     userId: auth.zNumber,
@@ -607,7 +595,7 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
       startBin: range.startBin, endBin: range.endBin, binSide: range.binSide,
       startLevel: range.startLevel, endLevel: range.endLevel,
       holdType: body.holdType, placed, upgraded, blocked,
-      reservationsCleared: reservedToClear.length,
+      reservationsCleared,
     },
   });
 
@@ -681,7 +669,7 @@ async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
       breakdown.push({ existing, next: existing, outcome: 'blocked', count });
       continue;
     }
-    await prisma.location.updateMany({ where: { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing }, data: { holdCategory: next } });
+    await applyRangeReleaseBucket({ aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing }, next);
     breakdown.push({ existing, next, outcome, count });
     if (outcome === 'downgraded') downgraded += count; else released += count;
   }
@@ -753,20 +741,9 @@ async function placeHold(req: HttpRequest): Promise<unknown> {
     throw Object.assign(new Error(transition.code), { status: transition.httpStatus });
   }
 
-  await prisma.location.update({
-    where: { LocationID: { aisle: full.aisle, bin: full.bin, level: full.level } },
-    data: { holdCategory: body.holdType },
-  });
-
-  // CLEAR_LOCATION (Logic Gate — #149), forced to EMPTY: placing a hold on a RESERVED
-  // location clears its active reservation rather than leaving it reserved-but-unusable —
-  // per the design doc, "placing a hold also calls the Gate... forcing the reservation to
-  // revert to EMPTY regardless of what its stored revert-to value would otherwise have
-  // been." A location that isn't currently RESERVED has nothing to clear; skipped to avoid
-  // a pointless write (and, for an EMPTY location, a needless no-op transaction).
-  if (location.status === 'RESERVED') {
-    await clearLocation({ aisle: full.aisle, bin: full.bin, level: full.level, overrideRevert: 'EMPTY' });
-  }
+  // Logic Gate placeHold (#211): writes the hold and, on a RESERVED location, clears its
+  // reservation (forced EMPTY) in one transaction.
+  await placeHoldAt({ aisle: full.aisle, bin: full.bin, level: full.level }, body.holdType);
 
   await writeLog({
     userId: auth.zNumber,
@@ -816,10 +793,7 @@ async function removeHold(req: HttpRequest): Promise<unknown> {
 
   const clearedHoldType = location.holdCategory;
 
-  await prisma.location.update({
-    where: { LocationID: { aisle: full.aisle, bin: full.bin, level: full.level } },
-    data: { holdCategory: null },
-  });
+  await removeHoldAt({ aisle: full.aisle, bin: full.bin, level: full.level }); // Logic Gate (#211)
 
   await writeLog({
     userId: auth.zNumber,

@@ -8,7 +8,8 @@ import { generateUniquePid } from '../lib/palletId.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { whereOpenContainer } from '../lib/containerLifecycle.js';
 import { parseDpci, formatDpci } from '../lib/dpci.js';
-import { storeLocationForCreate } from '../lib/logicGate.js';
+import { storeReinstatedPallets } from '../lib/logicGate.js';
+import type { Prisma } from '../generated/prisma/index.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
 import { isValidVcpSspRatio, exceedsSspCap } from '../../shared/vcpSsp.js';
 import { classifyExpirationDate } from '../../shared/expiration.js';
@@ -545,9 +546,8 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   const pids: number[] = [];
   for (let i = 0; i < rows.length; i++) pids.push(await generateUniquePid());
 
-  const ops: ReturnType<typeof prisma.pallet.create>[] = rows.map((row, i) =>
-    prisma.pallet.create({
-      data: {
+  const creates: Prisma.PalletUncheckedCreateInput[] = rows.map((row, i) => (
+      {
         pid: pids[i], dept, class: cls, item: itm,
         receivedPallets: 1, currentPallets: 1,
         receivedCartons: row.cartons, currentCartons: row.cartons,
@@ -577,21 +577,17 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
         poNumber: null,
         apptNumber: null,
         expirationDate,
-      },
-    }),
-  );
-  await prisma.$transaction(ops);
+      }
+  ));
 
-  // PUT_COMPLETE's location-side half (Logic Gate — #149), for the create-a-new-pallet
-  // shape `putComplete` itself doesn't support (see `storeLocationForCreate`'s own doc
-  // comment). Only when placing directly onto a location that was genuinely EMPTY — an
-  // override onto an already-occupied/staged/reserved location (the warn-then-allow path
-  // above) leaves that location's own row completely untouched, same as before this
-  // migration. Deliberately outside the pallet-creation transaction above — a narrow,
-  // acceptable tradeoff, same as this Gate rollout's other migrated call sites.
-  if (locationAisle != null && locationWasEmpty) {
-    await storeLocationForCreate(locationAisle, locationBin!, locationLevel!);
-  }
+  // Logic Gate storeReinstatedPallets (#211): the new pallet rows and — only when placing
+  // directly onto a location that was EMPTY — the location's STORED write commit together
+  // (the location write previously ran after, outside the create transaction). An override
+  // onto an occupied/held/contracted location leaves the location row untouched.
+  await storeReinstatedPallets(
+    creates,
+    locationAisle != null ? { aisle: locationAisle, bin: locationBin!, level: locationLevel!, wasEmpty: locationWasEmpty } : null,
+  );
 
   for (let i = 0; i < rows.length; i++) {
     await writeLog({

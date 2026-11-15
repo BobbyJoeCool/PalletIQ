@@ -6,7 +6,7 @@ import { requireAuth, requireRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { findNextStagingLocation } from '../lib/stagingLogic.js';
-import { stageLocation } from '../lib/logicGate.js';
+import { stageLocation, unstageAisleType } from '../lib/logicGate.js';
 
 /** Throws 404 NOT_FOUND unless at least one Location row exists for the given aisle. */
 async function requireAisleExists(aisle: number): Promise<void> {
@@ -208,10 +208,8 @@ async function restageAisle(req: HttpRequest): Promise<unknown> {
   const results: RestageTypeResult[] = [];
 
   for (const type of body.types) {
-    const cleared = await prisma.location.updateMany({
-      where: { aisle: body.aisle, status: 'STAGED', storageCode: type.storageCode, size: type.size },
-      data: { status: 'EMPTY' },
-    });
+    // Logic Gate unstageAisleType (#211) — the bulk STAGED → EMPTY step.
+    const cleared = { count: await unstageAisleType({ aisle: body.aisle, storageCode: type.storageCode, size: type.size }) };
 
     let staged = 0;
     let cursor: { bin: number; level: number } | undefined;
