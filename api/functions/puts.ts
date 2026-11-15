@@ -6,8 +6,9 @@ import { requireAuth, hasMinRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { checkPalletEligibility } from '../lib/eligibility.js';
 import { findNextLocation, resolveEffectiveCriteria } from '../lib/zoneLogic.js';
-import { parseLocationBarcode, formatLocationId as locationString } from '../lib/locationParser.js';
-import { reservePut, confirmReservation, releaseReservation, movePallet, consolidateInto } from '../lib/logicGate.js';
+import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId as locationString } from '../lib/locationParser.js';
+import { reservePut, confirmReservation, confirmReservationInto, releaseReservation, movePallet, consolidateInto } from '../lib/logicGate.js';
+import { findConsolidationTarget, listConsolidationCandidates } from '../lib/putRedirect.js';
 import { coercePalletId } from '../lib/palletId.js';
 import { formatDpci } from '../lib/dpci.js';
 import { putDecision } from '../lib/locationPolicy.js';
@@ -151,6 +152,50 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
 // ── POST /api/puts/:reservationId/confirm ────────────────────────────────────
 
 /**
+ * Completes an Exists Elsewhere redirect (#215): the scan must match the redirect target
+ * (aisle+bin), the target must still be a valid consolidation candidate, and then one Gate
+ * transaction claims the reservation, releases the reserved location, and consolidates the
+ * pallet into the target's occupant.
+ * @throws 400 LOCATION_MISMATCH / INVALID_INPUT, 409 NOT_A_CANDIDATE, 404 NOT_FOUND
+ */
+async function confirmRedirected(
+  workerZ: string,
+  reservationId: number,
+  body: { wasScanned?: boolean },
+  target: { aisle: number; bin: number; level: number },
+  scanned: { aisle: number; bin: number } | null,
+) {
+  const { reservation, targetPalletId, moved } = await confirmReservationInto(reservationId, async (res, tx) => {
+    if (!scanned) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    if (scanned.aisle !== target.aisle || scanned.bin !== target.bin) {
+      throw Object.assign(new Error('LOCATION_MISMATCH'), { status: 400 });
+    }
+    const occupant = await findConsolidationTarget(tx, res.palletId, target);
+    if (occupant == null) throw Object.assign(new Error('NOT_A_CANDIDATE'), { status: 409 });
+    return occupant;
+  });
+
+  await writeLog(consolidated({
+    userId: workerZ,
+    palletId: reservation.palletId,
+    locationAisle: target.aisle,
+    locationBin:   target.bin,
+    locationLevel: target.level,
+    details: {
+      targetPalletId,
+      sourcePalletId: reservation.palletId,
+      ...moved,
+      method: 'SDP_REDIRECT',
+      reservationId,
+      releasedLocation: locationString(reservation.locationAisle, reservation.locationBin, reservation.locationLevel),
+      verification: { pid: { scanned: reservation.pidWasScanned ?? false }, bin: { scanned: body.wasScanned === true } },
+    },
+  }));
+
+  return { consolidated: true, targetPalletId, location: locationString(target.aisle, target.bin, target.level) };
+}
+
+/**
  * Confirms a system-directed put by scanning the target location barcode.
  * Validates that the scanned location (Aisle+Bin) matches the reserved location, then
  * atomically claims the Reservation (deletes it first, before touching Location/Pallet
@@ -188,8 +233,22 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
   const reservationId = parseInt(req.params.reservationId ?? '', 10);
   if (isNaN(reservationId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const body = await req.json() as { scannedLocation: string; wasScanned?: boolean };
+  const body = await req.json() as { scannedLocation: string; wasScanned?: boolean; targetLocation?: string };
   if (!body.scannedLocation) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+
+  // Exists Elsewhere redirect (#215): a targetLocation other than the reserved location
+  // completes the put as a consolidation into that location's occupant. The match, the
+  // candidate rule and the resolution all live server-side now (they were computed in
+  // SDPPage/SDPVerifyPutModal against manual/confirm, which had no reservation to check).
+  if (body.targetLocation) {
+    const target = parseFullLocationBarcode(body.targetLocation);
+    if (!target) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    const scanned = parseLocationBarcode(body.scannedLocation);
+    const pre = await prisma.reservation.findUnique({ where: { id: reservationId } });
+    if (!pre) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+    const isReserved = target.aisle === pre.locationAisle && target.bin === pre.locationBin && target.level === pre.locationLevel;
+    if (!isReserved) return confirmRedirected(auth.zNumber, reservationId, body, target, scanned);
+  }
 
   // Logic Gate confirmReservation (#211): verify the scan against the reservation, claim
   // it (#93 race safety — a concurrent unassign/expiry loses with a clean 404), and move the
@@ -288,6 +347,23 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
     location: locationString(reservation.locationAisle, reservation.locationBin, reservation.locationLevel),
     releasedStatus,
   };
+}
+
+// ── GET /api/puts/:reservationId/consolidation-candidates ──────────────────────
+
+/**
+ * Exists Elsewhere candidates for a live reservation (#215): same-DPCI pallets at XS
+ * locations with cartons on them, excluding the reserved location. Empty for a Rack Put.
+ * All roles (matches the consolidate resolution's own access).
+ * @throws 400 INVALID_INPUT, 404 NOT_FOUND if the reservation is gone
+ */
+async function getConsolidationCandidates(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
+  await requireAuth(req);
+  const reservationId = parseInt(req.params.reservationId ?? '', 10);
+  if (isNaN(reservationId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
+  if (!reservation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+  return { locations: await listConsolidationCandidates(reservation) };
 }
 
 // ── POST /api/puts/manual/scan ────────────────────────────────────────────────
@@ -608,6 +684,13 @@ app.http('directedPut', {
   authLevel: 'anonymous',
   route: 'puts/directed',
   handler: withHandler(directedPut),
+});
+
+app.http('getConsolidationCandidates', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'puts/{reservationId:int}/consolidation-candidates',
+  handler: withHandler(getConsolidationCandidates),
 });
 
 app.http('confirmPut', {

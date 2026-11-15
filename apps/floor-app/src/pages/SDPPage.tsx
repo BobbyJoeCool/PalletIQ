@@ -14,7 +14,6 @@ import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNavLock } from '../context/NavLockContext';
 import { useNumpad } from '../context/NumpadContext';
-import { type SDPDirectedResult, useSDP } from '../context/SDPContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
@@ -22,7 +21,8 @@ import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useTabOrder } from '../lib/useTabOrder';
 import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 import { SDPVerifyPutModal } from './SDPVerifyPutModal';
-import { aisleBinOf, splitLocationId } from '@shared/location';
+import { createHttpPutsClient, type ConsolidationCandidate } from '../lib/putsClient';
+import { usePutSession } from '../lib/usePutSession';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -130,13 +130,13 @@ type ScreenState = 'entry' | 'directed';
  * directed: `SDPVerifyPutModal` (GitHub #151) opens as a screen-blocking popup — Rack body
  *   for everything but XS locations, Hand body (Carton Quantity beside Location, "Exists
  *   elsewhere" redirect) for XS. Worker scans the directed location to confirm
- *   (POST /api/puts/{id}/confirm). Two escapes, both inside the modal:
- *   - Unassign (POST /api/puts/{id}/unassign): releases reservation, returns to entry.
- *   - Hold Location: embeds the shared `HoldPanel` — placing a hold already clears the
- *     reservation server-side (Logic Gate — #149, `placeHold`'s own `CLEAR_LOCATION` side
- *     effect), so this only needs a local reset once `HoldPanel` succeeds. Replaces the
- *     old "Blocked Put" (hardcoded Hold Both + auto-continue to a new location) entirely —
- *     stops once the hold is placed, no auto-continue.
+ *   (POST /api/puts/{id}/confirm). The put session (`lib/usePutSession.ts`, #215) owns
+ *   every puts call and rule; this page only maps its outcomes to tones/messages/history:
+ *   - Exists Elsewhere (Hand Put): redirects the put to a same-DPCI occupied XS location;
+ *     the reservation stays live, and confirm completes it server-side as a consolidation.
+ *   - Unassign: releases the reservation (also while redirected), returns to entry.
+ *   - Hold Location: Hold Both on the reserved location — the hold clears the reservation
+ *     server-side. Stops once placed, no auto-continue.
  *   Reservation expiry (server-side 5-min timer) is detected when any action returns NOT_FOUND.
  *
  * A right-column history log tracks all reservation outcomes (ASSIGNED/PUT/MOVE/RELEASED/HELD).
@@ -178,7 +178,14 @@ export function SDPPage() {
   // Directed state.
   // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
   // SDPContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern.
-  const { directed, setDirected } = useSDP();
+  // The put session (#215) owns the put-verify flow and every puts call; this page maps
+  // its outcomes onto tones, messages and history.
+  const putsClient = useMemo(() => createHttpPutsClient(token!), [token]);
+  const session = usePutSession(putsClient);
+  const directed = session.view;
+  // Latest session for the reservation-expiry poll's interval callback.
+  const sessionRef = useRef(session);
+  useEffect(() => { sessionRef.current = session; });
 
   // Refs to check from async callbacks.
   const screenStateRef = useRef(screenState);
@@ -319,11 +326,11 @@ export function SDPPage() {
       const d = directedRef.current;
       if (!d || d.reservationId !== reservationId) return;
       try {
-        const loc = await apiFetch<{ status: string }>(`/api/locations/${d.directedLocation}`, token!);
-        if (loc.status !== 'RESERVED') {
+        // Watches the *reserved* location — a redirect target is STORED by design.
+        if (await sessionRef.current.isExpired()) {
           stopPolling();
           playAlert('warning');
-          setMessage({ type: 'warning', text: `Reservation expired — location ${d.directedLocation} released` });
+          setMessage({ type: 'warning', text: `Reservation expired — location ${d.reservedLocation} released` });
           resetToEntry(true);
         }
       } catch {
@@ -369,33 +376,18 @@ export function SDPPage() {
       const palletId = parseInt(v, 10);
       if (isNaN(palletId)) throw Object.assign(new Error('PALLET_NOT_FOUND'), { status: 404 });
 
-      const sizeVal    = sizeOverride;
-      const storageVal = storageOverride;
-
-      // `hasReservation`/`original`/`palletStorageCode` are client-only bookkeeping for the
-      // Exists Elsewhere redirect flow (#151) — the API's own directedPut response has no
-      // concept of any of them, since every fresh directed-put always starts with a live
-      // reservation, no prior redirect, and a target Storage Code that (at this moment,
-      // before any redirect) is also exactly the pallet's own. Merged in here rather than
-      // returned by the API itself.
-      const apiResult = await apiFetch<Omit<SDPDirectedResult, 'hasReservation' | 'original' | 'palletStorageCode'>>('/api/puts/directed', token!, {
-        method: 'POST',
-        body: JSON.stringify({
-          aisle,
-          palletId,
-          ...(sizeVal    && { size: sizeVal }),
-          ...(storageVal && { storageCode: storageVal }),
-          ...(zoneOverride != null && { zone: zoneOverride }),
-          consolidating: consolidatingRef.current,
-          wasScanned,
-        }),
+      const outcome = await session.direct({
+        aisle,
+        palletId,
+        ...(sizeOverride    && { size: sizeOverride }),
+        ...(storageOverride && { storageCode: storageOverride }),
+        ...(zoneOverride != null && { zone: zoneOverride }),
+        consolidating: consolidatingRef.current,
+        wasScanned,
       });
-      const result: SDPDirectedResult = {
-        ...apiResult, hasReservation: true, original: null,
-        palletStorageCode: apiResult.directedLocationStorageCode,
-      };
+      if (outcome.kind === 'error') throw new Error(outcome.code);
+      const result = outcome.view;
 
-      setDirected(result);
       setScreenState('directed');
       setPalletInvalid(false);
       // Clears any stale error from a prior failed attempt (issue #95) — the
@@ -406,7 +398,7 @@ export function SDPPage() {
       setHistory(h => [{
         reservationId: result.reservationId,
         palletId: result.pallet.id,
-        directedLocation: result.directedLocation,
+        directedLocation: result.reservedLocation,
         outcome: 'ASSIGNED',
         timestamp: new Date(),
       }, ...h]);
@@ -459,23 +451,8 @@ export function SDPPage() {
     setLocationEntryKey((k) => k + 1);
   }
 
-  /**
-   * Submit handler for the Confirm Location panel (LocationEntryFields), called once a
-   * full Aisle+Bin+Level value resolves — either scanned or hand-entered across all three
-   * boxes; `wasScanned` comes directly from the panel's own structural scan-vs-typed
-   * detection (see LocationEntryFields' docstring), not NumpadContext's isScanningRef.
-   * Calls POST /api/puts/{id}/confirm with the resolved value — the backend already only
-   * compares Aisle+Bin (see confirmPut's docstring), so the Level digits always along for
-   * the ride here are harmless. On LOCATION_MISMATCH, clears and re-focuses for retry. On
-   * NOT_FOUND, the reservation has expired — resets to entry with full field clear. On
-   * success, updates the history entry outcome and shows a completion message.
-   */
-  /** Shared success handling for both confirmPut's and the redirected-flow's
-   *  manual/confirm-'proceed' response — both return the identical
-   *  `{location, wasMove, clearedLocation, wasStaged}` shape (destinationWasStaged renamed
-   *  wasStaged by confirmPut's own response only — see the two call sites below for the
-   *  field-name reconciliation). Tags the history row, plays the tone, sets the message,
-   *  and resets to entry. */
+  /** Success handling for a completed (non-consolidating) put — tags the history row,
+   *  plays the tone, sets the message, and resets to entry. */
   function applyConfirmSuccess(
     reservationId: number,
     result: { location: string; wasMove: boolean; clearedLocation: string | null; wasStaged: boolean },
@@ -506,21 +483,10 @@ export function SDPPage() {
   }
 
   /**
-   * Completes the put once the worker confirms the directed location. Two paths,
-   * branching on `d.hasReservation`:
-   * - **Normal** (still has a live reservation): `POST /puts/:id/confirm` — unchanged.
-   * - **Redirected** (Exists Elsewhere released the original reservation at least once,
-   *   #151): no reservation left to confirm against, so this goes through the
-   *   fully self-contained `POST /puts/manual/confirm` instead — same endpoint MNP uses,
-   *   and the same one the redirect itself used to complete before this got split into a
-   *   real two-step "redirect, then confirm" flow. `resolution` is derived from whether
-   *   the worker is confirming at the original location (`'proceed'` — it's back to
-   *   plain EMPTY/STAGED, no consolidation needed) or a redirected-to one (`'consolidate'`
-   *   — always occupied by a same-DPCI pallet, guaranteed by Exists Elsewhere's own fetch
-   *   filter). The match check against `d.directedLocation` that confirmPut normally does
-   *   server-side has to happen client-side here instead, since manual/confirm has no
-   *   reservation to compare against and would otherwise happily put/consolidate at
-   *   *any* location typed in, not just the one the worker was actually directed to.
+   * Completes the put once the worker confirms the directed location (#215): the put
+   * session sends the scan to `confirmPut` (with the redirect target when Exists Elsewhere
+   * redirected it — the server checks the match, the candidate rule and the resolution).
+   * This handler only maps the outcome onto tone/message/history.
    */
   async function handleLocationConfirm(value: string, wasScanned: boolean) {
     const v = value.trim();
@@ -528,81 +494,45 @@ export function SDPPage() {
     const d = directedRef.current;
     if (!d) return;
 
-    if (!d.hasReservation) {
-      // Aisle+Bin only, matching confirmPut's own comparison (Level is never checked —
-      // physical barcodes only encode Aisle+Bin, see Location Barcode Handling).
-      if (aisleBinOf(v) !== aisleBinOf(d.directedLocation)) {
-        playAlert('error');
-        resetLocationField();
-        setMessage({ type: 'error', text: `Wrong location — directed to ${d.directedLocation}` });
-        return;
-      }
-      setLoading(true);
-      try {
-        const isOriginal = d.original != null && d.directedLocation === d.original.location;
-        const level = parseInt(splitLocationId(d.directedLocation).level ?? '', 10);
-        const result = await apiFetch<
-          | { consolidated: true; location: string }
-          | { location: string; wasMove: boolean; clearedLocation: string | null; destinationWasStaged: boolean }
-        >('/api/puts/manual/confirm', token!, {
-          method: 'POST',
-          body: JSON.stringify({
-            palletId: d.pallet.id, destinationLocation: d.directedLocation, level,
-            resolution: isOriginal ? 'proceed' : 'consolidate',
-          }),
-        });
-        if ('consolidated' in result) {
-          playAlert('info');
-          setMessage({ type: 'success', text: `Redirected — consolidated into ${fmtLocation(result.location)}` });
+    setLoading(true);
+    try {
+      const outcome = await session.confirm(v, wasScanned);
+      switch (outcome.kind) {
+        case 'put':
+          applyConfirmSuccess(d.reservationId, outcome);
+          break;
+        case 'consolidated':
           stopPolling();
+          playAlert('info');
+          setMessage({ type: 'success', text: `Redirected — consolidated into ${fmtLocation(outcome.location)}` });
           setHistory(h => h.map(e =>
             e.reservationId === d.reservationId
-              ? { ...e, outcome: d.pallet.currentLocation != null ? 'MOVE' as const : 'PUT' as const, finalLocation: result.location }
+              ? { ...e, outcome: outcome.wasMove ? 'MOVE' as const : 'PUT' as const, finalLocation: outcome.location }
               : e
           ));
           resetToEntry();
-        } else {
-          applyConfirmSuccess(d.reservationId, { ...result, wasStaged: result.destinationWasStaged });
-        }
-      } catch {
-        // Nothing was lost — the original reservation was already released back when the
-        // first redirect happened, well before this call, so a failure here is fully
-        // retryable (the pallet's own status is untouched either way).
-        playAlert('error');
-        setMessage({ type: 'error', text: 'Confirm failed — please try again' });
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await apiFetch<{ location: string; wasMove: boolean; clearedLocation: string | null; wasStaged: boolean }>(
-        `/api/puts/${d.reservationId}/confirm`,
-        token!,
-        { method: 'POST', body: JSON.stringify({ scannedLocation: v, wasScanned }) },
-      );
-      applyConfirmSuccess(d.reservationId, result);
-    } catch (err) {
-      const code = err instanceof Error ? err.message : '';
-      resetLocationField();
-      // One tone per outcome, not 'error' unconditionally plus a second, different tone
-      // layered on top for specific codes — the two used to play back-to-back on
-      // NOT_FOUND, with 'error' (this app's loudest tone) drowning out the 'warning'
-      // that actually matched what happened.
-      if (code === 'LOCATION_MISMATCH') {
-        playAlert('error');
-        setMessage({ type: 'error', text: `Wrong location — directed to ${d.directedLocation}` });
-      } else if (code === 'NOT_FOUND') {
-        // Reservation expired.
-        playAlert('warning');
-        setMessage({ type: 'warning', text: `Reservation expired — location ${d.directedLocation} released` });
-        stopPolling();
-        resetToEntry(true);
-      } else {
-        playAlert('error');
-        setMessage({ type: 'error', text: 'Confirm failed — please try again' });
+          break;
+        case 'mismatch':
+          resetLocationField();
+          playAlert('error');
+          setMessage({ type: 'error', text: `Wrong location — directed to ${outcome.directedLocation}` });
+          break;
+        case 'notCandidate':
+          resetLocationField();
+          playAlert('error');
+          setMessage({ type: 'error', text: `${fmtLocation(outcome.directedLocation)} can no longer take this pallet — pick another location` });
+          break;
+        case 'expired':
+          resetLocationField();
+          playAlert('warning');
+          setMessage({ type: 'warning', text: `Reservation expired — location ${outcome.reservedLocation} released` });
+          stopPolling();
+          resetToEntry(true);
+          break;
+        default:
+          resetLocationField();
+          playAlert('error');
+          setMessage({ type: 'error', text: 'Confirm failed — please try again' });
       }
     } finally {
       setLoading(false);
@@ -610,33 +540,26 @@ export function SDPPage() {
   }
 
   /**
-   * Escape-hatch: voluntarily releases the current reservation without placing the pallet.
-   * Calls POST /api/puts/{id}/unassign, which clears the location to EMPTY and deletes the
-   * Reservation row atomically. Returns to entry state; pallet and confirm fields are cleared,
-   * non-locked overrides are also cleared so the next put can start fresh. Only offered
-   * while `d.hasReservation` — see `handleCancelRedirect` for its no-reservation sibling.
+   * Escape hatch: releases the reservation without placing the pallet (also while
+   * redirected — the reservation stays live through a redirect since #215). Returns to
+   * entry; non-locked overrides clear so the next put starts fresh.
    */
   async function handleUnassign() {
     const d = directedRef.current;
     if (!d || loadingRef.current) return;
     setLoading(true);
     try {
-      const result = await apiFetch<{ location: string; releasedStatus: 'STAGED' | 'EMPTY' }>(
-        `/api/puts/${d.reservationId}/unassign`, token!, { method: 'POST' },
-      );
-      stopPolling();
-      playAlert('info');
-      setHistory(h => h.map(e =>
-        e.reservationId === d.reservationId ? { ...e, outcome: 'RELEASED' as const } : e
-      ));
-      const releasedTag = result.releasedStatus === 'STAGED' ? 'Staged' : 'Empty';
-      setMessage({ type: 'info', text: `Reservation cleared — ${d.directedLocation} released (${releasedTag})` });
-      resetToEntry();
-    } catch (err) {
-      const code = err instanceof Error ? err.message : '';
-      if (code === 'NOT_FOUND') {
+      const outcome = await session.unassign();
+      if (outcome.kind === 'released') {
+        stopPolling();
+        playAlert('info');
+        setHistory(h => h.map(e => e.reservationId === d.reservationId ? { ...e, outcome: 'RELEASED' as const } : e));
+        const releasedTag = outcome.releasedStatus === 'STAGED' ? 'Staged' : 'Empty';
+        setMessage({ type: 'info', text: `Reservation cleared — ${outcome.reservedLocation} released (${releasedTag})` });
+        resetToEntry();
+      } else if (outcome.kind === 'expired') {
         playAlert('warning');
-        setMessage({ type: 'warning', text: `Reservation expired — location ${d.directedLocation} released` });
+        setMessage({ type: 'warning', text: `Reservation expired — location ${outcome.reservedLocation} released` });
         stopPolling();
         resetToEntry(true);
       } else {
@@ -648,66 +571,38 @@ export function SDPPage() {
   }
 
   /**
-   * Hold Location succeeded — `SDPVerifyPutModal`'s embedded `HoldPanel` already placed
-   * the hold and (via `placeHold`'s own Logic Gate side effect) already cleared the
-   * reservation server-side, so there's no API call to make here, just local cleanup:
-   * stop polling a reservation that no longer exists, tag its history entry, and return
-   * to entry. Replaces the old `handleBlock`'s auto-continue entirely — Hold Location
-   * stops here, it doesn't re-direct to a new location.
+   * Hold Location — the session places Hold Both on the reserved location (the hold clears
+   * the reservation server-side). Stops here; no auto-continue to a new location.
+   * @returns true when the hold landed (the modal closes its dialog)
    */
-  function handleHoldDone() {
+  async function handleHold(reasonCode: string): Promise<boolean> {
     const d = directedRef.current;
-    stopPolling();
-    if (d) {
-      setHistory(h => h.map(e => e.reservationId === d.reservationId ? { ...e, outcome: 'HELD' as const } : e));
+    const outcome = await session.hold(reasonCode);
+    if (outcome.kind === 'error') {
+      playAlert('error');
+      setMessage({ type: 'error', text: outcome.code === 'FORBIDDEN' ? 'You do not have permission to place Hold Both holds' : 'Hold placement failed — please try again' });
+      return false;
     }
+    playAlert('info');
+    setMessage({ type: 'success', text: `Hold Both placed on ${fmtLocation(outcome.location)}` });
+    stopPolling();
+    if (d) setHistory(h => h.map(e => e.reservationId === d.reservationId ? { ...e, outcome: 'HELD' as const } : e));
     resetToEntry();
+    return true;
   }
 
-  /**
-   * "Exists elsewhere" (Hand Put + IM+) points the put at a different, already-occupied
-   * same-DPCI location — picking a candidate no longer completes the put by itself (#151
-   * follow-up); it just retargets `directed` and, the *first* time this fires for a given
-   * reservation, snapshots the pre-redirect location/Storage Code into `original` so the
-   * worker can return to it later. `hasReservation` flips to false here (the modal itself
-   * already released the underlying Reservation row before calling this, if one was still
-   * live) — from this point on, `handleLocationConfirm` completes the put through
-   * `manual/confirm` instead of `confirmPut`. Picking a second, third, etc. candidate after
-   * the first just re-calls this — `original` is only ever set once, from whatever
-   * `directed` looked like the moment `hasReservation` was still true.
-   */
-  function handleRedirect(newLocation: string, newStorageCode: string) {
-    setDirected(d => {
-      if (!d) return d;
-      const original = d.original ?? { location: d.directedLocation, storageCode: d.directedLocationStorageCode };
-      return { ...d, directedLocation: newLocation, directedLocationStorageCode: newStorageCode, hasReservation: false, original };
-    });
+  /** Exists Elsewhere pick — points the put at the candidate; the worker still confirms it. */
+  function handleRedirect(candidate: ConsolidationCandidate) {
+    session.redirect({ locationId: candidate.locationId, storageCode: candidate.storageCode });
     setLocationEntryKey(k => k + 1);
     playAlert('info');
-    setMessage({ type: 'info', text: `Redirected to ${fmtLocation(newLocation)} — confirm the new location to complete` });
+    setMessage({ type: 'info', text: `Redirected to ${fmtLocation(candidate.locationId)} — confirm the new location to complete` });
   }
 
-  /** Return-to-Original button (#151 follow-up) — only shown once a redirect has moved
-   *  the target away from `original`. Pure client-side state swap, same as picking any
-   *  other Exists Elsewhere candidate (see `handleRedirect`) — the original location was
-   *  only ever released, never reassigned to anyone else in the meantime. */
-  function handleReturnToOriginal() {
-    setDirected(d => (d?.original ? { ...d, directedLocation: d.original.location, directedLocationStorageCode: d.original.storageCode } : d));
+  /** Return to the reserved location after a redirect. */
+  function handleReturnToReserved() {
+    session.returnToReserved();
     setLocationEntryKey(k => k + 1);
-  }
-
-  /** Cancel button (#151 follow-up) — the redirected-flow's sibling to Unassign, for once
-   *  `hasReservation` is already false and there's nothing left to release: no API call,
-   *  just resets to entry. Tags the history row RELEASED, same outcome Unassign itself
-   *  would show, since that's genuinely what happened to the original reservation even
-   *  though it happened earlier (at the first redirect), not at this exact tap. */
-  function handleCancelRedirect() {
-    const d = directedRef.current;
-    if (d) {
-      setHistory(h => h.map(e => e.reservationId === d.reservationId ? { ...e, outcome: 'RELEASED' as const } : e));
-    }
-    stopPolling();
-    resetToEntry();
   }
 
   /**
@@ -718,7 +613,7 @@ export function SDPPage() {
    *   overrides; focus returns to the aisle field.
    */
   function resetToEntry(full = false) {
-    setDirected(null);
+    session.reset();
     setScreenState('entry');
     setPalletIdValue('');
     setPalletInvalid(false);
@@ -971,16 +866,16 @@ export function SDPPage() {
         {/* Directed state — Verify-Put Modal (GitHub #151) */}
         {screenState === 'directed' && directed && (
           <SDPVerifyPutModal
-            directed={directed}
+            view={directed}
+            candidates={session.candidates}
             loading={loading}
             locationEntryKey={locationEntryKey}
             onLocationConfirm={handleLocationConfirm}
             onLocationActiveChange={setLocationActive}
             onUnassign={handleUnassign}
-            onHoldDone={handleHoldDone}
+            onHold={handleHold}
             onRedirect={handleRedirect}
-            onReturnToOriginal={handleReturnToOriginal}
-            onCancelRedirect={handleCancelRedirect}
+            onReturnToReserved={handleReturnToReserved}
           />
         )}
 

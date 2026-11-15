@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { hasMinRole, type Role } from '@shared/index';
+import { useState } from 'react';
 import { DataRow } from '../components/shared/DataRow';
 import { ItemDescription } from '../components/shared/ItemDescription';
 import { LocationEntryFields } from '../components/shared/LocationEntryFields';
@@ -7,192 +6,60 @@ import { LockedHoldConfirmDialog } from '../components/shared/LockedHoldConfirmD
 import { StorageCodeBadge } from '../components/shared/StorageCodeBadge';
 import { LiveId } from '../components/ui/LiveId';
 import { ModalOverlay } from '../components/ui/ModalOverlay';
-import { useAuth } from '../context/AuthContext';
-import { useMessageBar } from '../context/MessageBarContext';
-import { type SDPDirectedResult } from '../context/SDPContext';
-import { apiFetch } from '../lib/api';
-import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
-import { splitReasonCode } from '../lib/reasonCode';
-
-/** A same-DPCI XS location — populates the "Exists elsewhere" popup. Only the fields
- *  that popup actually shows/needs (location + Storage Code + carton count), not the
- *  full `ISILocationEntry` shape `/api/items/dpci/:dpci/locations` returns. */
-interface ExistsElsewhereEntry {
-  locationId: string;
-  storageCode: string;
-  currentCartons: number;
-}
+import type { ConsolidationCandidate } from '../lib/putsClient';
+import type { PutView } from '../lib/usePutSession';
 
 interface SDPVerifyPutModalProps {
-  directed: SDPDirectedResult;
+  view: PutView;
+  /** Exists Elsewhere candidates from the put session (server-filtered, current target
+   *  already excluded). Empty for a Rack Put. */
+  candidates: ConsolidationCandidate[];
   loading: boolean;
   locationEntryKey: number;
   onLocationConfirm: (value: string, wasScanned: boolean) => void;
   onLocationActiveChange: (active: boolean) => void;
   onUnassign: () => void;
-  /** Hold Location's own placement (`handleConfirmHold`, below) already clears the
-   *  reservation server-side as a side effect of placing the hold (Logic Gate — #149,
-   *  `placeHold`'s new `CLEAR_LOCATION` call) — this callback fires once that's done and
-   *  only needs to reset local screen state, no API call of its own. */
-  onHoldDone: () => void;
-  /** A worker picked an Exists Elsewhere candidate — retargets `directed` at it. Does
-   *  *not* complete the put; the worker still has to confirm the new location like any
-   *  other target (see this component's own top-of-file doc comment). */
-  onRedirect: (newLocation: string, newStorageCode: string) => void;
-  /** Return-to-Original button — swaps the target back to `directed.original`. */
-  onReturnToOriginal: () => void;
-  /** Cancel button — the redirected-flow's sibling to Unassign, for once there's no
-   *  longer a live reservation to release. */
-  onCancelRedirect: () => void;
+  /** Places Hold Both on the reserved location; resolves true when it landed. */
+  onHold: (reasonCode: string) => Promise<boolean>;
+  /** Points the put at an Exists Elsewhere candidate (the reservation stays live). */
+  onRedirect: (candidate: ConsolidationCandidate) => void;
+  /** Points the put back at the reserved location. */
+  onReturnToReserved: () => void;
 }
 
 /**
- * SDP's Verify-Put Modal (GitHub #151) — replaces the screen's old inline "Confirm
- * Location" block with a screen-blocking popup, per the design doc
- * (`DevNotes/DesignPrompts/Shared-Infrastructure-Design-Spec.md`). Two bodies only —
- * **Rack** (everything but XS) and **Hand** (XS) — Bulk Put is out of scope for this
- * build, per direct instruction.
+ * SDP's Verify-Put Modal (GitHub #151) — render-only since #215: the put session
+ * (`usePutSession`) owns every call and rule, this component shows its `view` and raises
+ * the worker's choices as callbacks. Two bodies — **Rack** (everything but XS) and
+ * **Hand** (XS).
  *
- * Confirm/Unassign are unchanged existing SDP actions, passed down as callbacks
- * (`onLocationConfirm`/`onUnassign` — both already fully implemented in `SDPPage.tsx`,
- * this component only renders their UI). Hold Location is always **Hold Both**, reason
- * `70` (Blocked Location) — no Hold Type grid to choose from, since the type is implied by
- * the situation, same shape as MNP's occupied-location gate (2026-08-03, direct
- * instruction: "similar to the one used by MNP") — rendered via the shared
- * `LockedHoldConfirmDialog` rather than the full `HoldPanel` PIP/MNP/WLH use for their own
- * general-purpose hold actions. Per direct instruction, this **replaces** the old
- * "Blocked Put" button entirely (hardcoded Hold Both + auto-continue to a new location) —
- * it stops once the hold is placed, no auto-continue. Its own Back/Cancel button (unlike
- * `HoldPanel`'s Close) never calls `onHoldDone` — closing without confirming returns to
- * this modal untouched, since no hold was actually placed.
+ * Hold Location is always **Hold Both** with reason `70` (Blocked Location) pre-filled, via
+ * the shared `LockedHoldConfirmDialog`; it stops once the hold is placed (no auto-continue).
  *
- * **Exists Elsewhere (Hand Put + IM+) is a redirect, not a shortcut confirm.** Picking a
- * candidate releases the original reservation (only on the *first* pick — see
- * `pickExistsElsewhere`) and retargets `directed.directedLocation`/
- * `directedLocationStorageCode` at it; it does **not** place the pallet. The worker still
- * has to scan/type the new location through the same Confirm Location panel as any other
- * target — `directed.hasReservation` flips to `false` once redirected, which is what
- * tells `SDPPage.tsx`'s `handleLocationConfirm` to complete the put via
- * `POST /puts/manual/confirm` instead of the normal reservation-based
- * `POST /puts/:id/confirm` (there's no more Reservation row to confirm against). While
- * `hasReservation` is false: Unassign/Hold Location are replaced by Cancel (nothing left
- * to unassign or hold against this transaction), and once the target has actually moved
- * away from `directed.original`, a Return to Original button reappears — both are pure
- * client-side state swaps (`onReturnToOriginal`/re-picking a candidate), never a second
- * server round-trip, since the original location was only ever released, never
- * reassigned to anyone else in the meantime.
+ * **Exists Elsewhere (Hand Put) is a redirect, not a shortcut confirm.** Picking a
+ * candidate points the put at it; the worker still scans/types that location to confirm,
+ * and the server completes it as a consolidation. The reservation stays live throughout,
+ * so Unassign always releases it and Return to {reserved location} is always available
+ * once review.
  */
 export function SDPVerifyPutModal({
-  directed, loading, locationEntryKey, onLocationConfirm, onLocationActiveChange,
-  onUnassign, onHoldDone, onRedirect, onReturnToOriginal, onCancelRedirect,
+  view, candidates, loading, locationEntryKey, onLocationConfirm, onLocationActiveChange,
+  onUnassign, onHold, onRedirect, onReturnToReserved,
 }: SDPVerifyPutModalProps) {
-  const { token, user } = useAuth();
-  const { setMessage } = useMessageBar();
-  // AuthUser.role is typed as a loose string (see src/lib/api.ts) — always one of the
-  // five real Role values at runtime, since it comes straight from the JWT the server issued.
-  const isIM = hasMinRole((user?.role ?? 'WORKER') as Role, 'IM');
-
   const [holdOpen, setHoldOpen] = useState(false);
   const [holdReasonCode, setHoldReasonCode] = useState('');
   const [holdSubmitting, setHoldSubmitting] = useState(false);
   const [existsOpen, setExistsOpen] = useState(false);
-  const [existsElsewhere, setExistsElsewhere] = useState<ExistsElsewhereEntry[]>([]);
-  const [redirecting, setRedirecting] = useState(false);
 
-  const isHand = directed.directedLocationSize === 'XS';
-  const isAtOriginal = directed.original == null || directed.directedLocation === directed.original.location;
+  const isHand = view.isHandPut;
 
-  // Fetches "exists elsewhere" candidates once per pallet, Hand Put only — the
-  // button itself only renders once this resolves with at least one match.
-  // All roles see this (the server-side consolidate resolution is also open to
-  // all roles as of the same change).
-  //
-  // Keyed on the DPCI alone (not on `directedLocation`, which now changes as the worker
-  // toggles between candidates/original) — the current target is excluded client-side at
-  // render time instead, so toggling doesn't re-fire this fetch.
-  useEffect(() => {
-    if (!isHand) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const result = await apiFetch<{ locations: { locationId: string; storageCode: string; size: string; currentCartons: number }[] }>(
-          `/api/items/dpci/${directed.pallet.dpci}/locations`, token!,
-        );
-        if (cancelled) return;
-        setExistsElsewhere(
-          result.locations
-            // `buildItemLocations` (shared with ISI, `api/functions/items.ts`) returns
-            // every pallet row with a location for this DPCI regardless of status or
-            // quantity — a `currentCartons: 0` row is a zeroed/consolidated pallet whose
-            // location field was never cleared, not a real occupant to consolidate into
-            // (its own location's real occupant, if any, wouldn't even be this pallet
-            // anymore). Filtering it out here rather than in the shared endpoint, since
-            // ISI's own consumers rely on seeing the full unfiltered picture.
-            .filter((l) => l.size === 'XS' && l.currentCartons > 0)
-            .map((l) => ({ locationId: l.locationId, storageCode: l.storageCode, currentCartons: l.currentCartons })),
-        );
-      } catch {
-        // Silent — a failed lookup just means "Exists elsewhere" doesn't offer this time;
-        // not worth its own error message for what's a convenience shortcut, not a
-        // required step (the worker can still Confirm/Unassign normally).
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    })();
-    return () => { cancelled = true; };
-  }, [isHand, isIM, directed.pallet.dpci]);
-
-  /**
-   * Releases the original reservation on the *first* redirect only (once
-   * `hasReservation` is already false, every subsequent pick — including re-picking the
-   * same one — is a pure client-side retarget, no API call, since there's nothing left to
-   * release). See this component's own top-of-file doc comment for the full flow;
-   * `onRedirect` (owned by `SDPPage.tsx`) does the actual `directed` state update.
-   */
-  async function pickExistsElsewhere(entry: ExistsElsewhereEntry) {
-    if (redirecting) return;
-    setExistsOpen(false);
-    if (!directed.hasReservation) {
-      onRedirect(entry.locationId, entry.storageCode);
-      return;
-    }
-    setRedirecting(true);
-    try {
-      await apiFetch(`/api/puts/${directed.reservationId}/unassign`, token!, { method: 'POST' });
-      onRedirect(entry.locationId, entry.storageCode);
-    } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Redirect failed — please try again' });
-      setExistsOpen(true);
-    } finally {
-      setRedirecting(false);
-    }
-  }
-
-  /**
-   * Hold Location's Confirm — always `HOLD_BOTH`, no type picker (see this file's own
-   * top-of-file doc comment). Calls `PATCH /api/locations/:id/hold` directly (matching what
-   * `HoldPanel` itself already does internally) — the Logic Gate's `CLEAR_LOCATION` call
-   * clears the reservation server-side as a side effect, so `onHoldDone` only needs to
-   * reset local screen state, same as before this dialog swap.
-   */
+  /** Hold Location's Confirm — hands the reason code to the session; closes on success. */
   async function handleConfirmHold() {
     if (!holdReasonCode || holdSubmitting) return;
     setHoldSubmitting(true);
     try {
-      const { prefix: reasonPrefix, number: reasonNumber } = splitReasonCode(holdReasonCode);
-      await apiFetch(`/api/locations/${directed.directedLocation}/hold`, token!, {
-        method: 'PATCH',
-        body: JSON.stringify({ holdType: 'HOLD_BOTH', reasonPrefix, reasonNumber }),
-      });
-      playAlert('info');
-      setMessage({ type: 'success', text: `Hold Both placed on ${fmtLocation(directed.directedLocation)}` });
-      setHoldOpen(false);
-      onHoldDone();
-    } catch (err) {
-      playAlert('error');
-      const code = err instanceof Error ? err.message : '';
-      setMessage({ type: 'error', text: code === 'FORBIDDEN' ? 'You do not have permission to place Hold Both holds' : 'Hold placement failed — please try again' });
+      if (await onHold(holdReasonCode)) setHoldOpen(false);
     } finally {
       setHoldSubmitting(false);
     }
@@ -201,21 +68,21 @@ export function SDPVerifyPutModal({
   return (
     <ModalOverlay width="w-[820px]" position="left" testId="sdp-verify-put-modal">
       <div className="flex flex-col gap-3">
-        <DataRow label="Pallet ID"><LiveId type="pallet" id={String(directed.pallet.id)} /></DataRow>
-        <ItemDescription value={directed.pallet.descShort} label="Item" />
+        <DataRow label="Pallet ID"><LiveId type="pallet" id={String(view.pallet.id)} /></DataRow>
+        <ItemDescription value={view.pallet.descShort} label="Item" />
         <DataRow label="DPCI">
           <span className="flex items-center gap-2">
-            <LiveId type="dpci" id={directed.pallet.dpci} className="!text-[22px]" />
-            <StorageCodeBadge storageCode={directed.palletStorageCode} />
+            <LiveId type="dpci" id={view.pallet.dpci} className="!text-[22px]" />
+            <StorageCodeBadge storageCode={view.palletStorageCode} />
           </span>
         </DataRow>
-        {directed.pallet.currentLocation && (
-          <DataRow label="Move from"><LiveId type="location" id={directed.pallet.currentLocation} /></DataRow>
+        {view.pallet.currentLocation && (
+          <DataRow label="Move from"><LiveId type="location" id={view.pallet.currentLocation} /></DataRow>
         )}
         <DataRow label="Directed To">
           <span className="flex items-center gap-2">
-            <LiveId type="location" id={directed.directedLocation} className="!text-[28px] !font-bold !text-[#FF1A1A]" />
-            <StorageCodeBadge storageCode={directed.directedLocationStorageCode} size={directed.directedLocationSize} />
+            <LiveId type="location" id={view.directedLocation} className="!text-[28px] !font-bold !text-[#FF1A1A]" />
+            <StorageCodeBadge storageCode={view.directedLocationStorageCode} size={view.directedLocationSize} />
           </span>
         </DataRow>
 
@@ -233,13 +100,13 @@ export function SDPVerifyPutModal({
             <div className="flex flex-col gap-1">
               <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Carton Quantity</span>
               <div className="flex items-center h-[68px] px-5 rounded-[12px] border-2 border-[#3A3A3A] bg-[#0D0D0D]">
-                <span className="font-data text-[26px] font-medium text-white">{directed.pallet.quantity.cartons}</span>
+                <span className="font-data text-[26px] font-medium text-white">{view.pallet.quantity.cartons}</span>
               </div>
             </div>
           )}
 
           <div className="flex gap-3">
-            {directed.hasReservation ? (
+            {!view.isRedirected ? (
               <>
                 <button
                   type="button"
@@ -262,7 +129,7 @@ export function SDPVerifyPutModal({
               <>
                 <button
                   type="button"
-                  onClick={onCancelRedirect}
+                  onClick={onUnassign}
                   disabled={loading}
                   className="h-[72px] px-6 rounded-[12px] font-ui text-[20px] font-semibold transition-colors disabled:opacity-40 bg-[#554400] hover:bg-[#665500] text-white"
                 >
@@ -271,17 +138,15 @@ export function SDPVerifyPutModal({
                 {/* Two-line label (same convention as the entry-state "Applying
                     Constraints" bubble) rather than fighting a single line for width —
                     an 8-digit location code reads badly split mid-number by a wrap. */}
-                {!isAtOriginal && (
-                  <button
-                    type="button"
-                    onClick={onReturnToOriginal}
-                    disabled={loading}
-                    className="h-[72px] px-5 rounded-[12px] font-ui font-semibold transition-colors disabled:opacity-40 bg-[#333333] hover:bg-[#444444] text-white flex flex-col items-center justify-center gap-0.5 whitespace-nowrap"
-                  >
-                    <span className="text-[12px] font-medium text-[#BBBBBB] uppercase tracking-wider">Return to</span>
-                    <span className="text-[18px]">{fmtLocation(directed.original!.location)}</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={onReturnToReserved}
+                  disabled={loading}
+                  className="h-[72px] px-5 rounded-[12px] font-ui font-semibold transition-colors disabled:opacity-40 bg-[#333333] hover:bg-[#444444] text-white flex flex-col items-center justify-center gap-0.5 whitespace-nowrap"
+                >
+                  <span className="text-[12px] font-medium text-[#BBBBBB] uppercase tracking-wider">Return to</span>
+                  <span className="text-[18px]">{fmtLocation(view.reservedLocation)}</span>
+                </button>
               </>
             )}
           </div>
@@ -289,7 +154,7 @@ export function SDPVerifyPutModal({
 
         {/* Hand Put only — shown once the "exists elsewhere" fetch resolves with at
             least one same-DPCI XS match other than whatever's currently targeted. */}
-        {isHand && existsElsewhere.some((e) => e.locationId !== directed.directedLocation) && (
+        {isHand && candidates.length > 0 && (
           <button
             type="button"
             onClick={() => setExistsOpen(true)}
@@ -325,12 +190,11 @@ export function SDPVerifyPutModal({
                 doc's own "listing only location and current carton count for each
                 match," no distance cutoff specified). */}
             <div className="flex flex-col border border-[#2A2A2A] rounded-[12px] overflow-y-auto max-h-[420px]">
-              {existsElsewhere.filter((entry) => entry.locationId !== directed.directedLocation).map((entry) => (
+              {candidates.map((entry) => (
                 <button
                   key={entry.locationId}
                   type="button"
-                  onClick={() => void pickExistsElsewhere(entry)}
-                  disabled={redirecting}
+                  onClick={() => { setExistsOpen(false); onRedirect(entry); }}
                   className="w-full flex items-center justify-between px-5 py-3 border-b border-[#1A1A1A] last:border-b-0 text-left hover:bg-[#111111] transition-colors disabled:opacity-40"
                 >
                   <span className="flex items-center gap-2">
@@ -344,7 +208,6 @@ export function SDPVerifyPutModal({
             <button
               type="button"
               onClick={() => setExistsOpen(false)}
-              disabled={redirecting}
               className="self-start h-[48px] px-5 rounded-[10px] border border-[#3A3A3A] font-ui text-[15px] text-white disabled:opacity-40"
             >
               Cancel

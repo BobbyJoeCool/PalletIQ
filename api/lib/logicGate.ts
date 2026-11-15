@@ -20,6 +20,7 @@ import { whereAcceptsPut, acceptsInbound, type HoldCategory } from './locationPo
  * |----------------------------|--------------------------|------------------------------|
  * | SDP directs a put          | `reservePut`             | puts.ts directedPut          |
  * | SDP confirms the put       | `confirmReservation`     | puts.ts confirmPut           |
+ * | SDP confirms a redirect    | `confirmReservationInto` | puts.ts confirmPut           |
  * | SDP unassigns              | `releaseReservation`     | puts.ts unassignPut          |
  * | Reservation times out      | `expireReservation`      | reservationTimer.ts          |
  * | MNP puts / moves a pallet  | `movePallet`             | puts.ts manualConfirm        |
@@ -79,6 +80,9 @@ async function claimReservationTx(tx: Tx, reservationId: number) {
 
 /** The claimed reservation row, as the confirm/release operations return it. */
 export type ClaimedReservation = NonNullable<Awaited<ReturnType<typeof claimReservationTx>>>;
+
+/** Pre-claim check a confirm runs inside its transaction; throwing aborts without claiming. */
+export type VerifyReservation = (reservation: ClaimedReservation, tx: Tx) => void | Promise<void>;
 
 /**
  * CLEAR_LOCATION — preferred `EMPTY`; falls back to `STORED` if another pallet still
@@ -201,11 +205,11 @@ export async function confirmReservationTx(
   tx: Tx,
   reservationId: number,
   workerZ: string,
-  verify?: (reservation: ClaimedReservation) => void,
+  verify?: VerifyReservation,
 ): Promise<{ reservation: ClaimedReservation } & MoveResult> {
   const existing = await tx.reservation.findUnique({ where: { id: reservationId } });
   if (!existing) throw reservationGone();
-  verify?.(existing);
+  await verify?.(existing, tx);
   const reservation = await claimReservationTx(tx, reservationId);
   if (!reservation) throw reservationGone();
   const move = await movePalletTx(tx, {
@@ -217,10 +221,37 @@ export async function confirmReservationTx(
 }
 
 /** SDP confirm in its own transaction (see `confirmReservationTx`). */
-export async function confirmReservation(
-  reservationId: number, workerZ: string, verify?: (reservation: ClaimedReservation) => void,
-) {
+export async function confirmReservation(reservationId: number, workerZ: string, verify?: VerifyReservation) {
   return prisma.$transaction((tx) => confirmReservationTx(tx, reservationId, workerZ, verify));
+}
+
+/**
+ * SDP confirm onto a redirect target (Exists Elsewhere, #215), in the caller's transaction:
+ * `resolveTarget` runs before the claim — it verifies the scan and re-checks the candidate
+ * rule, returning the occupant pallet to consolidate into (throwing aborts without
+ * claiming). Then: claim the reservation, release the reserved location to its revert
+ * status, and consolidate the reservation's pallet into the occupant.
+ * @throws 404 NOT_FOUND if the reservation was already claimed
+ */
+export async function confirmReservationIntoTx(
+  tx: Tx,
+  reservationId: number,
+  resolveTarget: (reservation: ClaimedReservation, tx: Tx) => Promise<number>,
+): Promise<{ reservation: ClaimedReservation; targetPalletId: number; moved: { cartons: number; pallets: number; ssps: number } }> {
+  const existing = await tx.reservation.findUnique({ where: { id: reservationId } });
+  if (!existing) throw reservationGone();
+  const targetPalletId = await resolveTarget(existing, tx);
+  const claimed = await claimAndClearTx(tx, reservationId);
+  if (!claimed) throw reservationGone();
+  const moved = await consolidateIntoTx(tx, { sourcePalletId: claimed.reservation.palletId, targetPalletId });
+  return { reservation: claimed.reservation, targetPalletId, moved };
+}
+
+export async function confirmReservationInto(
+  reservationId: number,
+  resolveTarget: (reservation: ClaimedReservation, tx: Tx) => Promise<number>,
+) {
+  return prisma.$transaction((tx) => confirmReservationIntoTx(tx, reservationId, resolveTarget));
 }
 
 /** Claims a reservation and clears its location; null when it was already claimed. */
