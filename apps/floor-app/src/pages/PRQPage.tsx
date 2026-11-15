@@ -12,6 +12,7 @@ import { apiFetch } from '../lib/api';
 import { useAisleField } from '../lib/useAisleField';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useTabOrder } from '../lib/useTabOrder';
+import { isRangeEndValid } from '../lib/rangeValidation';
 
 // ─── API response types ──────────────────────────────────────────────────────
 
@@ -73,6 +74,9 @@ const FUNCTION_LABELS: Record<string, string> = {
   BK: 'Bulk',
 };
 
+/** Function filter options for L2/L3, in PRQ.md's fixed function order. */
+const FUNCTION_OPTIONS = Object.entries(FUNCTION_LABELS).map(([value, label]) => ({ value, label }));
+
 function formatBatchDate(bd: number): string {
   const year = Math.floor(bd / 1000);
   const day = bd % 1000;
@@ -90,7 +94,9 @@ function formatDpci(dept: number, cls: number, item: number): string {
 
 // ─── Filter Bar ──────────────────────────────────────────────────────────────
 
-function PRQFilterBar() {
+/** @param batchDates - distinct batch dates from the current L1 summary, used as the options
+ *   for L2/L3's editable Batch Date filter (PRQ.md: drill-down pre-fills stay editable). */
+function PRQFilterBar({ batchDates }: { batchDates: number[] }) {
   const { token } = useAuth();
   const { filters, setFilters, currentLevel, setCurrentLevel, setSelectedIndex } = usePRQ();
   const { setMessage } = useMessageBar();
@@ -114,7 +120,7 @@ function PRQFilterBar() {
       return { exists: res.exists, breakdown: [] };
     },
     onResolved: (aisle) => {
-      if (filters.aisleStart && parseInt(aisle, 10) <= parseInt(filters.aisleStart, 10)) {
+      if (!isRangeEndValid(filters.aisleStart, aisle, false)) {
         setMessage({ type: 'error', text: 'End aisle must be higher than the start aisle.' });
         return;
       }
@@ -128,15 +134,47 @@ function PRQFilterBar() {
   const binStartField = useNumpadField('numpad', 3, true);
   const binEndField = useNumpadField('numpad', 3, true);
   const levelField = useNumpadField('numpad', 2, true);
+  const cartonMinField = useNumpadField('numpad', 4, true);
+  const cartonMaxField = useNumpadField('numpad', 4, true);
+
+  /** Bin End confirm — rejects an end that isn't above Start (or has no Start), per PRQ.md. */
+  const confirmBinEnd = (v: string) => {
+    if (!isRangeEndValid(filters.binStart, v, false)) {
+      setMessage({ type: 'error', text: 'End bin must be higher than the start bin.' });
+      binEndField.clear();
+      return;
+    }
+    setFilters((f) => ({ ...f, binEnd: v }));
+  };
+  /** Bin Start confirm — clears a now-invalid Bin End so the pair never goes inconsistent. */
+  const confirmBinStart = (v: string) => {
+    setFilters((f) => (isRangeEndValid(v, f.binEnd, false) ? { ...f, binStart: v } : { ...f, binStart: v, binEnd: '' }));
+    if (!isRangeEndValid(v, filters.binEnd, false)) binEndField.clear();
+  };
+  /** Carton Max confirm — min = max allowed (an exact count), max below min rejected. */
+  const confirmCartonMax = (v: string) => {
+    if (!isRangeEndValid(filters.cartonMin, v, true)) {
+      setMessage({ type: 'error', text: 'Max cartons must be at least the min cartons.' });
+      cartonMaxField.clear();
+      return;
+    }
+    setFilters((f) => ({ ...f, cartonMax: v }));
+  };
+  const confirmCartonMin = (v: string) => {
+    setFilters((f) => (isRangeEndValid(v, f.cartonMax, true) ? { ...f, cartonMin: v } : { ...f, cartonMin: v, cartonMax: '' }));
+    if (!isRangeEndValid(v, filters.cartonMax, true)) cartonMaxField.clear();
+  };
   const workstationRef = useRef<CodePickerFieldHandle>(null);
 
   useTabOrder([
     { fieldId: aisleStart.field.fieldId, activate: aisleStart.focusField },
     { fieldId: aisleEnd.field.fieldId, activate: aisleEnd.focusField },
     { fieldId: workstationRef.current?.fieldId ?? '', activate: () => workstationRef.current?.focus() },
-    { fieldId: binStartField.fieldId, activate: () => binStartField.focus((v: string) => { setFilters((f) => ({ ...f, binStart: v })); }), enabled: currentLevel === 3 },
-    { fieldId: binEndField.fieldId, activate: () => binEndField.focus((v: string) => { setFilters((f) => ({ ...f, binEnd: v })); }), enabled: currentLevel === 3 },
+    { fieldId: binStartField.fieldId, activate: () => binStartField.focus(confirmBinStart), enabled: currentLevel === 3 },
+    { fieldId: binEndField.fieldId, activate: () => binEndField.focus(confirmBinEnd), enabled: currentLevel === 3 },
     { fieldId: levelField.fieldId, activate: () => levelField.focus((v: string) => { setFilters((f) => ({ ...f, level: v })); }), enabled: currentLevel === 3 },
+    { fieldId: cartonMinField.fieldId, activate: () => cartonMinField.focus(confirmCartonMin), enabled: currentLevel === 3 },
+    { fieldId: cartonMaxField.fieldId, activate: () => cartonMaxField.focus(confirmCartonMax), enabled: currentLevel === 3 },
   ]);
 
   const handleWorkstationChange = useCallback((ws: string) => {
@@ -207,6 +245,24 @@ function PRQFilterBar() {
         label="Status"
       />
 
+      {/* L2/L3 editable drill-down filters — pre-filled by zoom-in, still editable (PRQ.md). */}
+      {currentLevel > 1 && (
+        <>
+          <Dropdown
+            value={filters.pullFunction}
+            options={FUNCTION_OPTIONS}
+            onChange={(fn: string) => setFilters((f) => ({ ...f, pullFunction: fn }))}
+            label="Function"
+          />
+          <Dropdown
+            value={filters.batchDate != null ? String(filters.batchDate) : ''}
+            options={batchDates.map((bd) => ({ value: String(bd), label: formatBatchDate(bd) }))}
+            onChange={(bd: string) => setFilters((f) => ({ ...f, batchDate: bd ? parseInt(bd, 10) : null }))}
+            label="Batch Date"
+          />
+        </>
+      )}
+
       {/* Level indicators + back button */}
       {currentLevel > 1 && (
         <button
@@ -223,9 +279,7 @@ function PRQFilterBar() {
         <>
           <NumpadFieldBox
             value={binStartField.value}
-            onFocus={() => binStartField.focus((v: string) => {
-              setFilters((f) => ({ ...f, binStart: v }));
-            })}
+            onFocus={() => binStartField.focus(confirmBinStart)}
             label="Bin Start"
             active={binStartField.isActive}
             width="w-[90px]"
@@ -236,9 +290,7 @@ function PRQFilterBar() {
           />
           <NumpadFieldBox
             value={binEndField.value}
-            onFocus={() => binEndField.focus((v: string) => {
-              setFilters((f) => ({ ...f, binEnd: v }));
-            })}
+            onFocus={() => binEndField.focus(confirmBinEnd)}
             label="Bin End"
             active={binEndField.isActive}
             width="w-[90px]"
@@ -255,6 +307,28 @@ function PRQFilterBar() {
             label="Level"
             active={levelField.isActive}
             width="w-[70px]"
+            boxClass="h-[52px] px-3 rounded-[10px]"
+            valueClass="text-[24px] font-semibold"
+            caretClass="w-[2px] h-[28px]"
+            labelClass="text-[12px]"
+          />
+          <NumpadFieldBox
+            value={cartonMinField.value}
+            onFocus={() => cartonMinField.focus(confirmCartonMin)}
+            label="Cartons Min"
+            active={cartonMinField.isActive}
+            width="w-[100px]"
+            boxClass="h-[52px] px-3 rounded-[10px]"
+            valueClass="text-[24px] font-semibold"
+            caretClass="w-[2px] h-[28px]"
+            labelClass="text-[12px]"
+          />
+          <NumpadFieldBox
+            value={cartonMaxField.value}
+            onFocus={() => cartonMaxField.focus(confirmCartonMax)}
+            label="Cartons Max"
+            active={cartonMaxField.isActive}
+            width="w-[100px]"
             boxClass="h-[52px] px-3 rounded-[10px]"
             valueClass="text-[24px] font-semibold"
             caretClass="w-[2px] h-[28px]"
@@ -579,6 +653,11 @@ export function PRQPage() {
 
   const hasValidFilter = (filters.aisleStart || filters.workstation) && filters.status;
   const isRange = !!(filters.aisleEnd || filters.workstation);
+  // Distinct L1 batch dates, ascending — options for L2/L3's editable Batch Date filter.
+  const batchDateOptions = useMemo(
+    () => [...new Set(summaryRows.map((r) => r.batchDate))].sort((a, b) => a - b),
+    [summaryRows],
+  );
 
   // L1: fetch summary whenever top-level filters change
   useEffect(() => {
@@ -646,6 +725,8 @@ export function PRQPage() {
     if (filters.binStart) params.set('binStart', filters.binStart);
     if (filters.binEnd) params.set('binEnd', filters.binEnd);
     if (filters.level) params.set('level', filters.level);
+    if (filters.cartonMin) params.set('cartonMin', filters.cartonMin);
+    if (filters.cartonMax) params.set('cartonMax', filters.cartonMax);
 
     apiFetch<{ locations: DetailLocation[] }>(`/api/pulls/detail?${params}`, token!)
       .then((res) => setDetailLocations(res.locations))
@@ -653,19 +734,26 @@ export function PRQPage() {
       .finally(() => setLoading(false));
   }, [filters, hasValidFilter, token]);
 
+  // Re-fetch the current drill level whenever one of its editable filters changes — the
+  // zoom-in handlers fetch once on arrival, but PRQ.md has every filter stay live/editable
+  // at L2/L3 (previously, editing Bin/Level after arriving at L3 never re-queried).
+  useEffect(() => {
+    if (currentLevel === 2 && filters.batchDate != null && filters.pullFunction) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-filter-change effect
+      fetchL2(filters.batchDate, filters.pullFunction);
+    } else if (currentLevel === 3 && filters.batchDate != null && filters.pullFunction) {
+      fetchL3(filters.batchDate, filters.pullFunction, filters.drillAisle ?? undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentLevel, filters.batchDate, filters.pullFunction, filters.drillAisle, filters.binStart, filters.binEnd, filters.level, filters.cartonMin, filters.cartonMax]);
+
   // L1 zoom-in handler
   const handleL1ZoomIn = useCallback((row: SummaryRow) => {
-    setFilters((f) => ({ ...f, batchDate: row.batchDate, pullFunction: row.pullFunction }));
+    // The fetch itself happens in the drill-level effect above, off this state change.
+    setFilters((f) => ({ ...f, batchDate: row.batchDate, pullFunction: row.pullFunction, drillAisle: null }));
     setSelectedIndex(null);
-
-    if (isRange) {
-      setCurrentLevel(2);
-      fetchL2(row.batchDate, row.pullFunction);
-    } else {
-      setCurrentLevel(3);
-      fetchL3(row.batchDate, row.pullFunction);
-    }
-  }, [isRange, setFilters, setCurrentLevel, setSelectedIndex, fetchL2, fetchL3]);
+    setCurrentLevel(isRange ? 2 : 3);
+  }, [isRange, setFilters, setCurrentLevel, setSelectedIndex]);
 
   // L2 zoom-in handler
   const handleL2ZoomIn = useCallback((row: SummaryRow) => {
@@ -673,8 +761,7 @@ export function PRQPage() {
     setFilters((f) => ({ ...f, drillAisle: row.aisle! }));
     setSelectedIndex(null);
     setCurrentLevel(3);
-    fetchL3(filters.batchDate!, filters.pullFunction, row.aisle);
-  }, [setFilters, setCurrentLevel, setSelectedIndex, fetchL3, filters.batchDate, filters.pullFunction]);
+  }, [setFilters, setCurrentLevel, setSelectedIndex]);
 
   // Zoom-in from current selection
   const handleZoomIn = useCallback(() => {
@@ -694,7 +781,7 @@ export function PRQPage() {
 
   return (
     <div className="absolute inset-0 flex flex-col gap-3 p-6 select-none">
-      <PRQFilterBar />
+      <PRQFilterBar batchDates={batchDateOptions} />
 
       {!hasValidFilter ? (
         <div className="flex-1 flex items-center justify-center">

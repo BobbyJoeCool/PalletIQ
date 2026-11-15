@@ -18,7 +18,7 @@ Only three container statuses are queryable: **Available**, **Printed**, **Verif
 ## Entry Filters
 
 - **Aisle** (numpad, 3-digit) — uses shared `useAisleField` hook with existence check.
-- **End Aisle** (optional, numpad, 3-digit) — defines a range. Must be higher than Start Aisle.
+- **End Aisle** (optional, numpad, 3-digit) — defines a range. Must be higher than Start Aisle; an End Aisle with no Start Aisle is rejected with the same error (v1.9.1). Range checks share `lib/rangeValidation.ts`'s `isRangeEndValid`.
 - **Workstation** (keyboard, CodePickerField via `WorkstationField`) — mutually exclusive with Aisle fields. Entering a workstation clears the aisle fields, and vice versa.
 - **Status** (dropdown) — required, defaults to unselected. Available / Printed / Verified only.
 
@@ -50,7 +50,14 @@ Shown only for range/workstation-scoped queries. Same batch-date/function totals
 
 Shows individual locations with container quantity totals.
 
-**Additional filters:** Bin range (start/end), Level.
+**Additional filters:** Bin range (start/end), Level, Carton count range (Cartons Min / Cartons Max).
+
+**(v1.9.1, #135 gap-fill)**
+- **Bin End** must be higher than Bin Start ("End bin must be higher than the start bin."); a Bin End with no Bin Start is rejected the same way. Changing Bin Start to a value that invalidates the current Bin End clears Bin End.
+- **Cartons Min / Max** — inclusive range on each location's total pull cartons for this batch/function (API `cartonMin`/`cartonMax`). Either bound may be used alone; Min = Max expresses an exact count. Max below Min is rejected ("Max cartons must be at least the min cartons.").
+- **Function** and **Batch Date** dropdowns appear at L2 and L3, pre-filled by zoom-in and editable (Batch Date options are the current L1 summary's distinct batch dates).
+- Every L2/L3 filter change re-queries live. Previously, editing Bin/Level after arriving at L3 never re-fetched.
+- **Deferred:** PRQ.md's Breakpack row (Conveyable / Breakpack Cartons / Loose SSPs) and a true Bulk row wait on #195 (Breakpack workflow) and #137 (Bulk Pull). Breakpack-Workflow.md later ruled out a separate BKP pull function.
 
 **Row:** `{Aisle-Bin-Level}` — `Cartons: ## Pallets: ## SSPs: ##`
 
@@ -74,7 +81,7 @@ Full-screen overlay showing complete detail for one pull:
 ## API Endpoints
 
 - `GET /api/pulls/summary` — query params: `aisleStart`, `aisleEnd`, `workstation`, `status`, `batchDate`, `pullFunction`, `byAisle`. Returns `{ rows: SummaryRow[] }`.
-- `GET /api/pulls/detail` — query params: same as summary plus `aisle`, `binStart`, `binEnd`, `level`. Returns `{ locations: DetailLocation[] }`.
+- `GET /api/pulls/detail` — query params: same as summary plus `aisle`, `binStart`, `binEnd`, `level`, `cartonMin`, `cartonMax` (non-negative integers; 400 `INVALID_INPUT` otherwise). Returns `{ locations: DetailLocation[] }`.
 
 ## State Persistence
 
@@ -97,6 +104,8 @@ both directions), inside the `PRQFilterBar` component:
 4. Bin Start *(Level 3 drill-down only)*
 5. Bin End *(Level 3 drill-down only)*
 6. Level *(Level 3 drill-down only)*
+7. Cartons Min *(Level 3 drill-down only)*
+8. Cartons Max *(Level 3 drill-down only)*
 
-Fields 4-6 are enabled only when the current drill-down level is L3
+Fields 4-8 are enabled only when the current drill-down level is L3
 (location-level).
