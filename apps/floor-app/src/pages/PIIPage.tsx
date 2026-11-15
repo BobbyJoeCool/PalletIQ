@@ -450,6 +450,9 @@ export function PIIPage() {
                   ref={sspsRef}
                   sspPerCarton={vcpSspState.sspPerCarton}
                   onChange={setSspsState}
+                  // Feature 12 (#167): confirming auto-advances to the next edit field in
+                  // tab order (Full Pallets), matching the VCP/SSP-family fields.
+                  onConfirm={() => setTimeout(() => palletsEdit.focus(), 50)}
                   setMessage={setMessage}
                   playAlert={playAlert}
                   width="w-[140px]"
