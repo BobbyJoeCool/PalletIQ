@@ -153,6 +153,8 @@ flowchart TD
 
 ## Tab Order
 
+**(v1.10.0, #214)** Tab / Back Tab no longer follow a hand-written slot list. They move along the field boxes rendered on screen, in layout order (`lib/fieldSequence.ts`), wrapping at both ends and scoped to the topmost open modal. A field that isn't rendered (or is disabled) is skipped. The order below is what that produces.
+
 Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
 both directions):
 

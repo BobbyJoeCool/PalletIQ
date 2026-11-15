@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle } from 'react';
 import { useCodePickerField } from '../../lib/useCodePickerField';
 import { INVALID_WASH } from '../../lib/invalidWash';
+import { fieldBoxAttrs } from '../../lib/fieldSequence';
 
 export interface CodeOption { code: string; desc: string }
 
@@ -71,7 +72,6 @@ interface CodePickerFieldProps {
  *  reliably re-fire on every chain pass rather than only the first. */
 export interface CodePickerFieldHandle {
   focus: () => void;
-  fieldId: string;
 }
 
 /**
@@ -92,7 +92,7 @@ export const CodePickerField = forwardRef<CodePickerFieldHandle, CodePickerField
   });
   const invalid = forcedInvalid || computedInvalid;
 
-  useImperativeHandle(ref, () => ({ focus: focusField, fieldId: field.fieldId }));
+  useImperativeHandle(ref, () => ({ focus: focusField }));
 
   const boxHeight = size === 'compact' ? 'h-[52px]' : 'h-[64px]';
   const textSize = size === 'compact' ? 'text-[20px]' : 'text-[26px]';
@@ -107,6 +107,7 @@ export const CodePickerField = forwardRef<CodePickerFieldHandle, CodePickerField
           onClick={focusField}
           disabled={disabled}
           aria-label={ariaLabel}
+          {...fieldBoxAttrs(field.isActive)}
           className={`flex-1 min-w-0 flex items-center justify-center ${boxHeight} px-4 rounded-[12px] border-2 disabled:opacity-40 transition-colors ${
             invalid ? INVALID_WASH : field.isActive ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
           }`}

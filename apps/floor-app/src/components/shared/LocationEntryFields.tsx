@@ -5,6 +5,7 @@ import { INVALID_WASH } from '../../lib/invalidWash';
 import { useNumpadField } from '../../lib/useNumpadField';
 import { LocationDemoScannerBar } from './LocationDemoScannerBar';
 import { splitLocationId } from '@shared/location';
+import { advanceField, fieldBoxAttrs } from '../../lib/fieldSequence';
 
 interface LocationEntryFieldsProps {
   /** Called once a location is resolved, either by a barcode scan (in any field), by
@@ -160,9 +161,6 @@ interface LocationEntryFieldsProps {
 }
 
 export interface LocationEntryFieldsHandle {
-  aisleFieldId: string;
-  binFieldId: string;
-  levelFieldId: string;
   focusAisle: () => void;
   focusBin: () => void;
   focusLevel: () => void;
@@ -272,9 +270,6 @@ export const LocationEntryFields = forwardRef<LocationEntryFieldsHandle, Locatio
   }
 
   useImperativeHandle(ref, () => ({
-    aisleFieldId: aisleField.fieldId,
-    binFieldId: binField.fieldId,
-    levelFieldId: levelField.fieldId,
     focusAisle: focusAisleField,
     focusBin: focusBinField,
     focusLevel: focusLevelField,
@@ -343,7 +338,7 @@ export const LocationEntryFields = forwardRef<LocationEntryFieldsHandle, Locatio
         .then(({ exists }) => setInternalAisleInvalid(!exists))
         .catch(() => setInternalAisleInvalid(true));
     }
-    setTimeout(() => focusBinField(), 50);
+    advanceField(); // Aisle → Bin (field sequence, #214)
   }
 
   /** Bin field submit: an 8-digit value is a full-barcode override; a 6-digit value is a
@@ -376,7 +371,7 @@ export const LocationEntryFields = forwardRef<LocationEntryFieldsHandle, Locatio
       onResolved((lockedAisle ?? aisleValueRef.current) + v, false);
       return;
     }
-    setTimeout(() => focusLevelField(), 50);
+    advanceField(); // Bin → Level (field sequence, #214)
   }
 
   /** Level field submit: an 8-digit value is a full-barcode override; a 6-digit value is a
@@ -451,7 +446,7 @@ export const LocationEntryFields = forwardRef<LocationEntryFieldsHandle, Locatio
             </span>
           </div>
         ) : (
-          <button type="button" onClick={focusAisleField} disabled={disabled} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${boxClasses(aisleField.isActive, aisleInvalid)}`}>
+          <button type="button" onClick={focusAisleField} disabled={disabled} {...fieldBoxAttrs(aisleField.isActive)} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${boxClasses(aisleField.isActive, aisleInvalid)}`}>
             <span className={`font-data ${textSize} font-medium text-white`}>{aisleField.value || <span className="text-[#444]">—</span>}</span>
             {aisleField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
           </button>
@@ -459,7 +454,7 @@ export const LocationEntryFields = forwardRef<LocationEntryFieldsHandle, Locatio
       </div>
       <div className={`flex flex-col gap-1 ${binWidth}`}>
         <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Bin</span>
-        <button type="button" onClick={focusBinField} disabled={disabled} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${boxClasses(binField.isActive, binInvalid)}`}>
+        <button type="button" onClick={focusBinField} disabled={disabled} {...fieldBoxAttrs(binField.isActive)} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${boxClasses(binField.isActive, binInvalid)}`}>
           <span className={`font-data ${textSize} font-medium text-white`}>{binField.value || <span className="text-[#444]">—</span>}</span>
           {binField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
         </button>
@@ -473,7 +468,7 @@ export const LocationEntryFields = forwardRef<LocationEntryFieldsHandle, Locatio
             </span>
           </div>
         ) : (
-          <button type="button" onClick={focusLevelField} disabled={disabled} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${boxClasses(levelField.isActive, levelInvalid)}`}>
+          <button type="button" onClick={focusLevelField} disabled={disabled} {...fieldBoxAttrs(levelField.isActive)} className={`flex items-center ${boxHeight} px-4 rounded-[10px] border-2 transition-colors disabled:opacity-40 ${boxClasses(levelField.isActive, levelInvalid)}`}>
             <span className={`font-data ${textSize} font-medium text-white`}>{levelField.value || <span className="text-[#444]">—</span>}</span>
             {levelField.isActive && <span className={`inline-block w-[2px] ${barHeight} bg-[#CC0000] ml-2 animate-pulse rounded-sm`} />}
           </button>

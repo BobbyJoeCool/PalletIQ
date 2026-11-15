@@ -528,8 +528,5 @@ next to the zone summary, not a bug where the log renders twice (it's the same
 
 ## Tab Order
 
-STG does not wire `useTabOrder`. The screen's multi-component layout (Master
-Control with its own Aisle/Storage Code/Size/Zone fields, plus three independent
-per-stack field sets each with their own override-gated Aisle/Storage Code/Size/
-Zone/Quantity) would require significant architectural changes to present as a
-single flat tab order. Each field set manages its own focus independently.
+**(v1.10.0, #214)** STG now gets Tab / Back Tab like every other screen: they move along the field boxes rendered on screen in layout order (`lib/fieldSequence.ts`). Master Control's fields come first, then each stack box's fields in turn, wrapping at both ends. No hand-written order is needed, so the multi-component layout that previously kept STG out of Tab navigation no longer matters.
+

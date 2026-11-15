@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { moveField } from '../lib/fieldSequence';
 
 type InputPanel = 'numpad' | 'keyboard' | 'none';
 
-type TabHandler = (direction: 'next' | 'prev', currentFieldId: string | null) => void;
 
 interface NumpadContextValue {
   activePanel: InputPanel;
@@ -18,7 +18,6 @@ interface NumpadContextValue {
    *  so a longer scanner override (e.g. a full 8-digit barcode into a 3-digit Aisle field)
    *  isn't cut short by a shorter field's auto-submit before the whole value lands. */
   isScanningRef: React.RefObject<boolean>;
-  setTabHandler: (handler: TabHandler | null) => void;
 }
 
 const NumpadContext = createContext<NumpadContextValue | null>(null);
@@ -42,7 +41,6 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   // a useCallback closure would be stale for that purpose.
   const activeFieldIdRef = useRef<string | null>(null);
   const isScanningRef = useRef(false);
-  const tabHandlerRef = useRef<TabHandler | null>(null);
   // Guards the synthetic-Enter-on-dismiss block below against firing itself recursively —
   // the outgoing field's own submit callback typically calls hidePanel() as its last step,
   // which is a reentrant setKeyHandler(null) call; without this guard that reentrant call
@@ -107,21 +105,20 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   /** Closes whichever input panel is currently open and clears the active field/handler. */
   const hidePanel = useCallback(() => setKeyHandler(null), [setKeyHandler]);
 
-  const setTabHandler = useCallback((handler: TabHandler | null) => {
-    tabHandlerRef.current = handler;
-  }, []);
 
   /**
    * Dispatches a single key string to the active field handler.
    * Called by Numpad and Keyboard components on each button tap.
-   * Tab/Back Tab are intercepted here and routed to the screen's tab handler
-   * (registered via useTabOrder) instead of the field's own key handler.
+   * Tab/Back Tab are intercepted here and move along the field sequence
+   * (`lib/fieldSequence.ts`) instead of reaching the field's own key handler.
    *
    * @param key - Key string to dispatch (digit, '⌫', 'OK', 'Enter', 'CLEAR', or space)
    */
   const handleKey = useCallback((key: string) => {
-    if ((key === 'Tab' || key === 'Back Tab') && tabHandlerRef.current) {
-      tabHandlerRef.current(key === 'Tab' ? 'next' : 'prev', activeFieldIdRef.current);
+    if (key === 'Tab' || key === 'Back Tab') {
+      // Field sequence (#214): the on-screen field boxes in layout order, scoped to the
+      // topmost open modal — no per-screen slot list.
+      moveField(key === 'Tab' ? 'next' : 'prev');
       return;
     }
     keyHandlerRef.current?.(key);
@@ -154,7 +151,7 @@ export function NumpadProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <NumpadContext.Provider value={{ activePanel, activeFieldId, showNumpad, showKeyboard, hidePanel, setKeyHandler, handleKey, deliverScan, isScanningRef, setTabHandler }}>
+    <NumpadContext.Provider value={{ activePanel, activeFieldId, showNumpad, showKeyboard, hidePanel, setKeyHandler, handleKey, deliverScan, isScanningRef }}>
       {children}
     </NumpadContext.Provider>
   );

@@ -23,9 +23,9 @@ import { INVALID_WASH } from '../lib/invalidWash';
 import { useDpciFields } from '../lib/useDpciFields';
 import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
-import { useTabOrder } from '../lib/useTabOrder';
 import { useUpcField } from '../lib/useUpcField';
 import { reinstateReasons } from '@shared/locationPolicy';
+import { fieldBoxAttrs } from '../lib/fieldSequence';
 
 type Mode = 'single' | 'multiple';
 
@@ -108,6 +108,7 @@ function PrinterField({ value, onFocus, active }: { value: string; onFocus: () =
       <button
         type="button"
         onClick={onFocus}
+        {...fieldBoxAttrs(active)}
         className={`flex items-center ${ENTRY_BOX_HEIGHT} rounded-[10px] border-2 overflow-hidden transition-colors ${active ? 'border-[#CC0000] bg-[#0D0D0D]' : NORMAL_BG}`}
       >
         <span className="flex-1 px-4 font-data text-[18px] font-medium text-white text-left">
@@ -370,27 +371,6 @@ export function PARPage() {
   const focusCartonsPerPallet = useCallback(() => cartonsPerPalletField.focus((v) => { cartonsPerPalletField.set(v.trim()); resetToNumpad(); }), [cartonsPerPalletField, resetToNumpad]);
   const focusPartialCartons = useCallback(() => partialCartonsField.focus((v) => { partialCartonsField.set(v.trim()); resetToNumpad(); }), [partialCartonsField, resetToNumpad]);
 
-  useTabOrder([
-    { fieldId: deptField.fieldId, activate: focusDeptField },
-    { fieldId: classField.fieldId, activate: focusClassField },
-    { fieldId: itemField.fieldId, activate: focusItemField },
-    { fieldId: upcFields.field.fieldId, activate: upcFields.focusField },
-    { fieldId: vcpSspRef.current?.vcpFieldId ?? '', activate: () => vcpSspRef.current?.focusVcp() },
-    { fieldId: vcpSspRef.current?.sspFieldId ?? '', activate: () => vcpSspRef.current?.focusSsp() },
-    { fieldId: sizeFieldRef.current?.fieldId ?? '', activate: () => sizeFieldRef.current?.focus() },
-    { fieldId: cartonsField.fieldId, activate: focusCartons, enabled: mode === 'single' },
-    { fieldId: sspsRef.current?.fieldId ?? '', activate: () => sspsRef.current?.focus(), enabled: mode === 'single' },
-    { fieldId: fullPalletsField.fieldId, activate: focusFullPallets, enabled: mode === 'multiple' },
-    { fieldId: cartonsPerPalletField.fieldId, activate: focusCartonsPerPallet, enabled: mode === 'multiple' },
-    { fieldId: partialCartonsField.fieldId, activate: focusPartialCartons, enabled: mode === 'multiple' },
-    { fieldId: partialSspsRef.current?.fieldId ?? '', activate: () => partialSspsRef.current?.focus(), enabled: mode === 'multiple' },
-    { fieldId: monthField.fieldId, activate: focusMonthField, enabled: !!item?.requiresExpirationDate },
-    { fieldId: dayField.fieldId, activate: focusDayField, enabled: !!item?.requiresExpirationDate },
-    { fieldId: yearField.fieldId, activate: focusYearField, enabled: !!item?.requiresExpirationDate },
-    { fieldId: locRef.current?.aisleFieldId ?? '', activate: () => locRef.current?.focusAisle() },
-    { fieldId: locRef.current?.binFieldId ?? '', activate: () => locRef.current?.focusBin() },
-    { fieldId: locRef.current?.levelFieldId ?? '', activate: () => locRef.current?.focusLevel() },
-  ]);
 
   // ── Row 4: Summary (derived, read-only) ─────────────────────────────────────
   const cartonsNum = cartonsField.value ? parseInt(cartonsField.value, 10) : 0;

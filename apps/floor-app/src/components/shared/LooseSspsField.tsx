@@ -5,7 +5,6 @@ import { checkSspCap } from '../../lib/vcpSspValidation';
 import { NumpadFieldBox } from './NumpadFieldBox';
 
 export interface LooseSspsFieldHandle {
-  fieldId: string;
   focus: () => void;
   set: (value: string) => void;
   clear: () => void;
@@ -69,7 +68,6 @@ export const LooseSspsField = forwardRef<LooseSspsFieldHandle, LooseSspsFieldPro
   function focusField() { field.focus(handleConfirm); }
 
   useImperativeHandle(ref, () => ({
-    fieldId: field.fieldId,
     focus: focusField,
     set(value: string) {
       field.set(value);

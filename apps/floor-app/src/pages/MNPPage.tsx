@@ -19,7 +19,6 @@ import { playAlert } from '../lib/audio';
 import { useDigitInput } from '../lib/useDigitInput';
 import { fmtLocation } from '../lib/fmt';
 import { splitReasonCode } from '../lib/reasonCode';
-import { useTabOrder } from '../lib/useTabOrder';
 import { hasMinRole, type Role } from '@shared/index';
 import { splitLocationId, withLevel } from '@shared/location';
 
@@ -327,12 +326,6 @@ export function MNPPage() {
     palletFieldRef.current?.focus();
   }, []);
 
-  useTabOrder([
-    { fieldId: palletFieldRef.current?.fieldId ?? '', activate: focusPalletField, enabled: screenState === 'ready' },
-    { fieldId: locRef.current?.aisleFieldId ?? '', activate: () => locRef.current?.focusAisle(), enabled: screenState === 'pallet_scanned' },
-    { fieldId: locRef.current?.binFieldId ?? '', activate: () => locRef.current?.focusBin(), enabled: screenState === 'pallet_scanned' },
-    { fieldId: locRef.current?.levelFieldId ?? '', activate: () => locRef.current?.focusLevel(), enabled: screenState === 'pallet_scanned' },
-  ]);
 
   useEffect(() => {
     if (screenState === 'ready') {

@@ -20,10 +20,10 @@ import { usePalletIdField } from '../lib/usePalletIdField';
 import { useDpciFields } from '../lib/useDpciFields';
 import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
-import { useTabOrder } from '../lib/useTabOrder';
 import { RecordActivityPanel } from '../components/shared/RecordActivityPanel';
 import { LooseSspsField, type LooseSspsFieldHandle } from '../components/shared/LooseSspsField';
 import { VcpSspFields, type VcpSspFieldsHandle } from '../components/shared/VcpSspFields';
+import { advanceField } from '../lib/fieldSequence';
 
 /** Formats a location object as its canonical 8-digit id (Aisle+Bin+Level). */
 function location8(loc: { aisle: number; bin: number; level: number }): string {
@@ -248,22 +248,6 @@ export function PIIPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idParam]);
 
-  const isEdit = screenState === 'edit';
-  useTabOrder([
-    { fieldId: pidField.field.fieldId, activate: pidField.focusField, enabled: screenState === 'ready' },
-    { fieldId: dpciFields.deptField.fieldId, activate: dpciFields.focusDeptField, enabled: isEdit },
-    { fieldId: dpciFields.classField.fieldId, activate: dpciFields.focusClassField, enabled: isEdit },
-    { fieldId: dpciFields.itemField.fieldId, activate: dpciFields.focusItemField, enabled: isEdit },
-    { fieldId: vcpSspRef.current?.vcpFieldId ?? '', activate: () => vcpSspRef.current?.focusVcp(), enabled: isEdit },
-    { fieldId: vcpSspRef.current?.sspFieldId ?? '', activate: () => vcpSspRef.current?.focusSsp(), enabled: isEdit },
-    { fieldId: cartonsEdit.field.fieldId, activate: cartonsEdit.focus, enabled: isEdit },
-    { fieldId: sspsRef.current?.fieldId ?? '', activate: () => sspsRef.current?.focus(), enabled: isEdit },
-    { fieldId: palletsEdit.field.fieldId, activate: palletsEdit.focus, enabled: isEdit },
-    { fieldId: monthField.fieldId, activate: focusMonthField, enabled: isEdit },
-    { fieldId: dayField.fieldId, activate: focusDayField, enabled: isEdit },
-    { fieldId: yearField.fieldId, activate: focusYearField, enabled: isEdit },
-  ]);
-
   /** Seeds the edit-mode fields from the currently loaded pallet and switches to the edit state. */
   function enterEditMode() {
     if (!pallet) return;
@@ -450,9 +434,9 @@ export function PIIPage() {
                   ref={sspsRef}
                   sspPerCarton={vcpSspState.sspPerCarton}
                   onChange={setSspsState}
-                  // Feature 12 (#167): confirming auto-advances to the next edit field in
-                  // tab order (Full Pallets), matching the VCP/SSP-family fields.
-                  onConfirm={() => setTimeout(() => palletsEdit.focus(), 50)}
+                  // Feature 12 (#167): confirming auto-advances to the next edit field
+                  // (Full Pallets) along the field sequence (#214).
+                  onConfirm={advanceField}
                   setMessage={setMessage}
                   playAlert={playAlert}
                   width="w-[140px]"

@@ -234,16 +234,5 @@ flowchart TD
 
 ## Tab Order
 
-Tab / Back Tab navigation is wired only in **Range mode** (IM+ only), inside
-the `RangeHoldPanel` component. Single Location mode relies on
-`LocationEntryFields`' own auto-advance chain (Aisle/Bin/Level) and does not
-register a separate `useTabOrder` -- competing parent/child tab handlers would
-conflict.
+**(v1.10.0, #214)** Both modes get Tab / Back Tab from the shared field sequence (`lib/fieldSequence.ts`): the field boxes on screen in layout order, wrapping at both ends. Single Location mode: Aisle, Bin, Level (LocationEntryFields' own Aisle → Bin → Level auto-advance runs along the same sequence). Range mode: Aisle, Start Bin, End Bin, Start Level, End Level. The old parent/child handler conflict that kept Single Location mode out of Tab doesn't arise, because there's only one sequence.
 
-**Range mode** (wraps in both directions):
-
-1. Aisle
-2. Start Bin
-3. End Bin
-4. Start Level
-5. End Level

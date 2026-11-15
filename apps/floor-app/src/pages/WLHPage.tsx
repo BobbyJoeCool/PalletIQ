@@ -17,7 +17,6 @@ import { splitReasonCode } from '../lib/reasonCode';
 import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useLocationRangeFields } from '../lib/useLocationRangeFields';
 import { useNumpadField } from '../lib/useNumpadField';
-import { useTabOrder } from '../lib/useTabOrder';
 import { HOLD_CATEGORIES, HOLD_PLACE_MIN_ROLE } from '@shared/locationPolicy';
 
 type BinSide = 'ALL' | 'ODD' | 'EVEN';
@@ -130,13 +129,6 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
     startBin, endBin, startLevel, endLevel, hasLevelRange, levelRangeValid,
   } = rangeFields;
 
-  useTabOrder([
-    { fieldId: aisleFields.field.fieldId, activate: aisleFields.focusField },
-    { fieldId: startBinField.fieldId, activate: focusStartBin },
-    { fieldId: endBinField.fieldId, activate: focusEndBin },
-    { fieldId: startLevelField.fieldId, activate: focusStartLevel },
-    { fieldId: endLevelField.fieldId, activate: focusEndLevel },
-  ]);
 
   const [binSide, setBinSide] = useState<BinSide>('ALL');
   const [action, setAction] = useState<RangeAction>('PLACE');

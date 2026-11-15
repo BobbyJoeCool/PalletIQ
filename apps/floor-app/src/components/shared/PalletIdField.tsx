@@ -57,7 +57,6 @@ interface PalletIdFieldProps {
  *  screen transitions back to its ready state. Mirrors `CodePickerFieldHandle`. */
 export interface PalletIdFieldHandle {
   focus: () => void;
-  fieldId: string;
 }
 
 /** Exported so a self-validating hook consumer (`usePalletIdField`, e.g. PII) that renders
@@ -88,7 +87,7 @@ export const PalletIdField = forwardRef<PalletIdFieldHandle, PalletIdFieldProps>
     field.focus((v) => onChange(v.trim()));
   }
 
-  useImperativeHandle(ref, () => ({ focus: focusField, fieldId: field.fieldId }));
+  useImperativeHandle(ref, () => ({ focus: focusField }));
 
   // `onChange` read via ref rather than a direct dependency — SDP/MNP don't (and shouldn't
   // need to) wrap their own onChange in useCallback just to keep this memo stable; see

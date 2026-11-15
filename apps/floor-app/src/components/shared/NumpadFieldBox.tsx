@@ -1,4 +1,5 @@
 import { INVALID_WASH, VALID_WASH } from '../../lib/invalidWash';
+import { fieldBoxAttrs } from '../../lib/fieldSequence';
 
 export interface NumpadFieldBoxProps {
   /** Current field value; renders an em-dash placeholder when empty. */
@@ -74,6 +75,7 @@ export function NumpadFieldBox({
       type="button"
       onClick={onFocus}
       disabled={disabled}
+      {...fieldBoxAttrs(active)}
       className={`flex items-center ${centered ? 'justify-center' : ''} ${boxClass} border-2 disabled:opacity-40 transition-colors ${!hasWrapper && width ? width : ''} ${
         invalid ? INVALID_WASH : valid ? VALID_WASH : active && !disabled ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
       }`}

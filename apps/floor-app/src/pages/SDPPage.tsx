@@ -18,7 +18,6 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
-import { useTabOrder } from '../lib/useTabOrder';
 import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 import { SDPVerifyPutModal } from './SDPVerifyPutModal';
 import { createHttpPutsClient, type ConsolidationCandidate } from '../lib/putsClient';
@@ -277,13 +276,6 @@ export function SDPPage() {
     palletFieldRef.current?.focus();
   }, []);
 
-  useTabOrder([
-    { fieldId: aisleFields.field.fieldId, activate: aisleFields.focusField, enabled: screenState !== 'directed' },
-    { fieldId: sizeFieldRef.current?.fieldId ?? '', activate: () => sizeFieldRef.current?.focus(), enabled: screenState !== 'directed' },
-    { fieldId: storageFieldRef.current?.fieldId ?? '', activate: () => storageFieldRef.current?.focus(), enabled: isIM && screenState !== 'directed' },
-    { fieldId: zoneFieldRef.current?.fieldId ?? '', activate: () => zoneFieldRef.current?.focus(), enabled: isIM && screenState !== 'directed' },
-    { fieldId: palletFieldRef.current?.fieldId ?? '', activate: () => palletFieldRef.current?.focus(), enabled: screenState !== 'directed' && !!aisleFields.field.value.trim() },
-  ]);
 
   /** Storage Code override committed via the shared field's onChange — advances to Pallet ID, matching the old numpad-driven behavior. */
   const handleStorageOverrideChange = useCallback((v: string) => {

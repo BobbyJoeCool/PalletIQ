@@ -21,7 +21,6 @@ import { playAlert } from '../lib/audio';
 import { PULL_FUNCTIONS } from '../lib/demoScanner';
 import { useDigitInput } from '../lib/useDigitInput';
 import { useNumpadField } from '../lib/useNumpadField';
-import { useTabOrder } from '../lib/useTabOrder';
 import { fmtLocation } from '../lib/fmt';
 import { splitLocationId, withLevel } from '@shared/location';
 
@@ -438,14 +437,6 @@ export function PIPPage() {
     upcField.focus(handleUpcVerify);
   }, [upcField]);
 
-  useTabOrder([
-    { fieldId: containerField.fieldId, activate: focusContainerField, enabled: screenState === 'ready' },
-    { fieldId: pidFieldRef.current?.fieldId ?? '', activate: focusPidField, enabled: screenState === 'verifying' && cidStatus === 'valid' },
-    { fieldId: upcField.fieldId, activate: focusUpcField, enabled: screenState === 'verifying' && cidStatus === 'valid' },
-    { fieldId: locRef.current?.aisleFieldId ?? '', activate: () => locRef.current?.focusAisle(), enabled: screenState === 'verifying' && cidStatus === 'valid' },
-    { fieldId: locRef.current?.binFieldId ?? '', activate: () => locRef.current?.focusBin(), enabled: screenState === 'verifying' && cidStatus === 'valid' },
-    { fieldId: locRef.current?.levelFieldId ?? '', activate: () => locRef.current?.focusLevel(), enabled: screenState === 'verifying' && cidStatus === 'valid' },
-  ]);
 
   /** Clears Location's three boxes via a full remount; pass autoFocus to also refocus Aisle immediately (matching PID/UPC's clear-and-refocus-on-error behavior). */
   const resetLocationField = useCallback((autoFocus: boolean) => {

@@ -11,7 +11,6 @@ import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
 import { useAisleField } from '../lib/useAisleField';
 import { useNumpadField } from '../lib/useNumpadField';
-import { useTabOrder } from '../lib/useTabOrder';
 import { isRangeEndValid } from '../lib/rangeValidation';
 import { containerStatusLabel } from '@shared/containerStatus';
 
@@ -167,16 +166,6 @@ function PRQFilterBar({ batchDates }: { batchDates: number[] }) {
   };
   const workstationRef = useRef<CodePickerFieldHandle>(null);
 
-  useTabOrder([
-    { fieldId: aisleStart.field.fieldId, activate: aisleStart.focusField },
-    { fieldId: aisleEnd.field.fieldId, activate: aisleEnd.focusField },
-    { fieldId: workstationRef.current?.fieldId ?? '', activate: () => workstationRef.current?.focus() },
-    { fieldId: binStartField.fieldId, activate: () => binStartField.focus(confirmBinStart), enabled: currentLevel === 3 },
-    { fieldId: binEndField.fieldId, activate: () => binEndField.focus(confirmBinEnd), enabled: currentLevel === 3 },
-    { fieldId: levelField.fieldId, activate: () => levelField.focus((v: string) => { setFilters((f) => ({ ...f, level: v })); }), enabled: currentLevel === 3 },
-    { fieldId: cartonMinField.fieldId, activate: () => cartonMinField.focus(confirmCartonMin), enabled: currentLevel === 3 },
-    { fieldId: cartonMaxField.fieldId, activate: () => cartonMaxField.focus(confirmCartonMax), enabled: currentLevel === 3 },
-  ]);
 
   const handleWorkstationChange = useCallback((ws: string) => {
     setFilters((f) => ({ ...f, workstation: ws, aisleStart: '', aisleEnd: '' }));

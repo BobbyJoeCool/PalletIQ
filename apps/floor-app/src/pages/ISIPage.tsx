@@ -12,7 +12,6 @@ import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
 import { INVALID_WASH } from '../lib/invalidWash';
 import { useDpciFields } from '../lib/useDpciFields';
-import { useTabOrder } from '../lib/useTabOrder';
 import { useUpcField } from '../lib/useUpcField';
 
 interface LocationsResponse {
@@ -96,12 +95,6 @@ export function ISIPage() {
   });
   useEffect(() => { clearUpcFieldRef.current = upcFields.clear; });
 
-  useTabOrder([
-    { fieldId: deptField.fieldId, activate: focusDeptField },
-    { fieldId: classField.fieldId, activate: focusClassField },
-    { fieldId: itemField.fieldId, activate: focusItemField },
-    { fieldId: upcFields.field.fieldId, activate: upcFields.focusField },
-  ]);
 
   useEffect(() => {
     const id = setTimeout(() => focusDeptField(), 50);

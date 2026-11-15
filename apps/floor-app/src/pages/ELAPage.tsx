@@ -13,7 +13,6 @@ import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useStorageCodes } from '../lib/useStorageCodes';
-import { useTabOrder } from '../lib/useTabOrder';
 import { useWorkstations, type Workstation } from '../lib/useWorkstations';
 
 type AisleRow = AisleSizeRow;
@@ -171,13 +170,6 @@ export function ELAPage() {
     if (inv) setMessage({ type: 'error', text: 'Invalid Workstation' });
   }, [setMessage]);
 
-  useTabOrder([
-    { fieldId: storageCodeRef.current?.fieldId ?? '', activate: () => storageCodeRef.current?.focus() },
-    { fieldId: sizeFieldRef.current?.fieldId ?? '', activate: () => sizeFieldRef.current?.focus() },
-    { fieldId: aisleStartFields.field.fieldId, activate: aisleStartFields.focusField },
-    { fieldId: aisleEndFields.field.fieldId, activate: aisleEndFields.focusField },
-    { fieldId: workstationRef.current?.fieldId ?? '', activate: () => workstationRef.current?.focus() },
-  ]);
 
   /** Workstation exclude filter (GitHub #125) — toggling the filter chip itself, or
    *  toggling one workstation's membership in the excluded set. */

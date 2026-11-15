@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { FIELD_SCOPE_ATTR } from '../../lib/fieldSequence';
 
 interface ModalOverlayProps {
   children: ReactNode;
@@ -68,7 +69,7 @@ export function ModalOverlay({
       data-testid={testId}
       className={`absolute inset-0 bg-black/80 flex ${POSITION_CLASSES[position]} z-50 ${backdropClassName}`}
     >
-      <div className={`bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] ${padding} ${width} ${shadow ? 'shadow-2xl' : ''} ${cardClassName}`}>
+      <div {...{ [FIELD_SCOPE_ATTR]: '' }} className={`bg-[#0D0D0D] border border-[#2A2A2A] rounded-[20px] ${padding} ${width} ${shadow ? 'shadow-2xl' : ''} ${cardClassName}`}>
         {children}
       </div>
     </div>
