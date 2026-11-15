@@ -4,6 +4,7 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.2.7 — 2026-11-15](#127--2026-11-15)
 - [1.2.6 — 2026-08-28](#126--2026-08-28)
 - [1.2.5 — 2026-08-26](#125--2026-08-26)
 - [1.2.4 — 2026-08-21](#124--2026-08-21)
@@ -13,6 +14,27 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 - [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
+
+---
+
+## [1.2.7] — 2026-11-15
+
+Backend for floor-app's `[1.9.1]` entry.
+
+### 1.2.7 — Fixed
+
+- **`placeRangeHold` clears reservations** (#209) — RESERVED locations in each bucket whose
+  hold lands (placed/upgraded) are collected before the bucket's write and cleared via the
+  Logic Gate's `clearLocation` (`overrideRevert: 'EMPTY'`). `reservationsCleared` added to the
+  `RANGE_HOLD` activity-log details.
+- **`cancelContainer` releases pull-pending pallets** (#210) — new Logic Gate intent
+  `releasePullPendingIfNoOpenContainersTx` runs inside the cancel transaction (Full Case and
+  SSP Master); response gains `palletReleased: boolean`.
+
+### 1.2.7 — Added
+
+- **`GET /api/pulls/detail`: `cartonMin` / `cartonMax`** (#135) — inclusive range on each
+  location's total pull cartons; non-negative integers, 400 `INVALID_INPUT` otherwise.
 
 ---
 
