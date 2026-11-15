@@ -47,6 +47,36 @@ export interface VcpSspFieldsProps {
   separator?: React.ReactNode;
   /** Flex classes for the group-wash wrapper div. */
   wrapperClass?: string;
+  /**
+   * How the component's own derived "SSPs per Carton" display renders (issue #165 — the
+   * display is owned here, not re-implemented per screen):
+   * - `stacked` — label above value, sized to sit beside labeled entry boxes (PAR)
+   * - `inline` — "{n} SSPs per Carton" as a small trailing caption (PII Edit mode)
+   * - `none` — omitted
+   */
+  sspPerCartonDisplay?: 'stacked' | 'inline' | 'none';
+}
+
+/**
+ * The derived "SSPs per Carton" readout (`vcp / ssp`), blank until both fields hold a valid,
+ * evenly dividing pair. Purely presentational — `VcpSspFields` owns the value.
+ */
+function SspPerCartonDisplay({ value, variant }: { value: number | null; variant: 'stacked' | 'inline' }) {
+  if (variant === 'inline') {
+    return (
+      <span className="font-ui text-[13px] text-[#9A9A9A]" data-testid="ssp-per-carton">
+        {value != null ? `${value} SSPs per Carton` : ''}
+      </span>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1 w-[160px]">
+      <span className="font-ui font-medium text-[#9A9A9A] uppercase tracking-wider text-[13px]">SSPs per Carton</span>
+      <span className="flex items-center font-data font-medium text-[#CFCFCF] h-[60px] text-[20px]" data-testid="ssp-per-carton">
+        {value != null ? String(value) : <span className="text-[#444]">—</span>}
+      </span>
+    </div>
+  );
 }
 
 export const VcpSspFields = forwardRef<VcpSspFieldsHandle, VcpSspFieldsProps>(function VcpSspFields({
@@ -64,10 +94,14 @@ export const VcpSspFields = forwardRef<VcpSspFieldsHandle, VcpSspFieldsProps>(fu
   sspWidth = 'w-[126px]',
   separator,
   wrapperClass = 'flex items-end gap-4',
+  sspPerCartonDisplay = 'none',
 }, ref) {
   const vcpField = useNumpadField();
   const sspField = useNumpadField();
   const [invalid, setInvalid] = useState(false);
+  // Committed (confirmed/set) pair's derived ratio — drives the owned display. Tracks
+  // confirmed values only, not in-progress numpad typing, so it never flickers mid-entry.
+  const [sspPerCarton, setSspPerCarton] = useState<number | null>(null);
 
   const vcpValueRef = useRef('');
   const sspValueRef = useRef('');
@@ -79,6 +113,7 @@ export const VcpSspFields = forwardRef<VcpSspFieldsHandle, VcpSspFieldsProps>(fu
   const runCheck = useCallback((vcp: string, ssp: string) => {
     const { ratioInvalid, sspPerCarton } = checkVcpSspRatio(vcp, ssp);
     setInvalid(ratioInvalid);
+    setSspPerCarton(sspPerCarton);
     if (ratioInvalid) {
       setMessage({ type: 'error', text: 'SSP must divide evenly into VCP' });
       playAlertFn?.('warning');
@@ -119,6 +154,7 @@ export const VcpSspFields = forwardRef<VcpSspFieldsHandle, VcpSspFieldsProps>(fu
       sspValueRef.current = ssp;
       const { sspPerCarton, ratioInvalid } = checkVcpSspRatio(vcp, ssp);
       setInvalid(ratioInvalid);
+      setSspPerCarton(sspPerCarton);
       onChangeRef.current?.({ vcpValue: vcp, sspValue: ssp, sspPerCarton, invalid: ratioInvalid });
     },
     markInvalid() {
@@ -131,7 +167,7 @@ export const VcpSspFields = forwardRef<VcpSspFieldsHandle, VcpSspFieldsProps>(fu
     },
   }));
 
-  return (
+  const group = (
     <div className={`rounded-[10px] ${invalid ? `${INVALID_WASH} border-2 p-1` : ''} ${wrapperClass}`}>
       <NumpadFieldBox
         label={vcpLabel}
@@ -157,5 +193,13 @@ export const VcpSspFields = forwardRef<VcpSspFieldsHandle, VcpSspFieldsProps>(fu
         caretClass={caretClass}
       />
     </div>
+  );
+
+  if (sspPerCartonDisplay === 'none') return group;
+  return (
+    <>
+      {group}
+      <SspPerCartonDisplay value={sspPerCarton} variant={sspPerCartonDisplay} />
+    </>
   );
 });

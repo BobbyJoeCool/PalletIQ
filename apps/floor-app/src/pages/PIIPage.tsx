@@ -435,6 +435,7 @@ export function PIIPage() {
                   sspWidth="w-[90px]"
                   separator={<span className="text-[#555]">/</span>}
                   wrapperClass="flex items-center gap-3"
+                  sspPerCartonDisplay="inline"
                 />
                 <CurrentValue>{pallet.vcp}/{pallet.ssp}</CurrentValue>
               </div>
