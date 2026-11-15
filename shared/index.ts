@@ -21,7 +21,8 @@ export type LocationStatus =
 
 export type LocationSize = 'XS' | 'HS' | 'S' | 'M' | 'L';
 
-export type HoldCategory = 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM';
+import type { HoldCategory } from './locationPolicy.js';
+export * from './locationPolicy.js';
 
 // CA_PULL_PEND/FP_PULL_PEND (v1.6.9) replace the never-implemented generic 'PULL_PENDING'
 // pallet value — CA_PULL_PEND covers both CA (Carton Air) and CF (Carton Floor) pull

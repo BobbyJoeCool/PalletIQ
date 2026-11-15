@@ -10,6 +10,7 @@ import { parseLocationBarcode, formatLocationId as locationString } from '../lib
 import { clearLocation, putComplete, reservePut, zeroPallet } from '../lib/logicGate.js';
 import { coercePalletId } from '../lib/palletId.js';
 import { formatDpci } from '../lib/dpci.js';
+import { putDecision } from '../lib/locationPolicy.js';
 
 /**
  * Atomically stores a pallet at a new location (PUT_COMPLETE, via the Logic Gate — #149).
@@ -509,37 +510,17 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
   ]);
   if (!destLocation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
-  // Contraction gate — blocks all puts to a contracted location; Worker cannot override,
-  // IM+ can after explicit acknowledgement.
-  if (destLocation.contraction) {
-    if (!hasMinRole(auth.role, 'IM')) {
-      throw Object.assign(new Error('CONTRACTED'), { status: 403 });
-    }
-    if (!body.acknowledgeContraction) {
-      throw Object.assign(new Error('CONTRACTION_CONFIRM_REQUIRED'), { status: 409 });
-    }
-  }
-
-  // Hold gate (#92) — mirrors findNextLocation's NOT_HELD_FILTER (zoneLogic.ts): HOLD_OUT
-  // never blocks a put (outbound-only). HOLD_IN/HOLD_BOTH use the same override pattern as
-  // Contraction above (Worker hard-blocked, IM+ can proceed after explicit acknowledgement).
-  // HOLD_PERM is a harder, no-override block for every role — matching how
-  // HOLD_REMOVE_MIN_ROLE already treats Permanent as the most protected hold tier
-  // elsewhere in the app (locations.ts) — per product decision, unlike Contraction there's
-  // no acknowledgement path that lets even an IM+ worker put onto a Hold Permanent location.
-  if (destLocation.holdCategory === 'HOLD_PERM') {
-    throw Object.assign(new Error('DESTINATION_HOLD_PERM'), { status: 403 });
-  }
-  if (destLocation.holdCategory === 'HOLD_IN' || destLocation.holdCategory === 'HOLD_BOTH') {
-    if (!hasMinRole(auth.role, 'IM')) {
-      throw Object.assign(new Error('DESTINATION_ON_HOLD'), { status: 403 });
-    }
-    if (!body.acknowledgeHold) {
-      throw Object.assign(new Error('HOLD_CONFIRM_REQUIRED'), {
-        status: 409,
-        data: { holdCategory: destLocation.holdCategory },
-      });
-    }
+  // Contraction + hold gates (#92) — the location acceptance policy's putDecision (#212):
+  // contracted → Worker denied, IM+ must acknowledge; HOLD_PERM → denied for every role;
+  // HOLD_IN/HOLD_BOTH → Worker denied, IM+ must acknowledge; HOLD_OUT never blocks a put.
+  const gate = putDecision(destLocation, auth.role, {
+    contraction: body.acknowledgeContraction, hold: body.acknowledgeHold,
+  });
+  if (gate.kind !== 'allow') {
+    throw Object.assign(new Error(gate.code), {
+      status: gate.httpStatus,
+      ...(gate.code === 'HOLD_CONFIRM_REQUIRED' && { data: { holdCategory: destLocation.holdCategory } }),
+    });
   }
 
   // Record whether the destination was already occupied or staged before the move.

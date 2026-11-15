@@ -5,7 +5,8 @@ import { withHandler } from '../lib/response.js';
 import { requireAuth, requireRole, hasMinRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
-import { sideOf, NOT_HELD_FILTER } from '../lib/zoneLogic.js';
+import { sideOf } from '../lib/zoneLogic.js';
+import { whereAcceptsPut, countsAsOpenCapacity, HOLD_PLACE_MIN_ROLE, HOLD_REMOVE_MIN_ROLE, holdTransition, isHoldCategory, resolveRangePlace, resolveRangeRelease, type HoldCategory, type RangePlaceOutcome } from '../lib/locationPolicy.js';
 import { formatDpci } from '../lib/dpci.js';
 import type { Role } from '../lib/jwt.js';
 import { clearLocation } from '../lib/logicGate.js';
@@ -14,21 +15,8 @@ import { validateReasonCode } from '../lib/reasonCodes.js';
 // Canonical ascending size order (mirrors SIZES in src/pages/ELAPage.tsx and STGPage.tsx).
 const SIZE_ORDER = ['XS', 'HS', 'S', 'M', 'L'];
 
-// Minimum role to place / remove each hold category, per DevNotes/Screen-Specs/WLH.md's
-// hold table. Hold Both may be *placed* by any role (WORKER is the lowest rank, so this
-// is effectively "no restriction") but only removed by IM+.
-const HOLD_PLACE_MIN_ROLE: Record<string, Role> = {
-  HOLD_IN: 'IM',
-  HOLD_OUT: 'IM',
-  HOLD_BOTH: 'WORKER',
-  HOLD_PERM: 'LEAD',
-};
-const HOLD_REMOVE_MIN_ROLE: Record<string, Role> = {
-  HOLD_IN: 'IM',
-  HOLD_OUT: 'IM',
-  HOLD_BOTH: 'IM',
-  HOLD_PERM: 'LEAD',
-};
+// Hold role tables (HOLD_PLACE_MIN_ROLE / HOLD_REMOVE_MIN_ROLE) and the range hold
+// hierarchy live in the location acceptance policy — shared/locationPolicy.ts (#212).
 
 const PALLET_SUMMARY_SELECT = {
   pid: true, dept: true, class: true, item: true,
@@ -264,12 +252,12 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
     }),
     prisma.location.groupBy({
       by: ['aisle', 'size'],
-      where: { storageCode, status: 'EMPTY', contraction: false, ...NOT_HELD_FILTER, ...aisleWhere },
+      where: { storageCode, status: 'EMPTY', ...whereAcceptsPut(), ...aisleWhere },
       _count: { _all: true },
     }),
     prisma.location.groupBy({
       by: ['aisle', 'size'],
-      where: { storageCode, status: 'STAGED', contraction: false, ...NOT_HELD_FILTER, ...aisleWhere },
+      where: { storageCode, status: 'STAGED', ...whereAcceptsPut(), ...aisleWhere },
       _count: { _all: true },
     }),
   ]);
@@ -396,9 +384,7 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
   for (const loc of locations) {
     if (storageCode && loc.storageCode.toUpperCase() !== storageCode) continue;
     if (size && loc.size.toUpperCase() !== size) continue;
-    if (loc.contraction) continue;
-    if (loc.holdCategory != null && loc.holdCategory !== 'HOLD_OUT') continue;
-    if (loc.status !== 'EMPTY' && loc.status !== 'STAGED') continue;
+    if (!countsAsOpenCapacity(loc)) continue; // location acceptance policy (#212)
     if (!zoneMap.has(loc.zone)) zoneMap.set(loc.zone, new Map());
     const breakdown = zoneMap.get(loc.zone)!;
     const bdKey = `${loc.storageCode}-${loc.size}`;
@@ -529,51 +515,7 @@ async function getRangeLocationCount(req: HttpRequest): Promise<unknown> {
   return { total };
 }
 
-// Hold hierarchy for Range Place, low to high: HI = HO < HB < HP (Range mode only — the
-// single-location Place flow always overwrites outright, no hierarchy). Determines the new
-// hold value and outcome bucket for locations currently holding `existing`; depends only on
-// the (requested, existing) pair, not on any individual location's identity, which is what
-// lets placeRangeHold batch-update by distinct existing-hold bucket instead of row-by-row.
-type PlaceOutcome = 'placed' | 'upgraded' | 'blocked';
-function resolveRangePlace(requested: string, existing: string | null): { next: string; outcome: PlaceOutcome } {
-  if (requested === 'HOLD_PERM') return { next: 'HOLD_PERM', outcome: 'placed' };
-  if (requested === 'HOLD_BOTH') {
-    return existing === 'HOLD_PERM' ? { next: existing, outcome: 'blocked' } : { next: 'HOLD_BOTH', outcome: 'placed' };
-  }
-  // requested is HOLD_IN or HOLD_OUT
-  const opposite = requested === 'HOLD_IN' ? 'HOLD_OUT' : 'HOLD_IN';
-  if (existing === opposite) return { next: 'HOLD_BOTH', outcome: 'upgraded' };
-  if (existing === 'HOLD_BOTH' || existing === 'HOLD_PERM') return { next: existing, outcome: 'blocked' };
-  return { next: requested, outcome: 'placed' };
-}
-
-// Hold hierarchy for Range Release, mirroring resolveRangePlace's shape (issue #123).
-// Unlike Place, Release isn't a flat "always clears" — a chosen release *level* only
-// acts on its own bucket plus whatever downgrades into it, per a confirmed priority
-// order: Hold Permanent is untouched by releasing anything but Hold Permanent itself
-// (releasing Permanent clears everything at/below it, including Both/In/Out); releasing
-// Hold Both clears Both, In, and Out all (Both is treated as a superset of the other
-// two, not just its own exact bucket); releasing Hold In/Out is symmetric — the
-// *opposite* single-direction hold is left untouched (nothing to release), a matching
-// Hold Both downgrades to the opposite direction (releasing just the requested
-// direction's component), and an exact match clears completely.
 type ReleaseOutcome = 'released' | 'downgraded' | 'blocked' | 'untouched';
-function resolveRangeRelease(requested: string, existing: string): { next: string | null; outcome: 'released' | 'downgraded' | 'untouched' } {
-  if (existing === 'HOLD_PERM' && requested !== 'HOLD_PERM') {
-    return { next: existing, outcome: 'untouched' };
-  }
-  if (requested === 'HOLD_PERM' || requested === 'HOLD_BOTH') {
-    // Releasing Permanent clears everything at/below it; releasing Both clears Both
-    // plus pure In/Out (existing is guaranteed one of those three here, since Perm was
-    // already handled above).
-    return { next: null, outcome: 'released' };
-  }
-  // requested is HOLD_IN or HOLD_OUT.
-  const opposite = requested === 'HOLD_IN' ? 'HOLD_OUT' : 'HOLD_IN';
-  if (existing === 'HOLD_BOTH') return { next: opposite, outcome: 'downgraded' };
-  if (existing === requested) return { next: null, outcome: 'released' };
-  return { next: existing, outcome: 'untouched' }; // existing === opposite — nothing to release
-}
 
 /**
  * Places a hold across every location in a single-aisle bin range (issue #14). Requires
@@ -605,7 +547,7 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
     reasonPrefix?: string; reasonNumber?: string;
   };
   const range = parseRangeParams(body);
-  if (!body.holdType || !(body.holdType in HOLD_PLACE_MIN_ROLE) || !body.reasonPrefix || !body.reasonNumber) {
+  if (!isHoldCategory(body.holdType) || !body.reasonPrefix || !body.reasonNumber) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
   requireRole(auth, HOLD_PLACE_MIN_ROLE[body.holdType]);
@@ -619,14 +561,14 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
   // bucket in the same request whose existing-value happens to equal what was just written
   // (exactly HOLD_IN here), double-counting those rows. Counting everything up front against
   // the pre-write state, then applying writes from that frozen snapshot, avoids it.
-  const buckets: { existing: string | null; count: number }[] = [];
+  const buckets: { existing: HoldCategory | null; count: number }[] = [];
   for (const existing of [null, 'HOLD_IN', 'HOLD_OUT', 'HOLD_BOTH', 'HOLD_PERM'] as const) {
     const count = await prisma.location.count({ where: { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing } });
     if (count > 0) buckets.push({ existing, count });
   }
 
   let placed = 0, upgraded = 0, blocked = 0;
-  const breakdown: { existing: string | null; next: string; outcome: PlaceOutcome; count: number }[] = [];
+  const breakdown: { existing: HoldCategory | null; next: HoldCategory; outcome: RangePlaceOutcome; count: number }[] = [];
   // RESERVED locations whose hold actually lands (placed/upgraded, never blocked) — collected
   // before each bucket's write, since the write changes `holdCategory` and would make the
   // bucket's own filter stop matching them afterward. Cleared through the Logic Gate below.
@@ -709,7 +651,7 @@ async function releaseRangeHold(req: HttpRequest): Promise<unknown> {
     startLevel?: unknown; endLevel?: unknown; holdType?: string;
   };
   const range = parseRangeParams(body);
-  if (!body.holdType || !(body.holdType in HOLD_REMOVE_MIN_ROLE)) {
+  if (!isHoldCategory(body.holdType)) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
   const bins = binsInRange(range);
@@ -786,7 +728,7 @@ async function placeHold(req: HttpRequest): Promise<unknown> {
   if (!full) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
   const body = await req.json() as { holdType?: string; reasonPrefix?: string; reasonNumber?: string };
-  if (!body.holdType || !(body.holdType in HOLD_PLACE_MIN_ROLE) || !body.reasonPrefix || !body.reasonNumber) {
+  if (!isHoldCategory(body.holdType) || !body.reasonPrefix || !body.reasonNumber) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
   }
 
@@ -806,8 +748,9 @@ async function placeHold(req: HttpRequest): Promise<unknown> {
   // otherwise replace an existing Hold Permanent with Hold Both, despite never having
   // permission to remove the Perm hold, since Hold Both's own placeRole is WORKER). Re-
   // placing the *same* type isn't a change, so it's exempt from this check.
-  if (previousHoldType && previousHoldType !== body.holdType && !hasMinRole(auth.role, HOLD_REMOVE_MIN_ROLE[previousHoldType])) {
-    throw Object.assign(new Error('FORBIDDEN'), { status: 403 });
+  const transition = holdTransition(isHoldCategory(previousHoldType) ? previousHoldType : null, body.holdType, auth.role);
+  if (transition.kind === 'deny') {
+    throw Object.assign(new Error(transition.code), { status: transition.httpStatus });
   }
 
   await prisma.location.update({
@@ -867,7 +810,7 @@ async function removeHold(req: HttpRequest): Promise<unknown> {
     where: { LocationID: { aisle: full.aisle, bin: full.bin, level: full.level } },
   });
   if (!location) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-  if (!location.holdCategory) throw Object.assign(new Error('NO_HOLD'), { status: 409 });
+  if (!isHoldCategory(location.holdCategory)) throw Object.assign(new Error('NO_HOLD'), { status: 409 });
 
   requireRole(auth, HOLD_REMOVE_MIN_ROLE[location.holdCategory]);
 
@@ -921,9 +864,7 @@ async function checkAisleExists(req: HttpRequest): Promise<unknown> {
   interface Breakdown { storageCode: string; size: string; empty: number; staged: number }
   const breakdownMap = new Map<string, Breakdown>();
   for (const loc of locations) {
-    if (loc.contraction) continue;
-    if (loc.holdCategory != null && loc.holdCategory !== 'HOLD_OUT') continue;
-    if (loc.status !== 'EMPTY' && loc.status !== 'STAGED') continue;
+    if (!countsAsOpenCapacity(loc)) continue; // location acceptance policy (#212)
     const bdKey = `${loc.storageCode}-${loc.size}`;
     if (!breakdownMap.has(bdKey)) {
       breakdownMap.set(bdKey, { storageCode: loc.storageCode, size: loc.size, empty: 0, staged: 0 });

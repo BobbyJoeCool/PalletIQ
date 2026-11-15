@@ -1,6 +1,6 @@
 import prisma from './prisma.js';
 import type { Prisma } from '../generated/prisma/index.js';
-import { NOT_HELD_FILTER } from './zoneLogic.js';
+import { whereAcceptsPut, acceptsInbound } from './locationPolicy.js';
 
 /**
  * The Logic Gate (GitHub #149, design doc `DevNotes/DesignPrompts/
@@ -40,14 +40,10 @@ const RESERVE_PUT_EXPIRY_MINUTES = 5;
 const CONSOLIDATION_EXPIRY_MINUTES = 15;
 const RESERVE_REINSTATE_EXPIRY_MINUTES = 30;
 
-/** Statuses that deny any of the RESERVE_ or STAGE_LOCATION intents outright — same three
- *  hold categories `manualConfirm`'s own hold gate and every RESERVE_ intent in the
- *  design doc use (HOLD_OUT is deliberately excluded — outbound-only, never blocks a
- *  put/stage/reserve, matching `zoneLogic.ts`'s NOT_HELD_FILTER elsewhere in the app). */
-const DENYING_HOLD_CATEGORIES = new Set(['HOLD_IN', 'HOLD_BOTH', 'HOLD_PERM']);
-
+/** RESERVE_ / STAGE_ intents deny a contracted or inbound-held location outright — the rule
+ *  itself is the location acceptance policy's `acceptsInbound` (#212). */
 function deniesReservation(location: { holdCategory: string | null; contraction: boolean }): boolean {
-  return location.contraction || (location.holdCategory != null && DENYING_HOLD_CATEGORIES.has(location.holdCategory));
+  return !acceptsInbound(location);
 }
 
 // ── Pallet-side intents ─────────────────────────────────────────────────────────
@@ -387,7 +383,7 @@ export async function reserveReinstate(aisle: number, bin: number, level: number
  */
 export async function stageLocation(aisle: number, bin: number, level: number): Promise<boolean> {
   const result = await prisma.location.updateMany({
-    where: { aisle, bin, level, status: 'EMPTY', contraction: false, ...NOT_HELD_FILTER },
+    where: { aisle, bin, level, status: 'EMPTY', ...whereAcceptsPut() },
     data: { status: 'STAGED' },
   });
   return result.count > 0;

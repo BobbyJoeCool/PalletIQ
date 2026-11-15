@@ -2,7 +2,7 @@ import { app } from '../lib/functionsRuntime.js';
 import type { HttpRequest, InvocationContext } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
-import { NOT_HELD_FILTER } from '../lib/zoneLogic.js';
+import { whereAcceptsPut } from '../lib/locationPolicy.js';
 import { writeLog } from '../lib/activityLog.js';
 import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genCid } from '../prisma/demoUtils.js';
 
@@ -214,8 +214,8 @@ async function simulateRackPuts(tx: TxClient, resumeFrom: Date, w: ShiftWindow):
     const dest = storageCode
       ? await tx.location.findFirst({
           where: {
-            status: 'EMPTY', contraction: false, storageCode,
-            ...NOT_HELD_FILTER,
+            status: 'EMPTY', storageCode,
+            ...whereAcceptsPut(),
           },
           select: { aisle: true, bin: true, level: true, size: true, zone: true },
         })
@@ -293,8 +293,8 @@ async function simulateGpmStaging(tx: TxClient, resumeFrom: Date, w: ShiftWindow
 
   const pool = await tx.location.findMany({
     where: {
-      status: 'EMPTY', contraction: false, size: { not: 'XS' },
-      ...NOT_HELD_FILTER,
+      status: 'EMPTY', size: { not: 'XS' },
+      ...whereAcceptsPut(),
     },
     select: { aisle: true, bin: true, level: true, size: true, storageCode: true },
   });
@@ -423,8 +423,8 @@ async function seedOlderStagedLocations(tx: TxClient, now: Date): Promise<number
 
   const eligible = await tx.location.findMany({
     where: {
-      status: 'EMPTY', contraction: false, size: { not: 'XS' },
-      ...NOT_HELD_FILTER,
+      status: 'EMPTY', size: { not: 'XS' },
+      ...whereAcceptsPut(),
     },
     select: { aisle: true, bin: true, level: true, storageCode: true, size: true },
     take: 500,

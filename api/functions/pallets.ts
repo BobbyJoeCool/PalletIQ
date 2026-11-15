@@ -12,6 +12,7 @@ import { storeLocationForCreate } from '../lib/logicGate.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
 import { isValidVcpSspRatio, exceedsSspCap } from '../../shared/vcpSsp.js';
 import { classifyExpirationDate } from '../../shared/expiration.js';
+import { reinstateDecision } from '../lib/locationPolicy.js';
 
 /**
  * Retrieves all fields of a pallet, including item UPC/description, current location,
@@ -520,9 +521,13 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
     // the worker types), so this endpoint doesn't need to communicate specifics back —
     // `confirmLocationStatus: true` alone is enough once the frontend has already shown
     // the worker why.
-    const needsConfirm = location.status !== 'EMPTY' || location.holdCategory != null || location.contraction;
-    if (needsConfirm && !body.confirmLocationStatus) {
-      throw Object.assign(new Error('LOCATION_NEEDS_CONFIRM'), { status: 409 });
+    // Location acceptance policy (#212): occupied / inbound-held / contracted / item-vs-
+    // location storage-code mismatch all raise the same warn-then-allow gate. HOLD_OUT no
+    // longer counts (outbound-only), and the storage mismatch is server-enforced (it was
+    // client-only before v1.10.0). The reasons ride along so the client can explain them.
+    const gate = reinstateDecision(location, itemStorageCode, !!body.confirmLocationStatus);
+    if (gate.kind === 'confirm') {
+      throw Object.assign(new Error(gate.code), { status: gate.httpStatus, data: { reasons: gate.reasons } });
     }
 
     locationAisle = parsed.aisle;

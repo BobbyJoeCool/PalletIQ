@@ -18,6 +18,7 @@ import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useLocationRangeFields } from '../lib/useLocationRangeFields';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useTabOrder } from '../lib/useTabOrder';
+import { HOLD_CATEGORIES, HOLD_PLACE_MIN_ROLE } from '@shared/locationPolicy';
 
 type BinSide = 'ALL' | 'ODD' | 'EVEN';
 type RangeAction = 'PLACE' | 'RELEASE';
@@ -149,7 +150,8 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
   // clearing `reasonCode` alone wouldn't reset the field's own internal dropdown selection.
   const [reasonCodeKey, setReasonCodeKey] = useState(0);
 
-  const placeableTypes = (Object.keys(HOLD_LABELS) as HoldCategory[]).filter((t) => hasMinRole(role, HOLD_LABELS[t].placeRole));
+  // Range Place offers every type the role may place (shared policy, #212).
+  const placeableTypes = HOLD_CATEGORIES.filter((t) => hasMinRole(role, HOLD_PLACE_MIN_ROLE[t]));
 
   const aisle = aisleFields.field.value ? parseInt(aisleFields.field.value, 10) : NaN;
   // Combines this screen's own Aisle existence check (issue #161) with the shared hook's

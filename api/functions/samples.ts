@@ -4,7 +4,7 @@ import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
 import { TERMINAL_CONTAINER_STATUSES } from '../lib/eligibility.js';
-import { NOT_HELD_FILTER } from '../lib/zoneLogic.js';
+import { whereAcceptsPut } from '../lib/locationPolicy.js';
 
 /**
  * Returns a random container ID for the PIP screen's demo "Scan Label" buttons.
@@ -149,8 +149,7 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
       where: {
         aisle,
         status: { in: ['EMPTY', 'STAGED'] },
-        contraction: false,
-        ...NOT_HELD_FILTER,
+        ...whereAcceptsPut(),
       },
       select: { storageCode: true, size: true },
       distinct: ['storageCode', 'size'],
@@ -243,8 +242,7 @@ async function samplePalletByStatus(req: HttpRequest, _ctx: InvocationContext): 
       where: {
         aisle,
         status: { in: ['EMPTY', 'STAGED'] },
-        contraction: false,
-        ...NOT_HELD_FILTER,
+        ...whereAcceptsPut(),
       },
       select: { storageCode: true, size: true },
       distinct: ['storageCode', 'size'],

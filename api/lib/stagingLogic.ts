@@ -1,5 +1,5 @@
 import prisma from './prisma.js';
-import { NOT_HELD_FILTER } from './zoneLogic.js';
+import { whereAcceptsPut } from './locationPolicy.js';
 
 export interface StagingCandidate {
   aisle: number;
@@ -52,8 +52,7 @@ export async function findNextStagingLocation(
     where: {
       aisle,
       status: 'EMPTY',
-      contraction: false,
-      ...NOT_HELD_FILTER,
+      ...whereAcceptsPut(),
       ...(opts.storageCode && { storageCode: opts.storageCode }),
       ...(opts.size        && { size:        opts.size }),
       ...(opts.zone != null && { zone: { gte: opts.zone } }),

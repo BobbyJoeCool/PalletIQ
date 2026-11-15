@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { whereAcceptsPut } from './locationPolicy.js';
 
 /**
  * Derives which physical side of the aisle a bin sits on. Per outline.md's Location
@@ -9,18 +10,8 @@ export function sideOf(bin: number): 'odd' | 'even' {
   return bin % 2 === 0 ? 'even' : 'odd';
 }
 
-/**
- * A location "not held" in the sense that blocks a put/stage — excludes HOLD_IN/
- * HOLD_BOTH/HOLD_PERM but allows HOLD_OUT (outbound-only holds don't block putting
- * something new there) and no hold at all. Explicit OR rather than
- * `holdCategory: { notIn: [...] }` — `NOT IN` over a nullable column excludes NULL rows
- * under standard SQL three-valued logic, which would wrongly exclude every location with
- * no hold at all (the vast majority). Canonical definition; spread into a `where` clause
- * alongside other conditions.
- */
-export const NOT_HELD_FILTER: { OR: ({ holdCategory: null } | { holdCategory: string })[] } = {
-  OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }],
-};
+// The "not inbound-held" filter that used to be defined here (NOT_HELD_FILTER) is now
+// derived from the location acceptance policy — see lib/locationPolicy.ts (#212).
 
 export interface EffectiveCriteria {
   // Both always resolve to a real value or resolveEffectiveCriteria throws — see its own
@@ -128,8 +119,7 @@ export async function findNextLocation(
       where: {
         aisle,
         status,
-        ...NOT_HELD_FILTER,
-        contraction: false,
+        ...whereAcceptsPut(),
         size:        opts.size,
         storageCode: opts.storageCode,
         zone: { gte: fromZone },

@@ -25,6 +25,7 @@ import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useTabOrder } from '../lib/useTabOrder';
 import { useUpcField } from '../lib/useUpcField';
+import { reinstateReasons } from '@shared/locationPolicy';
 
 type Mode = 'single' | 'multiple';
 
@@ -485,10 +486,11 @@ export function PARPage() {
   // the location vs. the DPCI... a warning popup should come up") reuses this same
   // warn-then-allow flow rather than a separate dialog, since it's the same shape of
   // decision ("this looks wrong, but continue anyway?"), just a different reason.
-  const storageMismatch = item != null && locationStatusInfo != null && item.storageCode !== locationStatusInfo.storageCode;
-  const locationNeedsWarning = locationStatusInfo != null && (
-    locationStatusInfo.status !== 'EMPTY' || locationStatusInfo.holdCategory != null || locationStatusInfo.contraction || storageMismatch
-  );
+  // The reasons come from the shared location acceptance policy (#212), the same rule the
+  // API's reinstatePallet enforces (HOLD_OUT doesn't count; storage mismatch does).
+  const reinstateWarnings = locationStatusInfo != null ? reinstateReasons(locationStatusInfo, item?.storageCode ?? null) : [];
+  const storageMismatch = reinstateWarnings.includes('STORAGE_MISMATCH');
+  const locationNeedsWarning = reinstateWarnings.length > 0;
 
   /** Builds the specific warning copy for whichever condition(s) actually apply, so the
    *  worker knows exactly what they're overriding before confirming. Status/hold/
@@ -499,7 +501,7 @@ export function PARPage() {
     if (!locationStatusInfo) return '';
     const statusReasons: string[] = [];
     if (locationStatusInfo.status !== 'EMPTY') statusReasons.push(`currently ${locationStatusInfo.status}`);
-    if (locationStatusInfo.holdCategory) statusReasons.push(`on ${HOLD_LABELS[locationStatusInfo.holdCategory].name}`);
+    if (reinstateWarnings.includes('ON_HOLD') && locationStatusInfo.holdCategory) statusReasons.push(`on ${HOLD_LABELS[locationStatusInfo.holdCategory].name}`);
     if (locationStatusInfo.contraction) statusReasons.push('under Contraction');
 
     const sentences: string[] = [];
@@ -523,7 +525,7 @@ export function PARPage() {
    *  than either a plain occupancy conflict or the item simply mapping to the wrong type. */
   function locationWarningTitle(): string {
     if (!locationStatusInfo) return 'Confirm Location';
-    if (locationStatusInfo.holdCategory) return `Location On ${HOLD_LABELS[locationStatusInfo.holdCategory].name}`;
+    if (reinstateWarnings.includes('ON_HOLD') && locationStatusInfo.holdCategory) return `Location On ${HOLD_LABELS[locationStatusInfo.holdCategory].name}`;
     if (locationStatusInfo.contraction) return 'Location On Contraction';
     if (locationStatusInfo.status !== 'EMPTY') return 'Location Occupied';
     if (storageMismatch) return 'Incorrect Storage Code';
