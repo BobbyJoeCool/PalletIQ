@@ -3,8 +3,9 @@ import type { HttpRequest } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
-import { parseLocationBarcode, formatLocationId } from '../lib/locationParser.js';
-import { parseDpci, formatDpci } from '../lib/dpci.js';
+import { parseLocationBarcode } from '../lib/locationParser.js';
+import { parseDpci } from '../lib/dpci.js';
+import { serializeActivityRow } from '../lib/activityLog.js';
 
 /**
  * Filtered activity-log query — the shared read path every reporting screen (IRP, SAR,
@@ -84,26 +85,7 @@ async function getActivity(req: HttpRequest): Promise<unknown> {
     take: 200,
   });
 
-  return entries.map((e) => ({
-    id: e.id,
-    timestamp: e.timestamp,
-    userId: e.userId,
-    actionType: e.actionType,
-    palletId: e.palletId,
-    locationAisle: e.locationAisle,
-    // Only a full Aisle+Bin+Level id counts as a formattable location — some actionTypes
-    // (RESTAGE, RANGE_HOLD, RANGE_REL) store only an aisle, which formatLocationId can't
-    // safely handle (it would previously produce a garbled string here).
-    location: e.locationAisle != null && e.locationBin != null && e.locationLevel != null
-      ? formatLocationId(e.locationAisle, e.locationBin, e.locationLevel)
-      : null,
-    dpci: e.dept != null
-      ? formatDpci(e.dept, e.class!, e.item!)
-      : null,
-    reasonPrefix: e.reasonPrefix,
-    reasonNumber: e.reasonNumber,
-    details: e.details ? JSON.parse(e.details) as unknown : null,
-  }));
+  return entries.map(serializeActivityRow); // shared serializer (#218)
 }
 
 app.http('getActivity', {

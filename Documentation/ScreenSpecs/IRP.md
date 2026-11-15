@@ -91,8 +91,14 @@ zoom in) or the hourly view's Back button.
   - **RP** — `actionType: 'PUT'` rows written by SDP's `confirmPut`.
   - **HP** — `actionType: 'PUT'` rows written by MNP's `manualConfirm` normal path.
   - **CON** — `actionType: 'CONSOLID'` rows written by MNP's consolidate branch.
-  - **GPM** — `actionType: 'STAGE'` rows written by `stageLocations` (mass `restageAisle`
-    stays a separate `RESTAGE` actionType and is never counted, per spec).
+  - **GPM** — `actionType: 'STAGE'` rows written by `stageLocations`. Mass `restageAisle`
+    never counts, per spec: its per-location `STAGE` rows carry no functionCode, and its
+    summary is a separate `RESTAGE` actionType.
+  - **(v1.10.0, #218)** Each of these rows is built by a typed event constructor in
+    `api/lib/activityEvents.ts` (`pulled`, `putCompleted('SDP' | 'MNP')`, `consolidated`,
+    `staged`, `restaged`) that sets its own actionType and functionCode. IRP reads its code
+    list (`IRP_FUNCTION_SOURCES`) from the same module, so the writer and the reader of
+    each code can't drift apart.
 - `ProdGoal` (functionCode, rate, unit, optional second blended rate/unit) — seeded
   reference data, not yet editable from any screen.
 - `Pallet.currentCartons`, best-effort, for HP's "Cartons" field only — a Manual Put's

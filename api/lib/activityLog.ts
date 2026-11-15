@@ -63,3 +63,20 @@ export async function writeLog(entry: LogEntry, client: PrismaOrTxClient = prism
     },
   });
 }
+
+// Row → API serializer lives in the pure lib/activityRow.ts (no Prisma client import, so
+// it's unit-testable); re-exported here for the activity endpoints.
+export { serializeActivityRow, type ActivityRow } from './activityRow.js';
+
+/**
+ * Writes a ScanLog entry (CII's separate action log) — one helper instead of four inline
+ * `scanLog.create({ details: JSON.stringify(...) })` calls (#218).
+ */
+export async function writeScanLog(
+  client: Pick<typeof prisma, 'scanLog'>,
+  entry: { zNumber: string; actionType: string; details: Record<string, unknown> },
+): Promise<void> {
+  await client.scanLog.create({
+    data: { zNumber: entry.zNumber, actionType: entry.actionType, details: JSON.stringify(entry.details) },
+  });
+}

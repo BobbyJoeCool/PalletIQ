@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { IRP_FUNCTION_CODES } from './activityEvents.js';
 
 /**
  * IRP aggregation — turns FunctionAssignment + ActivityLog rows into the per-function
@@ -21,17 +22,8 @@ export type FunctionCode = typeof FUNCTION_ORDER[number];
  *  permanently, this version. No query is ever run for them. */
 const GREYED_FUNCTIONS = new Set<FunctionCode>(['BKP', 'BK']);
 
-/** The 7 functions with a real ActivityLog data path, and the actionType(s)/functionCode
- *  combination each one is queried by. */
-const REAL_FUNCTION_QUERY: Record<string, { actionType: string }> = {
-  CA:  { actionType: 'PULL' },
-  CF:  { actionType: 'PULL' },
-  FP:  { actionType: 'PULL' },
-  RP:  { actionType: 'PUT' },
-  HP:  { actionType: 'PUT' },
-  GPM: { actionType: 'STAGE' },
-  CON: { actionType: 'CONSOLID' },
-};
+// The 7 functions with a real ActivityLog data path, and which typed event writes each,
+// live with the event constructors — lib/activityEvents.ts IRP_FUNCTION_SOURCES (#218).
 
 export interface FunctionSummary {
   functionCode: string;
@@ -227,7 +219,7 @@ export async function getIndividualSummary(workerZ: string, now: Date = new Date
       where: {
         userId: workerZ,
         timestamp: { gte: dayStart },
-        functionCode: { in: Object.keys(REAL_FUNCTION_QUERY) },
+        functionCode: { in: IRP_FUNCTION_CODES },
       },
       select: { functionCode: true, timestamp: true, palletId: true, locationAisle: true, locationBin: true, locationLevel: true, details: true },
       orderBy: { timestamp: 'asc' },

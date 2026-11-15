@@ -3,11 +3,11 @@ import type { HttpRequest, InvocationContext } from '../lib/functionsRuntime.js'
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth, requireRole } from '../lib/permissions.js';
-import { writeLog } from '../lib/activityLog.js';
+import { writeLog, serializeActivityRow } from '../lib/activityLog.js';
 import { generateUniquePid } from '../lib/palletId.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { whereOpenContainer } from '../lib/containerLifecycle.js';
-import { parseDpci, formatDpci } from '../lib/dpci.js';
+import { parseDpci } from '../lib/dpci.js';
 import { storeReinstatedPallets } from '../lib/logicGate.js';
 import type { Prisma } from '../generated/prisma/index.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
@@ -664,21 +664,7 @@ async function getPalletActivity(req: HttpRequest, _ctx: InvocationContext): Pro
     orderBy: { timestamp: 'desc' },
   });
 
-  return entries.map((e) => ({
-    id: e.id,
-    timestamp: e.timestamp,
-    userId: e.userId,
-    actionType: e.actionType,
-    palletId: e.palletId,
-    locationAisle: e.locationAisle,
-    location: e.locationAisle != null && e.locationBin != null && e.locationLevel != null
-      ? formatLocationId(e.locationAisle, e.locationBin, e.locationLevel)
-      : null,
-    dpci: e.dept != null ? formatDpci(e.dept, e.class!, e.item!) : null,
-    reasonPrefix: e.reasonPrefix,
-    reasonNumber: e.reasonNumber,
-    details: e.details ? JSON.parse(e.details) as unknown : null,
-  }));
+  return entries.map(serializeActivityRow); // shared serializer (#218)
 }
 
 app.http('getPalletActivity', {

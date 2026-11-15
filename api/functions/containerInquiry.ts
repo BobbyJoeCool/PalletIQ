@@ -7,6 +7,7 @@ import { validateReasonCode } from '../lib/reasonCodes.js';
 import { formatDpci } from '../lib/dpci.js';
 import { parseCidOrThrow, CID_TYPE, CID_TYPE_LABELS, type CidTypeCode } from '../lib/cidParser.js';
 import { cancelContainerTx } from '../lib/containerLifecycle.js';
+import { writeScanLog } from '../lib/activityLog.js';
 
 // ─── Inquiry (GET) ──────────────────────────────────────────────────────────
 
@@ -436,12 +437,7 @@ async function cancelContainer(req: HttpRequest, _ctx: InvocationContext): Promi
         reasonPrefix, reasonNumber, reasonNote: reasonNote ?? null,
       },
     });
-    await tx.scanLog.create({
-      data: {
-        zNumber: auth.zNumber, actionType: 'CONTAINER_CANCEL',
-        details: JSON.stringify({ cid: canonical, type: CID_TYPE_LABELS[type], reasonPrefix, reasonNumber }),
-      },
-    });
+    await writeScanLog(tx, { zNumber: auth.zNumber, actionType: 'CONTAINER_CANCEL', details: { cid: canonical, type: CID_TYPE_LABELS[type], reasonPrefix, reasonNumber } });
 
     if (type === CID_TYPE.SSP_PULL_MASTER) {
       const pendingChildren = await tx.sSPUnit.findMany({
@@ -495,12 +491,7 @@ async function forceCloseOverpack(req: HttpRequest, _ctx: InvocationContext): Pr
         reasonPrefix, reasonNumber, reasonNote: reasonNote ?? null,
       },
     });
-    await tx.scanLog.create({
-      data: {
-        zNumber: auth.zNumber, actionType: 'OVERPACK_FORCE_CLOSE',
-        details: JSON.stringify({ cid: canonical, reasonPrefix, reasonNumber }),
-      },
-    });
+    await writeScanLog(tx, { zNumber: auth.zNumber, actionType: 'OVERPACK_FORCE_CLOSE', details: { cid: canonical, reasonPrefix, reasonNumber } });
 
     return { cid: canonical, action: 'FORCE_CLOSE' };
   });
@@ -535,12 +526,7 @@ async function reopenOverpack(req: HttpRequest, _ctx: InvocationContext): Promis
         reasonPrefix, reasonNumber, reasonNote: reasonNote ?? null,
       },
     });
-    await tx.scanLog.create({
-      data: {
-        zNumber: auth.zNumber, actionType: 'OVERPACK_REOPEN',
-        details: JSON.stringify({ cid: canonical, reasonPrefix, reasonNumber }),
-      },
-    });
+    await writeScanLog(tx, { zNumber: auth.zNumber, actionType: 'OVERPACK_REOPEN', details: { cid: canonical, reasonPrefix, reasonNumber } });
 
     return { cid: canonical, action: 'REOPEN' };
   });
@@ -580,12 +566,7 @@ async function reassignStrayEach(req: HttpRequest, _ctx: InvocationContext): Pro
         reassignedByZ: auth.zNumber,
       },
     });
-    await tx.scanLog.create({
-      data: {
-        zNumber: auth.zNumber, actionType: 'STRAY_REASSIGN',
-        details: JSON.stringify({ cid: canonical, previousStore, newStore, reasonPrefix, reasonNumber }),
-      },
-    });
+    await writeScanLog(tx, { zNumber: auth.zNumber, actionType: 'STRAY_REASSIGN', details: { cid: canonical, previousStore, newStore, reasonPrefix, reasonNumber } });
 
     return { cid: canonical, previousStore, newStore };
   });

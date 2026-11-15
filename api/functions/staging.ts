@@ -7,6 +7,7 @@ import { writeLog } from '../lib/activityLog.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { findNextStagingLocation } from '../lib/stagingLogic.js';
 import { stageLocation, unstageAisleType } from '../lib/logicGate.js';
+import { staged as stagedEvent, restaged as restagedEvent } from '../lib/activityEvents.js';
 
 /** Throws 404 NOT_FOUND unless at least one Location row exists for the given aisle. */
 async function requireAisleExists(aisle: number): Promise<void> {
@@ -66,17 +67,13 @@ async function stageLocations(req: HttpRequest): Promise<unknown> {
     if (wasStaged) {
       staged.push(formatLocationId(aisle, bin, level));
       last = { bin, level };
-      await writeLog({
+      await writeLog(stagedEvent({
         userId: auth.zNumber,
-        actionType: 'STAGE',
         locationAisle: aisle,
         locationBin: bin,
         locationLevel: level,
-        // IRP GPM Staging count — deliberately not set on restageAisle's RESTAGE
-        // entries below/elsewhere, since GPM Staging must exclude mass restage.
-        functionCode: 'GPM',
         details: { storageCode: body.storageCode, size: body.size },
-      });
+      }));
     }
   }
 
@@ -234,14 +231,13 @@ async function restageAisle(req: HttpRequest): Promise<unknown> {
       const wasStaged = await stageLocation(next.aisle, next.bin, next.level);
       if (!wasStaged) continue;
       staged++;
-      await writeLog({
+      await writeLog(restagedEvent({
         userId: auth.zNumber,
-        actionType: 'STAGE',
         locationAisle: next.aisle,
         locationBin: next.bin,
         locationLevel: next.level,
         details: { method: 'RESTAGE', storageCode: type.storageCode, size: type.size },
-      });
+      }));
     }
 
     results.push({

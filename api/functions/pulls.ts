@@ -7,6 +7,7 @@ import { writeLog } from '../lib/activityLog.js';
 import { parseFullLocationBarcode } from '../lib/locationParser.js';
 import { coercePalletId } from '../lib/palletId.js';
 import { pullContainer } from '../lib/containerLifecycle.js';
+import { pulled } from '../lib/activityEvents.js';
 
 /**
  * Confirms a container pull via one of three independent verification paths: Pallet ID, UPC,
@@ -229,9 +230,8 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
     },
   });
 
-  await writeLog({
+  await writeLog(pulled(body.pullFunction, {
     userId: auth.zNumber,
-    actionType: 'PULL',
     palletId: pallet.pid,
     locationAisle: loc?.aisle,
     locationBin:   loc?.bin,
@@ -239,9 +239,6 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
     dept: pallet.dept,
     class: pallet.class,
     item: pallet.item,
-    // IRP: CA/CF/FP counts are read straight off this pullFunction (BK included for
-    // completeness, though nothing produces a real BK pull today).
-    functionCode: body.pullFunction,
     details: {
       containerId: container.cid,
       pullFunction: body.pullFunction,
@@ -251,7 +248,7 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
       wasScanned: body.wasScanned === true,
       ...(confirmedLevel != null && { confirmedLevel }),
     },
-  });
+  }));
 
   // Build the 8-digit location ID string (or null if the pallet has no location).
   const locationId =

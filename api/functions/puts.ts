@@ -11,6 +11,7 @@ import { reservePut, confirmReservation, releaseReservation, movePallet, consoli
 import { coercePalletId } from '../lib/palletId.js';
 import { formatDpci } from '../lib/dpci.js';
 import { putDecision } from '../lib/locationPolicy.js';
+import { putCompleted, consolidated } from '../lib/activityEvents.js';
 
 // Moving a pallet (clear its prior location + store it at the new one, atomically) is the
 // Logic Gate's movePallet / confirmReservation (#211) — formerly this file's placePallet,
@@ -217,15 +218,12 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
   // this tracking.
   const wasStaged = reservation.wasStaged !== false;
 
-  await writeLog({
+  await writeLog(putCompleted('SDP', {
     userId: auth.zNumber,
-    actionType: 'PUT',
     palletId: reservation.palletId,
     locationAisle: reservation.locationAisle,
     locationBin:   reservation.locationBin,
     locationLevel: reservation.locationLevel,
-    // IRP: this is a Rack Put (System Directed Put) — MNP's own PUT write below is HP.
-    functionCode: 'RP',
     details: {
       reservationId,
       wasMove,
@@ -239,7 +237,7 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
       },
       ...(Object.keys(override).length > 0 && { override }),
     },
-  });
+  }));
 
   return {
     location: locationString(reservation.locationAisle, reservation.locationBin, reservation.locationLevel),
@@ -500,14 +498,12 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
       // (previously the merge and the zeroing were separate writes).
       const moved = await consolidateInto({ sourcePalletId: pallet.pid, targetPalletId: occupant.pid });
 
-      await writeLog({
+      await writeLog(consolidated({
         userId: auth.zNumber,
-        actionType: 'CONSOLID',
         palletId: pallet.pid,
         locationAisle: parsed.aisle,
         locationBin:   parsed.bin,
         locationLevel: body.level,
-        functionCode: 'CON',
         details: {
           targetPalletId: occupant.pid,
           sourcePalletId: pallet.pid,
@@ -517,7 +513,7 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
           method:  'MNP',
           wasContracted: destLocation.contraction,
         },
-      });
+      }));
 
       return {
         consolidated:   true,
@@ -534,20 +530,17 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     palletId, aisle: parsed.aisle, bin: parsed.bin, level: body.level, workerZ: auth.zNumber,
   });
 
-  await writeLog({
+  await writeLog(putCompleted('MNP', {
     userId: auth.zNumber,
-    actionType: 'PUT',
     palletId,
     locationAisle: parsed.aisle,
     locationBin:   parsed.bin,
     locationLevel: body.level,
-    // IRP: this is a Hand Put (Manual Put) — SDP's own PUT write above is RP.
-    functionCode: 'HP',
     details: {
       wasMove, clearedLocation, destinationWasOccupied, destinationWasStaged, method: 'MNP',
       wasContracted: destLocation.contraction,
     },
-  });
+  }));
 
   return {
     location: locationString(parsed.aisle, parsed.bin, body.level),

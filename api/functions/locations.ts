@@ -3,7 +3,7 @@ import type { HttpRequest, InvocationContext } from '../lib/functionsRuntime.js'
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth, requireRole, hasMinRole } from '../lib/permissions.js';
-import { writeLog } from '../lib/activityLog.js';
+import { writeLog, serializeActivityRow } from '../lib/activityLog.js';
 import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { sideOf } from '../lib/zoneLogic.js';
 import { whereAcceptsPut, countsAsOpenCapacity, HOLD_PLACE_MIN_ROLE, HOLD_REMOVE_MIN_ROLE, holdTransition, isHoldCategory, resolveRangePlace, resolveRangeRelease, type HoldCategory, type RangePlaceOutcome } from '../lib/locationPolicy.js';
@@ -960,21 +960,7 @@ async function getLocationActivity(req: HttpRequest, _ctx: InvocationContext): P
     orderBy: { timestamp: 'desc' },
   });
 
-  return entries.map((e) => ({
-    id: e.id,
-    timestamp: e.timestamp,
-    userId: e.userId,
-    actionType: e.actionType,
-    palletId: e.palletId,
-    locationAisle: e.locationAisle,
-    location: e.locationAisle != null && e.locationBin != null && e.locationLevel != null
-      ? formatLocationId(e.locationAisle, e.locationBin, e.locationLevel)
-      : null,
-    dpci: e.dept != null ? formatDpci(e.dept, e.class!, e.item!) : null,
-    reasonPrefix: e.reasonPrefix,
-    reasonNumber: e.reasonNumber,
-    details: e.details ? JSON.parse(e.details) as unknown : null,
-  }));
+  return entries.map(serializeActivityRow); // shared serializer (#218)
 }
 
 app.http('getLocationActivity', {
