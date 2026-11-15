@@ -6,6 +6,7 @@ import { requireAuth } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { parseFullLocationBarcode } from '../lib/locationParser.js';
 import { completePull } from '../lib/logicGate.js';
+import { coercePalletId } from '../lib/palletId.js';
 
 /**
  * Confirms a container pull via one of three independent verification paths: Pallet ID, UPC,
@@ -121,9 +122,7 @@ async function verifyPull(req: HttpRequest, _ctx: InvocationContext): Promise<un
 
   // ── Pallet ID path ──────────────────────────────────────────────────────────
   if (body.palletId != null) {
-    const submittedPid = typeof body.palletId === 'string'
-      ? parseInt(body.palletId, 10)
-      : body.palletId;
+    const submittedPid = coercePalletId(body.palletId);
 
     if (submittedPid !== pallet.pid) {
       throw Object.assign(new Error('PALLET_MISMATCH'), { status: 400 });

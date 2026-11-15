@@ -23,6 +23,7 @@ import { useDigitInput } from '../lib/useDigitInput';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useTabOrder } from '../lib/useTabOrder';
 import { fmtLocation } from '../lib/fmt';
+import { splitLocationId, withLevel } from '@shared/location';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -701,7 +702,7 @@ export function PIPPage() {
     if (!pending || !ld) return;
     setLoading(true);
     try {
-      const correctedLocation = pending.locationValue.slice(0, 6) + String(correctedLevel).padStart(2, '0');
+      const correctedLocation = withLevel(pending.locationValue, correctedLevel);
       const result = await apiFetch<{ location: string; updatedQuantity: Qty }>(
         '/api/pulls/verify',
         token!,
@@ -893,8 +894,8 @@ export function PIPPage() {
   // still require Bin and Level to be genuinely typed and checked. All boxes stay visible
   // for layout consistency; a full location is always reconstructed underneath regardless
   // of which boxes are locked.
-  const locationLockedAisle = containerData?.location.id ? containerData.location.id.slice(0, 3) : undefined;
-  const locationLockedLevel = pullFunction === 'CF' && containerData?.location.id ? containerData.location.id.slice(6, 8) : undefined;
+  const locationLockedAisle = containerData?.location.id ? splitLocationId(containerData.location.id).aisle : undefined;
+  const locationLockedLevel = pullFunction === 'CF' && containerData?.location.id ? splitLocationId(containerData.location.id).level : undefined;
 
   // Issue #186 — the currently-scanned container's location, and the most recently
   // completed pull's location this session (history is prepended, so [0] is newest).

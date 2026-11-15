@@ -5,11 +5,13 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "prisma generate && tsc -p tsconfig.json",
-    "postbuild": "rm -rf dist/generated && cp -r generated dist/generated",
+    "build": "rm -rf dist && prisma generate && tsc -p tsconfig.json",
+    "postbuild": "cp -r generated dist/api/generated && printf \"import './api/index.js';\\n\" > dist/index.js",
     "watch": "tsc -p tsconfig.json --watch",
     "start": "tsx watch index.ts",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "tsx --test 'tests/unit/**/*.test.ts'",
+    "test:db": "tsx --env-file=.env --test 'tests/db/**/*.test.ts'"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

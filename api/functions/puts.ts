@@ -8,6 +8,8 @@ import { checkPalletEligibility } from '../lib/eligibility.js';
 import { findNextLocation, resolveEffectiveCriteria } from '../lib/zoneLogic.js';
 import { parseLocationBarcode, formatLocationId as locationString } from '../lib/locationParser.js';
 import { clearLocation, putComplete, reservePut, zeroPallet } from '../lib/logicGate.js';
+import { coercePalletId } from '../lib/palletId.js';
+import { formatDpci } from '../lib/dpci.js';
 
 /**
  * Atomically stores a pallet at a new location (PUT_COMPLETE, via the Logic Gate — #149).
@@ -176,7 +178,7 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
     directedLocationStorageCode: effective.storageCode,
     pallet: {
       id:              elig.pallet.pid,
-      dpci:            `${String(elig.pallet.dept).padStart(3,'0')}-${String(elig.pallet.class).padStart(2,'0')}-${String(elig.pallet.item).padStart(4,'0')}`,
+      dpci:            formatDpci(elig.pallet.dept, elig.pallet.class, elig.pallet.item),
       descShort:       elig.pallet.descShort,
       quantity: {
         pallets: elig.pallet.currentPallets,
@@ -377,9 +379,7 @@ async function manualScan(req: HttpRequest, _ctx: InvocationContext): Promise<un
   const auth = await requireAuth(req);
 
   const body = await req.json() as { palletId: number | string };
-  const palletId = typeof body.palletId === 'string'
-    ? parseInt(body.palletId, 10)
-    : body.palletId;
+  const palletId = coercePalletId(body.palletId);
 
   if (isNaN(palletId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
@@ -406,7 +406,7 @@ async function manualScan(req: HttpRequest, _ctx: InvocationContext): Promise<un
   return {
     pallet: {
       id:              elig.pallet.pid,
-      dpci:            `${String(elig.pallet.dept).padStart(3,'0')}-${String(elig.pallet.class).padStart(2,'0')}-${String(elig.pallet.item).padStart(4,'0')}`,
+      dpci:            formatDpci(elig.pallet.dept, elig.pallet.class, elig.pallet.item),
       descShort:       elig.pallet.descShort,
       quantity: {
         pallets: elig.pallet.currentPallets,
@@ -491,9 +491,7 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     resolution?: 'proceed' | 'consolidate';
   };
 
-  const palletId = typeof body.palletId === 'string'
-    ? parseInt(body.palletId, 10)
-    : body.palletId;
+  const palletId = coercePalletId(body.palletId);
 
   if (isNaN(palletId) || !body.destinationLocation || body.level == null) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
@@ -572,7 +570,7 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
         data: {
           occupantPalletId: occupant?.pid ?? null,
           occupantDpci: occupant
-            ? `${String(occupant.dept).padStart(3,'0')}-${String(occupant.class).padStart(2,'0')}-${String(occupant.item).padStart(4,'0')}`
+            ? formatDpci(occupant.dept, occupant.class, occupant.item)
             : null,
           matchesDpci,
           wasStaged: destinationWasStaged,
@@ -706,9 +704,7 @@ async function manualCancel(req: HttpRequest, _ctx: InvocationContext): Promise<
     destinationLocation?: string;
   };
 
-  const palletId = typeof body.palletId === 'string'
-    ? parseInt(body.palletId, 10)
-    : body.palletId;
+  const palletId = coercePalletId(body.palletId);
 
   if (isNaN(palletId) || (body.stage !== 'pallet_scanned' && body.stage !== 'level_modal')) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });

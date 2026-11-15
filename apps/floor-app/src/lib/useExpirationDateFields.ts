@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useNumpadField } from './useNumpadField';
 import { useNumpad } from '../context/NumpadContext';
+import { classifyExpirationDate } from '@shared/expiration';
 
 interface UseExpirationDateFieldsOpts {
   onChange: (iso: string) => void;
@@ -69,10 +70,8 @@ export function useExpirationDateFields({
   const checkTooSoonRule = useCallback((iso: string) => {
     if (!checkTooSoon) return;
     if (!iso) { onTooSoonChange?.(false); return; }
-    const parsed = new Date(iso);
-    const oneMonthOut = new Date();
-    oneMonthOut.setMonth(oneMonthOut.getMonth() + 1);
-    onTooSoonChange?.(parsed < oneMonthOut);
+    // Shared window rule (shared/expiration.ts — #217), same one the API enforces on save.
+    onTooSoonChange?.(classifyExpirationDate(new Date(iso)) === 'TOO_SOON');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkTooSoon]);
 

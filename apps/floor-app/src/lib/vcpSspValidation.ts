@@ -12,6 +12,8 @@
  * field wiring and calls into these functions for the check itself.
  */
 
+import { sspPerCarton as computeSspPerCarton, exceedsSspCap } from '@shared/vcpSsp';
+
 export interface VcpSspRatioResult {
   /** True when SSP doesn't evenly divide VCP (or either value isn't a valid positive
    *  integer yet — never flags incomplete input as invalid). */
@@ -21,15 +23,17 @@ export interface VcpSspRatioResult {
   sspPerCarton: number | null;
 }
 
-/** SSP must evenly divide VCP — the core cross-field rule both PAR and PII enforce. */
+/** SSP must evenly divide VCP — the core cross-field rule both PAR and PII enforce. The
+ *  rule itself lives in `shared/vcpSsp.ts` (#217, shared with the API); this adapter only
+ *  parses raw field strings and treats incomplete input as not-yet-invalid. */
 export function checkVcpSspRatio(vcpStr: string, sspStr: string): VcpSspRatioResult {
   const vcp = vcpStr ? parseInt(vcpStr, 10) : NaN;
   const ssp = sspStr ? parseInt(sspStr, 10) : NaN;
   if (!Number.isInteger(vcp) || !Number.isInteger(ssp)) {
     return { ratioInvalid: false, sspPerCarton: null };
   }
-  const ratioInvalid = ssp <= 0 || vcp % ssp !== 0;
-  return { ratioInvalid, sspPerCarton: ratioInvalid ? null : vcp / ssp };
+  const perCarton = computeSspPerCarton(vcp, ssp);
+  return { ratioInvalid: perCarton == null, sspPerCarton: perCarton };
 }
 
 /** Loose (non-full-carton) SSPs must stay below one carton's worth (`sspPerCarton`) — a
@@ -40,5 +44,5 @@ export function checkVcpSspRatio(vcpStr: string, sspStr: string): VcpSspRatioRes
 export function checkSspCap(sspPerCarton: number | null, looseSspsStr: string): boolean {
   const loose = looseSspsStr ? parseInt(looseSspsStr, 10) : 0;
   if (sspPerCarton == null || !Number.isInteger(loose)) return false;
-  return loose >= sspPerCarton;
+  return exceedsSspCap(sspPerCarton, loose);
 }

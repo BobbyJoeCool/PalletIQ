@@ -4,6 +4,7 @@ import { useDemoSlot } from '../../context/FooterDemoContext';
 import { INVALID_WASH } from '../../lib/invalidWash';
 import { useNumpadField } from '../../lib/useNumpadField';
 import { LocationDemoScannerBar } from './LocationDemoScannerBar';
+import { splitLocationId } from '@shared/location';
 
 interface LocationEntryFieldsProps {
   /** Called once a location is resolved, either by a barcode scan (in any field), by
@@ -303,9 +304,7 @@ export const LocationEntryFields = forwardRef<LocationEntryFieldsHandle, Locatio
   function resolveFullValue(v: string) {
     hidePanel();
     clearInternalInvalid();
-    const scannedAisle = v.slice(0, 3);
-    const scannedBin = v.slice(3, 6);
-    const scannedLevel = v.length === 8 ? v.slice(6, 8) : undefined;
+    const { aisle: scannedAisle, bin: scannedBin, level: scannedLevel } = splitLocationId(v);
 
     // Still applied even for a box that turns out locked-mismatched below — harmless (a
     // locked box never reads its own field's value for display, see the render below) and
@@ -416,11 +415,12 @@ export const LocationEntryFields = forwardRef<LocationEntryFieldsHandle, Locatio
       return;
     }
     if (value.length === 8) {
-      aisleField.set(value.slice(0, 3));
-      binField.set(value.slice(3, 6));
-      levelField.set(value.slice(6, 8));
-      aisleValueRef.current = value.slice(0, 3);
-      binValueRef.current = value.slice(3, 6);
+      const seg = splitLocationId(value);
+      aisleField.set(seg.aisle);
+      binField.set(seg.bin);
+      levelField.set(seg.level ?? '');
+      aisleValueRef.current = seg.aisle;
+      binValueRef.current = seg.bin;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);

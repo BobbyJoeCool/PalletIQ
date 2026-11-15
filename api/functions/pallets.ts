@@ -10,6 +10,8 @@ import { TERMINAL_CONTAINER_STATUSES } from '../lib/eligibility.js';
 import { parseDpci, formatDpci } from '../lib/dpci.js';
 import { storeLocationForCreate } from '../lib/logicGate.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
+import { isValidVcpSspRatio, exceedsSspCap } from '../../shared/vcpSsp.js';
+import { classifyExpirationDate } from '../../shared/expiration.js';
 
 /**
  * Retrieves all fields of a pallet, including item UPC/description, current location,
@@ -152,19 +154,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
     if (body.expirationDate === null) {
       newExpirationDate = null;
     } else {
-      const parsed = new Date(body.expirationDate);
-      if (isNaN(parsed.getTime())) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-      const oneMonthOut = new Date();
-      oneMonthOut.setMonth(oneMonthOut.getMonth() + 1);
-      const threeMonthsOut = new Date();
-      threeMonthsOut.setMonth(threeMonthsOut.getMonth() + 3);
-      if (parsed < oneMonthOut) {
-        throw Object.assign(new Error('EXPIRATION_TOO_SOON'), { status: 400 });
-      }
-      if (parsed < threeMonthsOut && !body.confirmNearExpiration) {
-        throw Object.assign(new Error('EXPIRATION_NEEDS_CONFIRM'), { status: 409 });
-      }
-      newExpirationDate = parsed;
+      newExpirationDate = parseAndGateExpirationDate(body.expirationDate, body.confirmNearExpiration);
     }
   }
 
@@ -186,12 +176,8 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   // specific fields change, so an edit never leaves the pallet in an inconsistent state.
   const newVcp = body.vcp ?? pallet.vcp;
   const newSsp = body.ssp ?? pallet.ssp;
-  if (newSsp <= 0 || newVcp % newSsp !== 0) {
-    throw Object.assign(new Error('INVALID_VCP_SSP_RATIO'), { status: 400 });
-  }
-  if (newSSPs >= newVcp / newSsp) {
-    throw Object.assign(new Error('SSPS_EXCEED_CARTON'), { status: 400 });
-  }
+  validateVcpRatio(newVcp, newSsp);
+  validateSspCap(newVcp, newSsp, newSSPs);
 
   // Determine whether the DPCI is actually changing (all three components must match).
   const dpciChanging =
@@ -335,7 +321,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
 /** SSP must evenly divide VCP (vcp/ssp = SSPs-per-carton, an integer) — same rule
  *  editPallet enforces (v1.6.11 — PAR now validates this too instead of not at all). */
 function validateVcpRatio(vcp: number, ssp: number): void {
-  if (ssp <= 0 || vcp % ssp !== 0) {
+  if (!isValidVcpSspRatio(vcp, ssp)) {
     throw Object.assign(new Error('INVALID_VCP_SSP_RATIO'), { status: 400 });
   }
 }
@@ -344,7 +330,7 @@ function validateVcpRatio(vcp: number, ssp: number): void {
  *  carton's worth of loose SSPs should just be another carton. Same rule editPallet
  *  enforces on `currentSSPs`. */
 function validateSspCap(vcp: number, ssp: number, looseSSPs: number): void {
-  if (looseSSPs >= vcp / ssp) {
+  if (exceedsSspCap(vcp / ssp, looseSSPs)) {
     throw Object.assign(new Error('SSPS_EXCEED_CARTON'), { status: 400 });
   }
 }
@@ -363,14 +349,21 @@ function validateExpirationDate(
     if (requiresExpirationDate) throw Object.assign(new Error('EXPIRATION_REQUIRED'), { status: 400 });
     return null;
   }
+  return parseAndGateExpirationDate(raw, confirmNearExpiration);
+}
+
+/**
+ * Parses a submitted expiration date and applies the shared window rule
+ * (`shared/expiration.ts` — #217, one copy for editPallet and reinstatePallet).
+ * @throws 400 INVALID_INPUT (unparseable), 400 EXPIRATION_TOO_SOON (< 1 month out),
+ *   409 EXPIRATION_NEEDS_CONFIRM (1-3 months out without `confirmNearExpiration`)
+ */
+function parseAndGateExpirationDate(raw: string, confirmNearExpiration: boolean | undefined): Date {
   const parsed = new Date(raw);
   if (isNaN(parsed.getTime())) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-  const oneMonthOut = new Date();
-  oneMonthOut.setMonth(oneMonthOut.getMonth() + 1);
-  const threeMonthsOut = new Date();
-  threeMonthsOut.setMonth(threeMonthsOut.getMonth() + 3);
-  if (parsed < oneMonthOut) throw Object.assign(new Error('EXPIRATION_TOO_SOON'), { status: 400 });
-  if (parsed < threeMonthsOut && !confirmNearExpiration) {
+  const cls = classifyExpirationDate(parsed);
+  if (cls === 'TOO_SOON') throw Object.assign(new Error('EXPIRATION_TOO_SOON'), { status: 400 });
+  if (cls === 'NEEDS_CONFIRM' && !confirmNearExpiration) {
     throw Object.assign(new Error('EXPIRATION_NEEDS_CONFIRM'), { status: 409 });
   }
   return parsed;

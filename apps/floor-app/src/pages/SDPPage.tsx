@@ -22,6 +22,7 @@ import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
 import { useTabOrder } from '../lib/useTabOrder';
 import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 import { SDPVerifyPutModal } from './SDPVerifyPutModal';
+import { aisleBinOf, splitLocationId } from '@shared/location';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -530,7 +531,7 @@ export function SDPPage() {
     if (!d.hasReservation) {
       // Aisle+Bin only, matching confirmPut's own comparison (Level is never checked —
       // physical barcodes only encode Aisle+Bin, see Location Barcode Handling).
-      if (v.slice(0, 6) !== d.directedLocation.slice(0, 6)) {
+      if (aisleBinOf(v) !== aisleBinOf(d.directedLocation)) {
         playAlert('error');
         resetLocationField();
         setMessage({ type: 'error', text: `Wrong location — directed to ${d.directedLocation}` });
@@ -539,7 +540,7 @@ export function SDPPage() {
       setLoading(true);
       try {
         const isOriginal = d.original != null && d.directedLocation === d.original.location;
-        const level = parseInt(d.directedLocation.slice(6, 8), 10);
+        const level = parseInt(splitLocationId(d.directedLocation).level ?? '', 10);
         const result = await apiFetch<
           | { consolidated: true; location: string }
           | { location: string; wasMove: boolean; clearedLocation: string | null; destinationWasStaged: boolean }

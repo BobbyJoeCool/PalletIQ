@@ -3,10 +3,14 @@
     "target": "ES2022",
     "module": "node16",
     "moduleResolution": "node16",
-    "lib": ["ES2022"],
-    "types": ["node"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ],
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "..",
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
@@ -14,9 +18,22 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@shared/*": ["../shared/*"]
+      "@shared/*": [
+        "../shared/*"
+      ]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "dist", "prisma/seed.ts", "prisma.config.ts", "scripts"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "../shared/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "prisma/seed.ts",
+    "prisma.config.ts",
+    "scripts",
+    "tests"
+  ]
 }

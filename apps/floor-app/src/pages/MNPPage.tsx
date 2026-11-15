@@ -21,6 +21,7 @@ import { fmtLocation } from '../lib/fmt';
 import { splitReasonCode } from '../lib/reasonCode';
 import { useTabOrder } from '../lib/useTabOrder';
 import { hasMinRole, type Role } from '@shared/index';
+import { splitLocationId, withLevel } from '@shared/location';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -423,7 +424,7 @@ export function MNPPage() {
     try {
       await apiFetch(`/api/locations/${encodeURIComponent(locationId)}`, token!);
       setPendingLocation(locationId);
-      setLevelHint(locationId.length === 8 ? parseInt(locationId.slice(6, 8), 10) : demoLevel ?? null);
+      setLevelHint(locationId.length === 8 ? parseInt(splitLocationId(locationId).level!, 10) : demoLevel ?? null);
       setLocationInvalid(false);
       setScreenState('level_modal');
       clearMessage();
@@ -620,7 +621,7 @@ export function MNPPage() {
     const level = pendingLevelRef.current;
     if (!loc || level == null || loadingRef.current) return;
 
-    const fullLocationId = loc.length === 8 ? loc : loc.slice(0, 6) + String(level).padStart(2, '0');
+    const fullLocationId = loc.length === 8 ? loc : withLevel(loc, level);
     const { prefix: reasonPrefix, number: reasonNumber } = splitReasonCode(reasonCode);
 
     setLoading(true);

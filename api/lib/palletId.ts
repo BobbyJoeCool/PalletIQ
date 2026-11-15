@@ -21,3 +21,13 @@ export async function generateUniquePid(): Promise<number> {
   }
   throw Object.assign(new Error('PID_GENERATION_FAILED'), { status: 500 });
 }
+
+/**
+ * Normalizes a request body's `palletId`, which clients send as either a number or a
+ * scanned/typed string (#217 — this coercion was inlined 4× across puts.ts/pulls.ts).
+ * @returns the numeric pallet ID, or NaN when the string doesn't parse — callers keep their
+ *   own NaN check so each can choose its error response
+ */
+export function coercePalletId(raw: number | string): number {
+  return typeof raw === 'string' ? parseInt(raw, 10) : raw;
+}
