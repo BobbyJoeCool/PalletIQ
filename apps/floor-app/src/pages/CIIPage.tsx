@@ -16,6 +16,7 @@ import { CIIOverpackDetail } from '../components/cii/CIIOverpackDetail';
 import { CIISSPMasterDetail } from '../components/cii/CIISSPMasterDetail';
 import { CIISSPUnitDetail } from '../components/cii/CIISSPUnitDetail';
 import { CIIStrayEachDetail } from '../components/cii/CIIStrayEachDetail';
+import { containerStatusLabel } from '@shared/containerStatus';
 
 export function CIIPage() {
   const { token, user } = useAuth();
@@ -105,7 +106,7 @@ export function CIIPage() {
             <span className="font-ui text-[14px] text-[#9A9A9A] uppercase tracking-wider">
               {CID_TYPE_LABELS[data.type as CidTypeCode]}
             </span>
-            <StatusBadge status={data.status} />
+            <StatusBadge status={data.status} label={containerStatusLabel(data.status)} />
           </div>
         )}
         {loading && <span className="font-ui text-[14px] text-[#666]">Loading...</span>}

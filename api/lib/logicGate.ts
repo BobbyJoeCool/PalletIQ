@@ -147,48 +147,9 @@ export async function storeLocationForCreate(aisle: number, bin: number, level: 
   await storeLocation(aisle, bin, level);
 }
 
-/**
- * COMPLETE_PULL — preferred `STORED` or `PULLED`, fallback `PULL_PENDING` (in practice
- * `CA_PULL_PEND`/`FP_PULL_PEND` — see the module-level note on those values); cascades to
- * `clearLocation` if resolved `PULLED`. Wired to PIP's `verifyPull` (`pulls.ts`), called
- * only for its one actual live trigger today — every outstanding container against the
- * pallet has now been pulled, attempt `STORED` — not extended to also detect/produce
- * `PULLED` (a fully-emptied pallet), since nothing in the current codebase does that
- * detection and adding it here would be a silent behavior change, not a migration.
- */
-export async function completePull(palletId: number): Promise<void> {
-  await prisma.pallet.update({ where: { pid: palletId }, data: { status: 'STORED' } });
-}
-
-/** Pull-pending statuses `releasePullPendingIfNoOpenContainersTx` is allowed to revert. */
-const PULL_PENDING_STATUSES = ['CA_PULL_PEND', 'FP_PULL_PEND'];
-
-/**
- * COMPLETE_PULL, transaction-scoped and conditional: if the pallet has no remaining open
- * (`AVAILABLE`/`PRINTED`) containers and is currently `CA_PULL_PEND`/`FP_PULL_PEND`, returns
- * it to `STORED` inside the caller's transaction. Any other pallet status is left alone — a
- * cancel must never flip, say, a held or already-`STORED` pallet.
- *
- * Wired to CII's `cancelContainer` (issue #210 — canceling a pallet's last open container
- * previously left the pallet stuck pull-pending, since only `verifyPull` ran this recompute).
- * The broader single-home consolidation of this rule is #213.
- *
- * @returns true if the pallet was returned to `STORED`
- */
-export async function releasePullPendingIfNoOpenContainersTx(
-  tx: Prisma.TransactionClient,
-  palletId: number,
-): Promise<boolean> {
-  const remainingOpen = await tx.container.count({
-    where: { pid: palletId, status: { in: ['AVAILABLE', 'PRINTED'] } },
-  });
-  if (remainingOpen > 0) return false;
-  const { count } = await tx.pallet.updateMany({
-    where: { pid: palletId, status: { in: PULL_PENDING_STATUSES } },
-    data: { status: 'STORED' },
-  });
-  return count > 0;
-}
+// COMPLETE_PULL moved to the container lifecycle (api/lib/containerLifecycle.ts — #213):
+// every container transition (pull, cancel) recomputes the pallet's pull-pending status in
+// its own transaction, so the Gate no longer exposes a separate completePull step.
 
 // ── Location-side intents ───────────────────────────────────────────────────────
 

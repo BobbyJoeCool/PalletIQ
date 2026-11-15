@@ -13,7 +13,7 @@ PRQ shows pull activity for an aisle, workstation, or aisle range — broken dow
 
 ## Container Status Scope
 
-Only three container statuses are queryable: **Available**, **Printed**, **Verified**. The status filter dropdown is limited to these three — Diverted, Canceled, and Purged containers cannot be looked up on this screen. The pull-detail popup's container list shows all six statuses since it reflects the full record for one specific pull.
+Only three container statuses are queryable: **Available**, **Printed**, **Verified**. **(v1.10.0, #213)** "Verified" filters on the stored status `PULLED` (shared `PRQ_STATUS_FILTERS`). Before this change it queried a `VERIFIED` status nothing writes, so it always came back empty. The pull-detail popup labels PULLED containers "VERIFIED". The status filter dropdown is limited to these three — Diverted, Canceled, and Purged containers cannot be looked up on this screen. The pull-detail popup's container list shows all six statuses since it reflects the full record for one specific pull.
 
 ## Entry Filters
 

@@ -6,7 +6,7 @@ import { requireAuth, requireRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { generateUniquePid } from '../lib/palletId.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
-import { TERMINAL_CONTAINER_STATUSES } from '../lib/eligibility.js';
+import { whereOpenContainer } from '../lib/containerLifecycle.js';
 import { parseDpci, formatDpci } from '../lib/dpci.js';
 import { storeLocationForCreate } from '../lib/logicGate.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
@@ -190,7 +190,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   if (dpciChanging) {
     // Block the DPCI change if any containers are still open (not terminal).
     const pendingCount = await prisma.container.count({
-      where: { pid, status: { notIn: TERMINAL_CONTAINER_STATUSES } },
+      where: { pid, ...whereOpenContainer() },
     });
     if (pendingCount > 0) {
       throw Object.assign(new Error('BLOCKED_BY_PENDING_PULL'), { status: 409 });
@@ -210,7 +210,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   if (quantityChanging) {
     // Sum up quantities already committed to open containers so we can enforce a floor.
     const pending = await prisma.container.aggregate({
-      where: { pid, status: { notIn: TERMINAL_CONTAINER_STATUSES } },
+      where: { pid, ...whereOpenContainer() },
       _sum: { cartonQuantity: true, sspQuantity: true },
     });
     const pendingCartons = pending._sum.cartonQuantity ?? 0;

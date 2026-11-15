@@ -40,7 +40,7 @@ erDiagram
     %% HoldCategory:   HOLD_IN, HOLD_OUT, HOLD_BOTH, HOLD_PERM (Location.holdCategory, independent of status)   → VarChar(10)
     %% LocationSize:   XS, HS, S, M, L                                                                         → VarChar(2)
     %% PalletStatus:   PUT_PENDING, STORED, CA_PULL_PEND, FP_PULL_PEND, PULLED, CANCELED, CONSOLIDATED         → VarChar(15)
-    %% ContainerStatus: AVAILABLE, PRINTED, PULLED, DIVERTED, CANCELED, PURGED                                 → VarChar(15)
+    %% ContainerStatus: AVAILABLE, PRINTED, PULLED, PARTIALLY_PACKED, PACKED, DIVERTED, CANCELED, PURGED        → VarChar(15) (shared/containerStatus.ts)
     %% SSPUnitStatus:   PENDING, PACKED, CANCELED                                                              → VarChar(15)
     %% StrayEachStatus: PENDING, PACKED, CANCELED                                                              → VarChar(15)
     %% ContainerEventType: CREATED, PRINTED, PULLED, DIVERTED, VERIFIED, CANCELED, PURGED, STATUS_CHANGE       → VarChar(15)

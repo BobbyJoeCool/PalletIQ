@@ -13,6 +13,7 @@ import { useAisleField } from '../lib/useAisleField';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useTabOrder } from '../lib/useTabOrder';
 import { isRangeEndValid } from '../lib/rangeValidation';
+import { containerStatusLabel } from '@shared/containerStatus';
 
 // ─── API response types ──────────────────────────────────────────────────────
 
@@ -604,7 +605,7 @@ function PullDetailPopup({ location, filters, onClose }: { location: DetailLocat
                     >
                       {c.cid}
                     </button>
-                    <StatusBadge status={c.status} />
+                    <StatusBadge status={c.status} label={containerStatusLabel(c.status)} />
                     <span className="font-data text-[13px] text-[#9A9A9A]">
                       {c.cartonQuantity} ctn / {c.palletQuantity} plt / {c.sspQuantity} ssp
                     </span>

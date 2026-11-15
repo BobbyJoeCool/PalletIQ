@@ -3,7 +3,7 @@ import type { HttpRequest, InvocationContext } from '../lib/functionsRuntime.js'
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
-import { TERMINAL_CONTAINER_STATUSES } from '../lib/eligibility.js';
+import { whereOpenContainer } from '../lib/containerLifecycle.js';
 import { whereAcceptsPut } from '../lib/locationPolicy.js';
 
 /**
@@ -173,7 +173,7 @@ async function samplePallet(req: HttpRequest, _ctx: InvocationContext): Promise<
     : statusParam === 'no-cartons' ? { currentCartons: { lte: 0 } }
     : statusParam === 'canceled' ? { status: 'CANCELED' }
     : statusParam === 'pull-pending'
-      ? { containers: { some: { status: { notIn: TERMINAL_CONTAINER_STATUSES } } } }
+      ? { containers: { some: { ...whereOpenContainer() } } }
     : {
         locationAisle: { not: null },
         ...(aislePairs && { OR: aislePairs.map((p) => ({ storageCode: p.storageCode, size: p.size })) }),

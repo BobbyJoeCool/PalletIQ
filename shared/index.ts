@@ -41,13 +41,8 @@ export type PalletStatus =
   | 'CANCELED'
   | 'CONSOLIDATED';
 
-export type ContainerStatus =
-  | 'AVAILABLE'
-  | 'PRINTED'
-  | 'PULLED'
-  | 'DIVERTED'
-  | 'CANCELED'
-  | 'PURGED';
+import type { ContainerStatus } from './containerStatus.js';
+export * from './containerStatus.js';
 
 export type ActionType = 'PULL' | 'PUT';
 

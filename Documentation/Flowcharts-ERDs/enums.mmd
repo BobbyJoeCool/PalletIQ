@@ -74,15 +74,19 @@ classDiagram
         %% Open — expand as app is built
     }
 
-    class LabelStatus {
+    class ContainerStatus {
         <<enumeration>>
         AVAILABLE
         PRINTED
         PULLED
+        PARTIALLY_PACKED
+        PACKED
         DIVERTED
         CANCELED
         PURGED
-        %% May expand as app is built
+        %% Canonical list: shared/containerStatus.ts (#213). "Open" = AVAILABLE | PRINTED.
+        %% PULLED is shown to workers as "Verified" (no stored VERIFIED status).
+        %% PARTIALLY_PACKED / PACKED are SSP Pull Master only.
     }
 
     class PullFunction {

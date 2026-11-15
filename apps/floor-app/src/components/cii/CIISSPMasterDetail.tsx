@@ -3,6 +3,7 @@ import { DataRow } from '../shared/DataRow';
 import { StatusBadge } from '../shared/StatusBadge';
 import type { CIIContainerData } from '../../context/CIIContext';
 import { CIICancelModal } from './CIICancelModal';
+import { canCancelSspMaster, containerStatusLabel } from '@shared/containerStatus';
 
 type SSPMasterData = Extract<CIIContainerData, { type: '93' }>;
 
@@ -19,13 +20,13 @@ interface Props {
 
 export function CIISSPMasterDetail({ data, isIM, token, onRefresh, onNavigatePallet, onNavigateItem, onNavigateLocation, onNavigateContainer }: Props) {
   const [showCancel, setShowCancel] = useState(false);
-  const canCancel = isIM && data.status !== 'PACKED' && data.status !== 'CANCELED' && data.status !== 'PURGED';
+  const canCancel = isIM && canCancelSspMaster(data.status); // shared lifecycle rule (#213)
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex gap-6">
         <div className="flex-1 flex flex-col gap-1">
-          <DataRow label="Status"><StatusBadge status={data.status} /></DataRow>
+          <DataRow label="Status"><StatusBadge status={data.status} label={containerStatusLabel(data.status)} /></DataRow>
           <DataRow label="Pull Function"><span className="text-white">{data.pullFunction}</span></DataRow>
           <DataRow label="DPCI">
             <button type="button" onClick={() => onNavigateItem(data.deptClassItem!.dept, data.deptClassItem!.class, data.deptClassItem!.item)} className="text-[#4499FF] underline">{data.dpci}</button>
