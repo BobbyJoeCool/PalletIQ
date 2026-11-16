@@ -18,6 +18,22 @@ A warehouse inventory/pallet-tracking system, built as a portfolio piece from 20
 | **Login: badge scan or zNumber + PIN** | |
 | ![Login screen](Documentation/screenshots/login.png) | |
 
+### Desktop app
+
+*The Manager desktop app (Electron) against the same demo data, signed in as a Roman-roster lead. More detail in [`apps/desktop-app/README.md`](apps/desktop-app/README.md#screenshots).*
+
+| **Job/Function Assignment: the shift roster as a timeline, staffing vs plan in the header** | **Team Prod Summary: live production against plan, by function** |
+|---|---|
+| ![Job/Function Assignment](Documentation/screenshots/desktop/job-assignment.png) | ![Team Prod Summary](Documentation/screenshots/desktop/team-prod.png) |
+| **Location Setup: zone cells edited on the aisle grid** | **Location Setup: contraction presets (here, all top locations)** |
+| ![Location Setup](Documentation/screenshots/desktop/location-setup.png) | ![Location Setup contraction](Documentation/screenshots/desktop/location-setup-contraction.png) |
+| **New aisle: zones, levels per side, and a live preview** | **Prod Goal / Ramping / Daily Plan: targets with the Daily Drop and staffing for reference** |
+| ![New aisle form](Documentation/screenshots/desktop/location-setup-new-aisle.png) | ![Prod Goal / Ramping / Daily Plan](Documentation/screenshots/desktop/prod-plan.png) |
+| **Audit Tool: three records side by side, linked by cross-reference chips** | **Embedded Floor App: the tablet app in a window, signed in from the desktop session** |
+| ![Audit Tool](Documentation/screenshots/desktop/audit-tool.png) | ![Embedded Floor App](Documentation/screenshots/desktop/floor-app.png) |
+| **Home** | **Sign-in: zNumber and password** |
+| ![Desktop home](Documentation/screenshots/desktop/home.png) | ![Desktop sign-in](Documentation/screenshots/desktop/login.png) |
+
 This repository is a **monorepo of independently-versioned pieces**, each with its own `package.json` and `CHANGELOG.md`:
 
 | Piece | What it is | Own docs |

@@ -57,7 +57,7 @@ export function RosterHeader(props: RosterHeaderProps) {
   );
 
   return (
-    <div className="sticky top-0 z-20 -mx-8 -mt-8 flex flex-col gap-3 border-b border-[var(--border-default)] bg-[var(--surface-0)] px-8 pb-2 pt-6">
+    <div className="sticky -top-8 z-20 -mx-8 -mt-8 flex flex-col gap-3 border-b border-[var(--border-default)] bg-[var(--surface-0)] px-8 pb-2 pt-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Job/Function Assignment</h1>

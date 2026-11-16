@@ -5,6 +5,10 @@ Audit Tool (#148), Location Setup (#143), Job/Function Assignment (#145), Prod G
 Daily Plan (#146) and Team Prod Summary (#147) are built. DPCI Setup Edit (#142) and Hung
 Pallet/Location Resolution (#144) are stubbed as "Coming Soon".
 
+![Job/Function Assignment: the shift roster as a timeline](../../Documentation/screenshots/desktop/job-assignment.png)
+
+*More screenshots [below](#screenshots).*
+
 The Manager-facing desktop application: a web app bundled with Electron, covering the
 DESKTOP-bucket screens designed in the 2026-07-25 design session (DPCI Setup Edit,
 Embedded Floor App, Hung Pallet/Location Resolution, Job/Function Assignment, Location
@@ -18,6 +22,24 @@ tablet/SYMBOL build), and [`../../api/CHANGELOG.md`](../../api/CHANGELOG.md) for
 shared backend's. All three share the same `../../api` (Azure Functions backend +
 Prisma/MySQL database) and `../../shared` (TypeScript types) at the repo root — this
 folder only holds the desktop-specific frontend.
+
+## Screenshots
+
+Taken from the built app against the seeded demo data (Roman roster; a lead, `z930l01`,
+except New aisle, which needs an OM). Retake them after a visible change — see
+`Documentation/screenshots/desktop/`.
+
+| **Job/Function Assignment: the shift roster as a timeline, staffing vs plan in the header** | **Team Prod Summary: live production against plan, by function** |
+|---|---|
+| ![Job/Function Assignment](../../Documentation/screenshots/desktop/job-assignment.png) | ![Team Prod Summary](../../Documentation/screenshots/desktop/team-prod.png) |
+| **Location Setup: zone cells edited on the aisle grid** | **Location Setup: contraction presets (here, all top locations)** |
+| ![Location Setup](../../Documentation/screenshots/desktop/location-setup.png) | ![Location Setup contraction](../../Documentation/screenshots/desktop/location-setup-contraction.png) |
+| **New aisle: zones, levels per side, and a live preview** | **Prod Goal / Ramping / Daily Plan: targets with the Daily Drop and staffing for reference** |
+| ![New aisle form](../../Documentation/screenshots/desktop/location-setup-new-aisle.png) | ![Prod Goal / Ramping / Daily Plan](../../Documentation/screenshots/desktop/prod-plan.png) |
+| **Audit Tool: three records side by side, linked by cross-reference chips** | **Embedded Floor App: the tablet app in a window, signed in from the desktop session** |
+| ![Audit Tool](../../Documentation/screenshots/desktop/audit-tool.png) | ![Embedded Floor App](../../Documentation/screenshots/desktop/floor-app.png) |
+| **Home** | **Sign-in: zNumber and password** |
+| ![Desktop home](../../Documentation/screenshots/desktop/home.png) | ![Desktop sign-in](../../Documentation/screenshots/desktop/login.png) |
 
 ## Where things live
 
