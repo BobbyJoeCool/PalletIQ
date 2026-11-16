@@ -1,7 +1,8 @@
 /**
  * The eight planned Manager screens (umbrella issue #140). This registry is the single
  * source the nav, the home grid and the routes are built from; a screen moves from
- * "Coming Soon" to real by gaining its own page under its own issue.
+ * "Coming Soon" to real by gaining its own page under its own issue. The Embedded Floor
+ * App (#141) is not listed: it is a window opened from the shell's toggle, not a page.
  */
 export interface DesktopScreen {
   /** URL slug — the screen lives at `/screens/{id}`. */
@@ -57,9 +58,6 @@ export const DESKTOP_SCREENS: readonly DesktopScreen[] = [
     summary: 'Cross-referenced audit trail lookup across every major entity.',
   },
 ];
-
-/** The Embedded Floor App (#141) is a window opened from the shell's toggle, not a page. */
-export const FLOOR_APP_ISSUE = 141;
 
 /**
  * @param id - a screen slug from the URL

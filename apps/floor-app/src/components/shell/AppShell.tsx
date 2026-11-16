@@ -4,6 +4,8 @@ import { FooterDemoProvider } from '../../context/FooterDemoContext';
 import { MessageBarProvider } from '../../context/MessageBarContext';
 import { NavLockProvider, useNavLockContext } from '../../context/NavLockContext';
 import { NumpadProvider, useNumpad } from '../../context/NumpadContext';
+import { isEmbeddedInDesktop } from '../../lib/embedHost';
+import { usePhysicalKeyboardInput } from '../../lib/usePhysicalKeyboardInput';
 import { Keyboard } from '../input/Keyboard';
 import { Numpad } from '../input/Numpad';
 import { ActivityLogOverlay } from './ActivityLogOverlay';
@@ -48,6 +50,11 @@ const SCANNER_THRESHOLD_MS = 50;
  *    Characters arriving within SCANNER_THRESHOLD_MS of each other are buffered;
  *    when Enter is received after the buffer, the entire string is delivered as a scan
  *    via deliverScan() rather than being processed key-by-key.
+ *
+ * Embedded in the desktop app (#141) the on-screen Numpad/Keyboard panels are not
+ * rendered and a physical keyboard drives the fields instead — usePhysicalKeyboardInput
+ * replaces the scanner listener in (2), handling both typing and scans. It is switched
+ * off while HotJump or the Activity overlay is open, since those take their own input.
  */
 function ShellInner() {
   const location = useLocation();
@@ -56,6 +63,8 @@ function ShellInner() {
   const [activityOpen, setActivityOpen] = useState(false);
   const { activePanel, deliverScan, hidePanel, setKeyHandler } = useNumpad();
   const { locked: navLocked } = useNavLockContext();
+  const embedded = isEmbeddedInDesktop();
+  usePhysicalKeyboardInput(embedded && !jumpOpen && !activityOpen);
 
   // Close the panel and clear the active handler whenever the route changes.
   useEffect(() => {
@@ -68,6 +77,9 @@ function ShellInner() {
   const lastKeyTimeRef = useRef(0);
 
   useEffect(() => {
+    // Embedded: usePhysicalKeyboardInput owns the keyboard, scans included.
+    if (embedded) return;
+
     /** Buffers rapid keypresses as a hardware scan; delivers the buffered string on Enter. */
     function onKeyDown(e: KeyboardEvent) {
       const now = Date.now();
@@ -95,7 +107,7 @@ function ShellInner() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [deliverScan]);
+  }, [deliverScan, embedded]);
 
   const isHome = location.pathname === '/';
   const title = SCREEN_TITLES[location.pathname] ?? 'PalletIQ';
@@ -129,8 +141,8 @@ function ShellInner() {
       {/* Main content slot — 792 px tall (1024 − 104 − 74 − 54) */}
       <div className="flex-1 relative overflow-hidden bg-black">
         <Outlet />
-        {activePanel === 'numpad'   && <Numpad />}
-        {activePanel === 'keyboard' && <Keyboard />}
+        {!embedded && activePanel === 'numpad'   && <Numpad />}
+        {!embedded && activePanel === 'keyboard' && <Keyboard />}
       </div>
 
       <Footer />

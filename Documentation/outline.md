@@ -79,6 +79,8 @@ On opening the app, the user is always prompted to log in first — there is no 
 
 **Desktop app login:** the Manager desktop app (`apps/desktop-app/`) signs in through a third endpoint, `POST /api/auth/desktop-login`, with a zNumber and a password rather than a PIN. The password is a second credential on the same user (`User.passwordHash`, bcrypt, nullable, admin-set only). Access is limited to LEAD, MANAGER and ADMIN, plus anyone whose home department is ICQA (`IQA`); anyone else is refused with `NO_DESKTOP_ACCESS` before the password is checked, and an eligible user with no password set gets `PASSWORD_NOT_SET`. It issues the same 12-hour JWT as the floor-app login.
 
+**Floor app embedded in the desktop app:** the desktop app can open this floor app in a window of its own (Embedded Floor App, `Documentation/ScreenSpecs/Desktop-Embedded-Floor-App.md`). In that mode the floor app skips Login/PIN and signs in with the desktop app's session token, has no 15-minute idle logout, does not render the on-screen numpad/keyboard (a physical keyboard drives the same fields, restricted to the characters each field's on-screen panel could produce), and its Logout button returns to the Home screen. None of this applies on the tablet.
+
 ---
 
 ## Home Screen

@@ -58,6 +58,12 @@ flowchart TD
     DX --> DB
     DH --> DI([Desktop shell\nHomePage])
 
+    %% Embedded Floor App (#141) — floor app inside the desktop app, no Login/PIN
+    DI -->|Floor App toggle| EA[Floor app loads in webview\napps/desktop-app — FloorAppWebview]
+    EA --> EB[EmbeddedSessionGate asks host for session\napps/floor-app/src/lib/embedHost.ts]
+    EB --> EC[Desktop app replies with its\nown JWT + user]
+    EC --> U
+
     style A fill:#1a1a1a,stroke:#555,color:#fff
     style V fill:#003300,stroke:#006600,color:#fff
     style J fill:#330000,stroke:#660000,color:#ff8080
