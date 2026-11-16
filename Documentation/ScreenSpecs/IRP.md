@@ -193,5 +193,6 @@ assignment" edge case — real counts show, but Hours/rate/% to goal stay blank.
 
 | Date | Change |
 |---|---|
+| 2026-11-16 (Team Prod Summary, [#147](https://github.com/BobbyJoeCool/PalletIQ/issues/147)) | Internal: IRP's per-function unit counting moved to `api/lib/irpUnits.ts` so Team Prod Summary counts identically. No behavior change. |
 | 2026-11-16 (Prod Goal / Ramping / Daily Plan, [#146](https://github.com/BobbyJoeCool/PalletIQ/issues/146)) | Prod goals now keep dated history (changed on the desktop Prod Goal screen, effective from a chosen date). IRP's % to goal and hours of work use the goal rate in force on the day being reported, not simply the latest row. No change while every function has a single goal row (the seeded state). |
 | 2026-07-22 (v1.7.1) | Initial build. All 9 prod functions listed; 7 backed by real data (CA, CF, FP, RP, HP, GPM, CON) via a new `ActivityLog.functionCode` column plus new `FunctionAssignment`/`ProdGoal` tables; Bulk and Breakpack permanently greyed (no real pull flow exists for either). Hour-by-hour zoom-in view added as a new drill-down navigation pattern (none existed in the app before this). |
