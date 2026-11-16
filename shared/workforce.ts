@@ -135,6 +135,16 @@ export function productiveHoursIn(span: TimeSpan, breaks: TimeSpan[]): number {
   return Math.max(0, total) / 3_600_000;
 }
 
+/**
+ * @returns a shift's full length in hours (B1 = 10). Staffing forecasts use this, with
+ * breaks treated as built into the goal rate (decided 2026-11-16: 18,000 cartons at
+ * 180/hr on a 10-hour shift needs 10 people).
+ */
+export function shiftHours(code: ShiftCode, isoDate: string): number {
+  const w = shiftWindow(code, isoDate);
+  return (w.end - w.start) / 3_600_000;
+}
+
 /** @returns a whole shift's productive hours: its length minus its breaks (A1 = 11h05m) */
 export function shiftProductiveHours(code: ShiftCode, isoDate: string): number {
   return productiveHoursIn(shiftWindow(code, isoDate), breakWindows(code, isoDate));
@@ -353,29 +363,49 @@ export function staffedAt(timelines: Segment[][], t: number): Map<string, number
 }
 
 /**
- * Workers needed to make a target: target ÷ (goal rate × the shift's productive hours).
+ * Workers needed to make a target: target ÷ (goal rate × the shift's full hours) — 18,000
+ * cartons at 180/hr on a 10-hour shift needs 10 people (decided 2026-11-16; breaks are
+ * treated as built into the rate).
  * @returns the exact figure (the screen rounds up), or null without a rate or hours
  */
-export function requiredHeadcount(target: number, ratePerHour: number, productiveHours: number): number | null {
-  if (ratePerHour <= 0 || productiveHours <= 0) return null;
-  return target / (ratePerHour * productiveHours);
+export function requiredHeadcount(target: number, ratePerHour: number, hours: number): number | null {
+  if (ratePerHour <= 0 || hours <= 0) return null;
+  return target / (ratePerHour * hours);
 }
 
 /**
- * The volume the staffing plan would produce on one function: for each worker, their
- * productive hours on it × the goal rate × their ramping percent (100 when not ramping).
- * A projection of who is staffed, not actual production (that is Team Prod Summary's job).
+ * Effective headcount on a function at an instant: each worker on it counts as their
+ * ramping percent (a worker ramping at 60% is 0.6 of a person), so ramping
+ * "underperformance" shows against the requirement (decided 2026-11-16).
+ */
+export function effectiveStaffedAt(
+  workers: readonly { segments: Segment[]; rampPercent: number }[],
+  functionCode: string,
+  t: number,
+): number {
+  let total = 0;
+  for (const w of workers) {
+    const s = segmentAt(w.segments, t);
+    if (s && s.functionCode === functionCode) total += w.rampPercent / 100;
+  }
+  return total;
+}
+
+/**
+ * The forecast volume for one function from who is staffed: for each worker, their hours
+ * on it × the goal rate × their ramping percent (100 when not ramping). Hours are clock
+ * hours, matching requiredHeadcount. A forecast, not actual production (that is Team Prod
+ * Summary's job).
  */
 export function projectedVolume(
-  workers: { segments: Segment[]; rampPercent: number }[],
+  workers: readonly { segments: Segment[]; rampPercent: number }[],
   functionCode: string,
   ratePerHour: number,
-  breaks: TimeSpan[],
 ): number {
   let total = 0;
   for (const w of workers) {
     for (const s of w.segments) {
-      if (s.functionCode === functionCode) total += productiveHoursIn(s, breaks) * ratePerHour * (w.rampPercent / 100);
+      if (s.functionCode === functionCode) total += ((s.end - s.start) / 3_600_000) * ratePerHour * (w.rampPercent / 100);
     }
   }
   return total;
@@ -425,7 +455,7 @@ export function simulatedTarget(functionCode: string, shiftCode: ShiftCode, isoD
   const headcount = TYPICAL_HEADCOUNT[functionCode];
   if (!headcount || !ratePerHour) return null;
   const jitter = 0.85 + stableFraction(`${functionCode}|${shiftCode}|${isoDate}`) * 0.3;
-  return Math.round(headcount * ratePerHour * shiftProductiveHours(shiftCode, isoDate) * jitter);
+  return Math.round(headcount * ratePerHour * shiftHours(shiftCode, isoDate) * jitter);
 }
 
 /** @returns a goal unit without its rate, e.g. "cartons/hr" → "cartons" */
@@ -446,7 +476,7 @@ export interface RosterPlanLine {
   target: number | null;
   /** True when no OM-entered target exists and the figure is simulated. */
   simulated: boolean;
-  /** Exact workers needed (the screen rounds up), or null without a target and rate. */
+  /** Exact workers needed — target ÷ (rate × shift hours); the screen rounds up. Null without a target and rate. */
   requiredHeadcount: number | null;
 }
 
@@ -472,6 +502,8 @@ export interface RosterView {
   window: TimeSpan;
   breaks: TimeSpan[];
   productiveHours: number;
+  /** Full shift length — the hours staffing forecasts use. */
+  shiftHours: number;
   departmentId: string;
   plan: RosterPlanLine[];
   workers: RosterWorker[];
