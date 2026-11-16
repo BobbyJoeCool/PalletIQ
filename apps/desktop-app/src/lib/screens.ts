@@ -57,7 +57,7 @@ export const DESKTOP_SCREENS: readonly DesktopScreen[] = [
     title: 'Team Prod Summary',
     issue: 147,
     summary: 'Live production-versus-plan dashboard by job function.',
-    built: false,
+    built: true,
   },
   {
     id: 'audit-tool',

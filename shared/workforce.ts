@@ -152,18 +152,27 @@ export function shiftProductiveHours(code: ShiftCode, isoDate: string): number {
 
 // ── Functions and reason codes ─────────────────────────────────────────────────────
 
+/**
+ * How a function is tracked, which decides its Team Prod Summary card (#147): PULL —
+ * pulled to store orders, has a plan and a finish time; PROD — production with a goal
+ * and plan but no queue to finish; SCAN — counted but no goal or plan. (Downtime is the
+ * fourth, OTHER tier — not a job function.) Kept here rather than in a table (decided
+ * 2026-11-16).
+ */
+export type FunctionTier = 'PULL' | 'PROD' | 'SCAN';
+
 /** The warehouse department's job functions, in the order they are offered. */
 export const WAREHOUSE_FUNCTIONS = [
-  { code: 'CA', label: 'Carton Air' },
-  { code: 'CF', label: 'Carton Floor' },
-  { code: 'FP', label: 'Full Pallet' },
-  { code: 'BKP', label: 'Breakpack' },
-  { code: 'BK', label: 'Bulk' },
-  { code: 'RP', label: 'Rack Puts' },
-  { code: 'HP', label: 'Hand Puts (XS)' },
-  { code: 'GPM', label: 'GPM Staging' },
-  { code: 'CON', label: 'Consolidation' },
-] as const;
+  { code: 'CA', label: 'Carton Air', tier: 'PULL' },
+  { code: 'CF', label: 'Carton Floor', tier: 'PULL' },
+  { code: 'FP', label: 'Full Pallet', tier: 'PULL' },
+  { code: 'BKP', label: 'Breakpack', tier: 'PULL' },
+  { code: 'BK', label: 'Bulk', tier: 'PULL' },
+  { code: 'RP', label: 'Rack Puts', tier: 'PROD' },
+  { code: 'HP', label: 'Hand Puts (XS)', tier: 'PROD' },
+  { code: 'GPM', label: 'GPM Staging', tier: 'SCAN' },
+  { code: 'CON', label: 'Consolidation', tier: 'SCAN' },
+] as const satisfies readonly { code: string; label: string; tier: FunctionTier }[];
 
 /** Time on the clock but not producing; needs a downtime reason. */
 export const DOWNTIME_CODE = 'DTM';

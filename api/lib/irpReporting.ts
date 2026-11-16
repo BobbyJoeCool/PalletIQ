@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import { goalsInForce } from './prodGoals.js';
+import { countFunctionUnits } from './irpUnits.js';
 import { isoDateOf } from '../../shared/workforce.js';
 import { IRP_FUNCTION_CODES } from './activityEvents.js';
 
@@ -22,7 +23,7 @@ export type FunctionCode = typeof FUNCTION_ORDER[number];
 /** Bulk and Breakpack have no real pull flow anywhere in the app today (PIP only offers
  *  CA/CF/FP) — these always render the spec's "no assignment today" greyed/zero state,
  *  permanently, this version. No query is ever run for them. */
-const GREYED_FUNCTIONS = new Set<FunctionCode>(['BKP', 'BK']);
+export const GREYED_FUNCTIONS = new Set<FunctionCode>(['BKP', 'BK']);
 
 // The 7 functions with a real ActivityLog data path, and which typed event writes each,
 // live with the event constructors — lib/activityEvents.ts IRP_FUNCTION_SOURCES (#218).
@@ -98,27 +99,6 @@ interface RawLogRow {
   details: string | null;
 }
 
-/** Parses a PULL row's `details` JSON for the fields IRP needs; never throws on malformed JSON. */
-function parsePulled(details: string | null): { pallets: number; cartons: number } {
-  if (!details) return { pallets: 0, cartons: 0 };
-  try {
-    const d = JSON.parse(details) as { pulled?: { pallets?: number; cartons?: number } };
-    return { pallets: d.pulled?.pallets ?? 0, cartons: d.pulled?.cartons ?? 0 };
-  } catch {
-    return { pallets: 0, cartons: 0 };
-  }
-}
-
-/** Distinct Aisle+Bin+Level combinations among a set of log rows. */
-function countDistinctLocations(rows: RawLogRow[]): number {
-  const seen = new Set<string>();
-  for (const r of rows) {
-    if (r.locationAisle == null || r.locationBin == null || r.locationLevel == null) continue;
-    seen.add(`${r.locationAisle}-${r.locationBin}-${r.locationLevel}`);
-  }
-  return seen.size;
-}
-
 /**
  * Computes one function's summary row from its today's-activity log rows, assignment
  * blocks, and goal rate. `now` caps hours-in-function; guards every rate/%-to-goal
@@ -140,37 +120,8 @@ function summarize(
     ? rows.reduce((min, r) => (r.timestamp < min ? r.timestamp : min), rows[0].timestamp).toISOString()
     : null;
 
-  let locations: number | null = null;
-  let cartons: number | null = null;
-  let pallets: number | null = null;
-  let puts: number | null = null;
-  let goalCount = 0; // the count that feeds hours-of-work / % to goal
-
-  if (functionCode === 'CA' || functionCode === 'CF') {
-    const parsed = rows.map((r) => parsePulled(r.details));
-    cartons = parsed.reduce((s, p) => s + p.cartons, 0);
-    locations = countDistinctLocations(rows);
-    goalCount = cartons;
-  } else if (functionCode === 'FP') {
-    const parsed = rows.map((r) => parsePulled(r.details));
-    pallets = parsed.reduce((s, p) => s + p.pallets, 0);
-    cartons = parsed.reduce((s, p) => s + p.cartons, 0);
-    goalCount = pallets;
-  } else if (functionCode === 'RP') {
-    puts = rows.length;
-    goalCount = puts;
-  } else if (functionCode === 'HP') {
-    locations = rows.length; // each Manual Put = one location; this IS the goal-metric count
-    goalCount = locations;
-    // Best-effort: a put moves a pallet's full current carton count, but ActivityLog's
-    // PUT/MNP details don't capture cartons at put time, so this reads the pallet's
-    // *current* count via its stored palletId. Can drift slightly stale if that same
-    // pallet was pulled from again later the same day.
-  } else if (functionCode === 'GPM') {
-    pallets = rows.length; // one STAGE row per staged location = one pallet staged
-  } else if (functionCode === 'CON') {
-    pallets = rows.length; // one CONSOLID row = one pallet moved/merged away
-  }
+  // Unit counting shared with Team Prod Summary (#147) — lib/irpUnits.ts.
+  const { locations, cartons, pallets, puts, goalCount, primaryCount } = countFunctionUnits(functionCode, rows);
 
   let density: number | null = null;
   if (functionCode === 'CA' || functionCode === 'CF') {
@@ -183,9 +134,6 @@ function summarize(
   // CA/CF set both `cartons` (the intended rate metric) and `locations` (a secondary
   // count) — the generic fallback chain below would pick `locations` first since
   // `cartons` is checked last, so CA/CF need their own explicit case (#131).
-  const primaryCount = (functionCode === 'CA' || functionCode === 'CF')
-    ? (cartons ?? 0)
-    : (pallets ?? puts ?? locations ?? cartons ?? 0);
   const ratePerHour = hours > 0 ? primaryCount / hours : null;
   const hoursOfWork = goal && hours > 0 ? goalCount / goal.rate : (goal ? 0 : null);
   // Zero hours assigned isn't a 0%-to-goal score, it's "no data" — must stay null (not

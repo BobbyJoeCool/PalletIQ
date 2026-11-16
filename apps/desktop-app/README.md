@@ -1,9 +1,9 @@
 # PalletIQ Desktop
 
 **Status:** Electron shell, zNumber + password login, the Embedded Floor App (#141), the
-Audit Tool (#148), Location Setup (#143), Job/Function Assignment (#145) and Prod Goal /
-Ramping / Daily Plan (#146) are built. The three remaining Manager screens are stubbed as
-"Coming Soon".
+Audit Tool (#148), Location Setup (#143), Job/Function Assignment (#145), Prod Goal / Ramping /
+Daily Plan (#146) and Team Prod Summary (#147) are built. DPCI Setup Edit (#142) and Hung
+Pallet/Location Resolution (#144) are stubbed as "Coming Soon".
 
 The Manager-facing desktop application: a web app bundled with Electron, covering the
 DESKTOP-bucket screens designed in the 2026-07-25 design session (DPCI Setup Edit,
@@ -98,10 +98,16 @@ other departments as reference), ramping overrides, and prod goal rates with dat
 history. LWW, OM and Admin; goal rates are OM / Admin only. Spec:
 `../../Documentation/ScreenSpecs/Desktop-Prod-Goal-Daily-Plan.md`.
 
+## Team Prod Summary
+
+Live production vs plan for a date and shift: a card per function with staffing, Team
+Prod %, % to Plan and (pull functions) estimated finish; expand a card for each worker's
+figures. Every desktop user. Spec: `../../Documentation/ScreenSpecs/Desktop-Team-Prod-Summary.md`.
+
 ## Not yet done
 
-- Three Manager screens (#142, #144, #147) do not exist yet; each nav entry opens a
-  "Coming Soon" page.
+- DPCI Setup Edit (#142) and Hung Pallet/Location Resolution (#144) do not exist yet; their
+  nav entries open a "Coming Soon" page.
 - None of the ~15 new Prisma models these screens need have been added to
   `../../api/prisma/schema.prisma` yet.
 - No automated e2e coverage for the desktop app.

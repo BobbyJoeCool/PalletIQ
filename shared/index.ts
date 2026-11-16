@@ -218,3 +218,4 @@ export * from './audit.js';
 export * from './aisleSetup.js';
 export * from './workforce.js';
 export * from './prodPlan.js';
+export * from './teamProd.js';

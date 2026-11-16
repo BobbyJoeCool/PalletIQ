@@ -89,6 +89,8 @@ On opening the app, the user is always prompted to log in first — there is no 
 
 **Desktop Prod Goal / Ramping / Daily Plan:** prod goal rates keep dated history — a change applies from a chosen date (today or later), and every reader (IRP, the roster's staffing math, simulated targets) uses the rate in force on the date in question. Only OM and Admin change goals. LWW, OM and Admin maintain ramping overrides (one per worker and function at a time, percent 1–99) and their department's Daily Plan targets per function, date and shift; the reference panels show a simulated company-wide Daily Drop, the department's staffing net of whole-shift roster Time Off, and other departments' net headcount and targets. See `Documentation/ScreenSpecs/Desktop-Prod-Goal-Daily-Plan.md`.
 
+**Desktop Team Prod Summary:** a read-only, live view of actual production for a date and shift, one card per job function by tier (PULL / PROD / SCAN, plus Downtime). Actual output is counted from `ActivityLog` exactly as IRP counts it; Team Prod % compares it with the ramping-weighted standard (each worker's hours × goal rate × ramping %), and % to Plan with the plan target (entered or simulated). Goal rates are treated as including breaks, so all of this runs on clock time. See `Documentation/ScreenSpecs/Desktop-Team-Prod-Summary.md`.
+
 ---
 
 ## Home Screen
