@@ -46,6 +46,8 @@
 - Requested `HOLD_IN`/`HOLD_OUT` against `HOLD_BOTH` or `HOLD_PERM`: blocked, the lower-priority hold does not overwrite.
 - Requested `HOLD_IN`/`HOLD_OUT` against None or the same type: applies normally.
 
+**Reservation clear on Range Place (v1.9.1, #209).** Every `RESERVED` location in a bucket whose hold actually lands (`placed`/`upgraded`, never `blocked`) has its reservation cleared through the Logic Gate's `clearLocation` (`overrideRevert: 'EMPTY'`) — the same side effect single-location Place already had. Previously the range path only wrote `holdCategory`, leaving the location `RESERVED` with its `Reservation` row live underneath the hold. The count cleared is recorded as `reservationsCleared` in the `RANGE_HOLD` activity-log details.
+
 **Hold hierarchy — Range Release (v1.8.0, #123)**. Release now requires a Release Level and is priority-aware — it no longer blindly clears every hold in the range regardless of type — via `resolveRangeRelease(requested, existing)` in `api/functions/locations.ts`, applied per-bucket against the snapshot taken before any writes (same snapshot-before-write pattern Place already used):
 
 - Releasing `HOLD_PERM` clears **everything** at or below it in the range — Perm, Both, In, and Out buckets all outcome `released` — since nothing outranks Perm, releasing it removes any lock a lower hold type could have implied too. Each bucket's own role threshold (`HOLD_REMOVE_MIN_ROLE`) still applies independently — an IM releasing Perm gets In/Out/Both cleared but the Perm bucket itself `blocked` (needs Lead+).

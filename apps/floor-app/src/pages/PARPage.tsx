@@ -885,9 +885,9 @@ export function PARPage() {
           vcpWidth="w-[126px]"
           sspWidth="w-[126px]"
           wrapperClass="flex items-end gap-4"
+          sspPerCartonDisplay="stacked"
         />
         <SizeField ref={sizeFieldRef} value={sizeValue} onChange={handleSizeChange} width="w-[126px]" disabled={mode === 'single' && !!location} />
-        <PlainText label="SSPs per Carton" value={sspPerCarton != null ? String(sspPerCarton) : ''} width="w-[160px]" />
       </div>
       </div>
 

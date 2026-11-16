@@ -6,6 +6,7 @@ import { requireAuth, requireRole } from '../lib/permissions.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
 import { formatDpci } from '../lib/dpci.js';
 import { parseCidOrThrow, CID_TYPE, CID_TYPE_LABELS, type CidTypeCode } from '../lib/cidParser.js';
+import { releasePullPendingIfNoOpenContainersTx } from '../lib/logicGate.js';
 
 // ─── Inquiry (GET) ──────────────────────────────────────────────────────────
 
@@ -451,6 +452,10 @@ async function cancelContainer(req: HttpRequest, _ctx: InvocationContext): Promi
       },
     });
 
+    // Issue #210: if this was the pallet's last open container, return the pallet from
+    // CA_PULL_PEND/FP_PULL_PEND to STORED in this same transaction (Logic Gate).
+    const palletReleased = await releasePullPendingIfNoOpenContainersTx(tx, container.pid);
+
     if (type === CID_TYPE.SSP_PULL_MASTER) {
       const pendingChildren = await tx.sSPUnit.findMany({
         where: { sourceContainerId: canonical, status: 'PENDING' },
@@ -465,10 +470,10 @@ async function cancelContainer(req: HttpRequest, _ctx: InvocationContext): Promi
           },
         });
       }
-      return { canceled: canonical, cascadedChildren: pendingChildren.length };
+      return { canceled: canonical, cascadedChildren: pendingChildren.length, palletReleased };
     }
 
-    return { canceled: canonical };
+    return { canceled: canonical, palletReleased };
   });
 }
 

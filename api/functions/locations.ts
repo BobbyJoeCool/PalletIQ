@@ -627,6 +627,10 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
 
   let placed = 0, upgraded = 0, blocked = 0;
   const breakdown: { existing: string | null; next: string; outcome: PlaceOutcome; count: number }[] = [];
+  // RESERVED locations whose hold actually lands (placed/upgraded, never blocked) — collected
+  // before each bucket's write, since the write changes `holdCategory` and would make the
+  // bucket's own filter stop matching them afterward. Cleared through the Logic Gate below.
+  const reservedToClear: { aisle: number; bin: number; level: number }[] = [];
   for (const { existing, count } of buckets) {
     const { next, outcome } = resolveRangePlace(body.holdType, existing);
     breakdown.push({ existing, next, outcome, count });
@@ -634,10 +638,22 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
       blocked += count;
       continue;
     }
-    await prisma.location.updateMany({ where: { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing }, data: { holdCategory: next } });
+    const bucketWhere = { aisle: range.aisle, bin: { in: bins }, ...levels, holdCategory: existing };
+    reservedToClear.push(...await prisma.location.findMany({
+      where: { ...bucketWhere, status: 'RESERVED' },
+      select: { aisle: true, bin: true, level: true },
+    }));
+    await prisma.location.updateMany({ where: bucketWhere, data: { holdCategory: next } });
     if (outcome === 'upgraded') upgraded += count; else placed += count;
   }
   const total = placed + upgraded + blocked;
+
+  // CLEAR_LOCATION (Logic Gate — #149), forced to EMPTY — the same side effect the
+  // single-location placeHold path applies (issue #209: the range path previously left
+  // each RESERVED location's status and Reservation row live underneath the new hold).
+  for (const loc of reservedToClear) {
+    await clearLocation({ ...loc, overrideRevert: 'EMPTY' });
+  }
 
   await writeLog({
     userId: auth.zNumber,
@@ -649,6 +665,7 @@ async function placeRangeHold(req: HttpRequest): Promise<unknown> {
       startBin: range.startBin, endBin: range.endBin, binSide: range.binSide,
       startLevel: range.startLevel, endLevel: range.endLevel,
       holdType: body.holdType, placed, upgraded, blocked,
+      reservationsCleared: reservedToClear.length,
     },
   });
 

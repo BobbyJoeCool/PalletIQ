@@ -18,6 +18,7 @@
 6. Worker may re-scan/re-type at any time in the Loaded state — the Pallet ID field stays live — loading a different pallet without navigating away.
 7. **IM+ presses Edit** → screen enters Edit mode (State: `edit`).
    - 7a. Edit-mode fields (DPCI, VCP, SSP, Total Cartons, SSPs on Pallet, Full Pallets, Expiration Date, Reason Code) are seeded from the currently-loaded pallet's values.
+   - 7a-i. **(v1.9.1, #165/#167)** VCP/SSP use the shared `VcpSspFields` component and SSPs on Pallet uses the shared `LooseSspsField` — same validation, wash, and auto-advance as PAR. Confirming VCP advances to SSP; confirming SSPs on Pallet advances to Full Pallets. Every other Edit-mode field keeps any-order, no-auto-advance entry. A live **"{n} SSPs per Carton"** caption (owned by `VcpSspFields`) trails the VCP/SSP boxes, blank until the committed pair divides evenly.
    - 7b. Worker changes one or more fields. The Save button stays disabled until at least one field's *parsed* value actually differs from what was loaded (a re-typed but numerically identical value does not enable Save).
    - 7c. Worker picks or types a Reason Code — required the moment any field differs; Save blocked client-side with a message-bar error if omitted at Save time.
    - 7d. Worker presses **Save** → `PATCH /api/pallets/:id` with only the changed fields plus `reasonPrefix`/`reasonNumber` (issue #84 — was one `reasonCode` string, now validated server-side against the caller's own department/role access).

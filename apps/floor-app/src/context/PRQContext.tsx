@@ -13,6 +13,9 @@ export interface PRQFilters {
   binStart: string;
   binEnd: string;
   level: string;
+  /** L3 carton-count range bounds (inclusive, either optional) — PRQ.md "Carton count". */
+  cartonMin: string;
+  cartonMax: string;
 }
 
 const EMPTY_FILTERS: PRQFilters = {
@@ -26,6 +29,8 @@ const EMPTY_FILTERS: PRQFilters = {
   binStart: '',
   binEnd: '',
   level: '',
+  cartonMin: '',
+  cartonMax: '',
 };
 
 interface PRQContextValue {

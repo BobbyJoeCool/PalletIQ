@@ -177,11 +177,25 @@ async function getPullSummary(req: HttpRequest): Promise<unknown> {
  *   `status` (required), `batchDate` (required), `pullFunction` (required),
  *   `binStart` / `binEnd` (optional range filter),
  *   `level` (optional — single level filter),
+ *   `cartonMin` / `cartonMax` (optional — inclusive range on each location's total pull
+ *     cartons for this batch/function; either bound may be given alone. PRQ.md's L3
+ *     "Carton count" filter, min/max per direct instruction 2026-11-15),
  *   `aisle` (optional — single-aisle override within a range, for L2→L3 drill)
  *
  * @returns `{ locations: LocationRow[] }` where each row has the location key, pallet/item
  *   info, quantity totals, and a `containers` array with full container detail.
  */
+/**
+ * Parses an optional non-negative integer query param.
+ * @returns the integer, or null when the param is absent/blank
+ * @throws 400 INVALID_INPUT when present but not a non-negative integer
+ */
+function parseOptionalNonNegativeInt(raw: string | null): number | null {
+  if (raw == null || raw === '') return null;
+  if (!/^\d+$/.test(raw)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  return parseInt(raw, 10);
+}
+
 async function getPullDetail(req: HttpRequest): Promise<unknown> {
   await requireAuth(req);
 
@@ -211,6 +225,8 @@ async function getPullDetail(req: HttpRequest): Promise<unknown> {
   const binStartParam = params.get('binStart');
   const binEndParam = params.get('binEnd');
   const levelParam = params.get('level');
+  const cartonMin = parseOptionalNonNegativeInt(params.get('cartonMin'));
+  const cartonMax = parseOptionalNonNegativeInt(params.get('cartonMax'));
 
   const palletWhere: Record<string, unknown> = { locationAisle: aisleFilter };
   if (binStartParam) {
@@ -357,7 +373,12 @@ async function getPullDetail(req: HttpRequest): Promise<unknown> {
     });
   }
 
-  const locations = [...locationMap.values()].sort((a, b) => {
+  // Carton-count range is a per-location aggregate (sum across this pull's containers), so it
+  // can only be applied after grouping, not in the container query's own WHERE.
+  const locations = [...locationMap.values()].filter((loc) =>
+    (cartonMin == null || loc.pullCartons >= cartonMin) &&
+    (cartonMax == null || loc.pullCartons <= cartonMax),
+  ).sort((a, b) => {
     if (a.aisle !== b.aisle) return a.aisle - b.aisle;
     if (a.bin !== b.bin) return a.bin - b.bin;
     return a.level - b.level;

@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.9.1 — 2026-11-15](#191--2026-11-15)
 - [1.9.0 — 2026-08-28](#190--2026-08-28)
 - [1.8.13 — 2026-08-28](#1813--2026-08-28)
 - [1.8.12 — 2026-08-26](#1812--2026-08-26)
@@ -142,7 +143,7 @@ Bugs and feature requests are now tracked as [GitHub Issues](https://github.com/
 
 ### Major/Important
 
-- [#84](https://github.com/BobbyJoeCool/PalletIQ/issues/84) — Reason codes should be a database table with per-department/role restrictions (needs a product conversation first)
+No bug-severity issues tracked here — see the [open issue list](https://github.com/BobbyJoeCool/PalletIQ/issues) for the live backlog (#84 verified built and closed 2026-11-15).
 
 ### Minor
 
@@ -159,6 +160,38 @@ No issues currently open in this category.
 ### Distant Future
 
 No issues currently open in this category.
+
+---
+
+## [1.9.1] — 2026-11-15
+
+Bug-fix and stale-issue cleanup release after the v1.9.0 milestone. API v1.2.7.
+
+### 1.9.1 — Fixed
+
+- **WLH range hold leaves reservations live** ([#209](https://github.com/BobbyJoeCool/PalletIQ/issues/209)) —
+  a range hold over a `RESERVED` location now clears its reservation through the Logic Gate
+  (location reverts to `EMPTY` under the hold), matching single-location holds. API-side.
+- **CII cancel leaves a pallet stuck pull-pending** ([#210](https://github.com/BobbyJoeCool/PalletIQ/issues/210)) —
+  canceling a pallet's last open container now returns it from `CA_PULL_PEND`/`FP_PULL_PEND`
+  to `STORED` in the same transaction. API-side.
+
+### 1.9.1 — Changed
+
+- **VCP/SSP shared component completed** ([#165](https://github.com/BobbyJoeCool/PalletIQ/issues/165)) —
+  `VcpSspFields` now owns the "SSPs per Carton" display. PAR shows it directly after SSP
+  (ahead of Size); PII Edit mode gains a live caption.
+- **Loose SSPs shared component completed** ([#167](https://github.com/BobbyJoeCool/PalletIQ/issues/167)) —
+  PII Edit mode's SSPs on Pallet auto-advances to Full Pallets on confirm.
+- **PRQ filter gaps closed** ([#135](https://github.com/BobbyJoeCool/PalletIQ/issues/135)) —
+  L3 Cartons Min/Max range filter; Bin range "end must be higher" check (and End Aisle with
+  no Start Aisle); editable Function/Batch Date dropdowns at L2/L3; every L2/L3 filter change
+  now re-queries. Breakpack/Bulk summary rows deferred to #195/#137.
+
+### 1.9.1 — Verified
+
+- **#84 (reason codes as a database table)** audited against its design doc and closed —
+  it shipped earlier; the backlog line above was stale.
 
 ---
 
