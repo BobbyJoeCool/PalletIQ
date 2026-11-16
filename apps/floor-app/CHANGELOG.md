@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.11.0 — 2026-11-15](#1110--2026-11-15)
 - [1.10.0 — 2026-11-15](#1100--2026-11-15)
 - [1.9.1 — 2026-11-15](#191--2026-11-15)
 - [1.9.0 — 2026-08-28](#190--2026-08-28)
@@ -161,6 +162,27 @@ No issues currently open in this category.
 ### Distant Future
 
 No issues currently open in this category.
+
+---
+
+## [1.11.0] — 2026-11-15
+
+Printer + display-field consolidation. API v1.4.0.
+
+### 1.11.0 — Added
+
+- **Printer field** ([#168](https://github.com/BobbyJoeCool/PalletIQ/issues/168)) — PAR's
+  free-text Printer preview becomes the shared `PrinterField`: 4-character code, pick list of
+  active printers (name + prefix type), strict validation against the new Printer table,
+  default OCL0. Create Pallet requires a valid printer.
+
+### 1.11.0 — Changed
+
+- **Display fields** ([#172](https://github.com/BobbyJoeCool/PalletIQ/issues/172)) — the
+  item description is labeled "Description" on every screen (was "Item" on SDP/PIP/MNP,
+  "Short Description" on IID, unlabeled on ISI); IID's long description reads "Long
+  Description". New shared `StorageCodeDescription` (ELA) and `LocationStatusBadges` /
+  `HoldBadge` (LII).
 
 ---
 

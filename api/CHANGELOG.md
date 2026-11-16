@@ -4,6 +4,7 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.4.0 — 2026-11-15](#140--2026-11-15)
 - [1.3.0 — 2026-11-15](#130--2026-11-15)
 - [1.2.7 — 2026-11-15](#127--2026-11-15)
 - [1.2.6 — 2026-08-28](#126--2026-08-28)
@@ -15,6 +16,19 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 - [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
+
+---
+
+## [1.4.0] — 2026-11-15
+
+Backend for floor-app's `[1.11.0]` entry.
+
+### 1.4.0 — Added
+
+- **`Printer` table** (#168) — `code VarChar(4)` PK, `name`, `active`; migration
+  `20261115120000_add_printer` creates and seeds 16 reference printers (RC02 inactive);
+  `seed.ts` carries the same list. Apply with `npx prisma migrate deploy`.
+- **`GET /api/printers`** — active printers, ordered by code.
 
 ---
 
