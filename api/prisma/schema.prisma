@@ -40,6 +40,7 @@ model Department {
   users              User[]
   userDepartments    UserDepartment[]
   reasonCodePrefixes ReasonCodePrefix[]
+  dailyPlanTargets   DailyPlanTarget[]
 }
 
 // ─── ReasonCode (issue #84) ──────────────────────────────────────────────────
@@ -244,18 +245,22 @@ model Location {
 }
 
 model User {
-  zNumber      String  @id @db.VarChar(7)
-  firstName    String  @db.VarChar(50)
-  lastName     String  @db.VarChar(50)
-  pinHash      String  @db.VarChar(60)
+  zNumber       String  @id @db.VarChar(7)
+  firstName     String  @db.VarChar(50)
+  lastName      String  @db.VarChar(50)
+  pinHash       String  @db.VarChar(60)
   // Desktop-app password (bcrypt). Null for anyone without desktop access — only set,
   // by an admin, for desktop-eligible users (see shared/roles.ts isDesktopEligible).
   // Same identity as the tablet's zNumber+PIN login, just a second credential.
-  passwordHash String? @db.VarChar(255)
-  role         String  @db.VarChar(10)
-  departmentId String  @db.VarChar(3)
+  passwordHash  String? @db.VarChar(255)
+  role          String  @db.VarChar(10)
+  departmentId  String  @db.VarChar(3)
+  // The shift this person normally works (Job/Function Assignment, #145): defaults that
+  // screen's shift selector and drives the simulated myTime schedule. Null = not scheduled.
+  homeShiftCode String? @db.VarChar(2)
 
   department Department @relation(fields: [departmentId], references: [id])
+  homeShift  Shift?     @relation(fields: [homeShiftCode], references: [code])
 
   receivedPallets Pallet[]      @relation("PalletReceivedBy")
   putPallets      Pallet[]      @relation("PalletPutBy")
@@ -269,6 +274,9 @@ model User {
 
   // Cross-training (issue #84) — extra departments beyond the required home one above.
   userDepartments UserDepartment[]
+
+  rampingOverrides    RampingOverride[] @relation("RampingWorker")
+  rampingOverridesSet RampingOverride[] @relation("RampingSetBy")
 
   // CII / breakpack event models
   containerEvents        ContainerEvent[]
@@ -459,6 +467,14 @@ model FunctionAssignment {
   startTime    DateTime
   endTime      DateTime
   assignedByZ  String   @db.VarChar(7)
+  // Job/Function Assignment (#145). `shiftCode` is the shift the segment belongs to (null
+  // on rows written before that screen, e.g. IRP demo data). `functionCode` is a job
+  // function, or DTM (Downtime) / OFF (time off); those two carry `reasonCode` — a
+  // downtime reason or an attendance code (shared/workforce.ts) — and `reasonText` when
+  // the code is OTH.
+  shiftCode    String?  @db.VarChar(2)
+  reasonCode   String?  @db.VarChar(3)
+  reasonText   String?  @db.VarChar(255)
 
   worker     User @relation("AssignmentWorker", fields: [workerZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
   assignedBy User @relation("AssignmentAssignedBy", fields: [assignedByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
@@ -727,4 +743,68 @@ model AisleZoneSetting {
   sizeRef    Size        @relation(fields: [size], references: [id])
 
   @@id([aisle, zone, side, level])
+}
+
+// ─── Job/Function Assignment (Desktop, #145) ─────────────────────────────────
+
+/// The four fixed shifts every department works. Times are local wall-clock times; a
+/// night shift ends the next day.
+model Shift {
+  code      String @id @db.VarChar(2)
+  /// "SAT-MON" or "TUE-FRI" — display only; which dates a shift runs is in shared/workforce.ts.
+  daysLabel String @db.VarChar(20)
+  /// "HH:MM", 24-hour.
+  startTime String @db.VarChar(5)
+  endTime   String @db.VarChar(5)
+
+  breaks           ShiftBreak[]
+  homeUsers        User[]
+  dailyPlanTargets DailyPlanTarget[]
+}
+
+/// A break window inside a shift ("HH:MM", 24-hour, local).
+model ShiftBreak {
+  id        Int    @id @default(autoincrement())
+  shiftCode String @db.VarChar(2)
+  startTime String @db.VarChar(5)
+  endTime   String @db.VarChar(5)
+
+  shift Shift @relation(fields: [shiftCode], references: [code])
+}
+
+/// A department's target volume for one function on one date and shift — entered by OM on
+/// Prod Goal / Daily Plan (#146). Where no row exists, Job/Function Assignment shows a
+/// simulated target (shared/workforce.ts) and says so.
+model DailyPlanTarget {
+  id           Int      @id @default(autoincrement())
+  departmentId String   @db.VarChar(3)
+  functionCode String   @db.VarChar(3)
+  date         DateTime @db.Date
+  shiftCode    String   @db.VarChar(2)
+  targetVolume Int
+  unit         String   @db.VarChar(20)
+
+  department Department @relation(fields: [departmentId], references: [id])
+  shift      Shift      @relation(fields: [shiftCode], references: [code])
+
+  @@unique([departmentId, functionCode, date, shiftCode])
+}
+
+/// A worker producing at a reduced share of a function's goal while ramping up (e.g. 60%).
+/// Edited on Prod Goal / Ramping (#146); read by Job/Function Assignment (#145) for the
+/// RAMP badge and the staffing projection. `endDate` null = open-ended.
+model RampingOverride {
+  id           Int       @id @default(autoincrement())
+  workerZ      String    @db.VarChar(7)
+  functionCode String    @db.VarChar(3)
+  percent      Int
+  startDate    DateTime  @db.Date
+  endDate      DateTime? @db.Date
+  setByZ       String    @db.VarChar(7)
+  createdAt    DateTime  @default(now())
+
+  worker User @relation("RampingWorker", fields: [workerZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  setBy  User @relation("RampingSetBy", fields: [setByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([workerZ, functionCode])
 }

@@ -211,6 +211,42 @@ erDiagram
         string passwordHash "VarChar(255), nullable — desktop-app login only"
         string role "VarChar(10), Role values"
         string departmentId FK "VarChar(3) → Department"
+        string homeShiftCode FK "nullable, VarChar(2) → Shift — Job/Function Assignment (#145)"
+    }
+
+    Shift {
+        string code PK "VarChar(2) — A1, A2, B1, B2"
+        string daysLabel "VarChar(20) — SAT-MON | TUE-FRI"
+        string startTime "VarChar(5) HH:MM local"
+        string endTime "VarChar(5) HH:MM local — night shifts end next day"
+    }
+
+    ShiftBreak {
+        int id PK "autoincrement"
+        string shiftCode FK "VarChar(2) → Shift"
+        string startTime "VarChar(5) HH:MM"
+        string endTime "VarChar(5) HH:MM"
+    }
+
+    DailyPlanTarget {
+        int id PK "autoincrement"
+        string departmentId FK "VarChar(3) → Department"
+        string functionCode "VarChar(3)"
+        date date
+        string shiftCode FK "VarChar(2) → Shift"
+        int targetVolume
+        string unit "VarChar(20) — e.g. cartons; unique per dept/function/date/shift"
+    }
+
+    RampingOverride {
+        int id PK "autoincrement"
+        string workerZ FK "VarChar(7) → User"
+        string functionCode "VarChar(3)"
+        int percent "share of goal, e.g. 60"
+        date startDate
+        date endDate "nullable — open-ended"
+        string setByZ FK "VarChar(7) → User"
+        datetime createdAt
     }
 
     Department {
@@ -254,11 +290,14 @@ erDiagram
     FunctionAssignment {
         int id PK "autoincrement"
         string workerZ FK "VarChar(7) → User"
-        string functionCode "VarChar(3) — CA/CF/FP/BKP/BK/RP/HP/GPM/CON"
+        string functionCode "VarChar(3) — CA/CF/FP/BKP/BK/RP/HP/GPM/CON, or DTM (Downtime) / OFF (time off)"
         date date "the assignment's calendar date"
         datetime startTime "block start"
         datetime endTime "block end"
         string assignedByZ FK "VarChar(7) → User"
+        string shiftCode "nullable, VarChar(2) — set by Job/Function Assignment (#145)"
+        string reasonCode "nullable, VarChar(3) — downtime reason (DTM) or attendance code (OFF)"
+        string reasonText "nullable, VarChar(255) — required when reasonCode = OTH"
     }
 
     ProdGoal {
@@ -315,6 +354,12 @@ erDiagram
 
     FunctionAssignment }o--|| User : "workerZ"
     FunctionAssignment }o--|| User : "assignedByZ"
+    User }o--o| Shift : "homeShiftCode (nullable)"
+    ShiftBreak }o--|| Shift : "shiftCode"
+    DailyPlanTarget }o--|| Shift : "shiftCode"
+    DailyPlanTarget }o--|| Department : "departmentId"
+    RampingOverride }o--|| User : "workerZ"
+    RampingOverride }o--|| User : "setByZ"
 
     %% ============================================================
     %% CII (Container ID Inquiry) MODELS — v1.8.9

@@ -1,8 +1,8 @@
 # PalletIQ Desktop
 
 **Status:** Electron shell, zNumber + password login, the Embedded Floor App (#141), the
-Audit Tool (#148) and Location Setup (#143) are built. The five remaining Manager screens
-are stubbed as "Coming Soon".
+Audit Tool (#148), Location Setup (#143) and Job/Function Assignment (#145) are built. The
+four remaining Manager screens are stubbed as "Coming Soon".
 
 The Manager-facing desktop application: a web app bundled with Electron, covering the
 DESKTOP-bucket screens designed in the 2026-07-25 design session (DPCI Setup Edit,
@@ -81,9 +81,18 @@ Storage; **Contraction** contracts or opens zone cells (floor / top presets) or 
 locations. OM, ICQA and Admin can also create and delete aisles and restore Not For
 Storage locations. Spec: `../../Documentation/ScreenSpecs/Desktop-Location-Setup.md`.
 
+## Job/Function Assignment
+
+The shift roster as a timeline, one bar per team member. Select names and click a
+function in the sticky header to assign their unassigned time (a dialog handles anyone
+already assigned). Drag a section's edge or type a start / finish time to change it;
+click a section to edit it, double-click to split it. Downtime and Time Off take a reason.
+LWW, OM and Admin only. Sign in as a Roman lead (e.g. `z930l01` / `Desktop1234`, B1) to
+see a full roster. Spec: `../../Documentation/ScreenSpecs/Desktop-Job-Assignment.md`.
+
 ## Not yet done
 
-- Five Manager screens (#142, #144–147) do not exist yet; each nav entry opens a
+- Four Manager screens (#142, #144, #146, #147) do not exist yet; each nav entry opens a
   "Coming Soon" page.
 - None of the ~15 new Prisma models these screens need have been added to
   `../../api/prisma/schema.prisma` yet.
