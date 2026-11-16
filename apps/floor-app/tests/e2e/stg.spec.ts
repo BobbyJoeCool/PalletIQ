@@ -9,9 +9,24 @@ import { pickCode, tapKeys } from './helpers';
 // comment here meant, mislabeled as 304); 303 isn't in `STAGED_AISLES` at all (0% staged,
 // full room). Re-seed (`cd api && npx prisma db seed`) if this test starts failing with
 // unplaced pallets.
+/** The demo reseed's shift simulator stages and puts more the later in the day it runs,
+ *  and can leave aisle 303's CR/L stock with no EMPTY location (or none anywhere). So
+ *  before the suite runs, return 303's staged CR/L locations to EMPTY via STG's own
+ *  restage endpoint (quantity 0 = the Unstage panel's clear), guaranteeing room to stage
+ *  regardless of when the reseed ran (#197). */
 const LIVE_AISLE = '303';
 const LIVE_STORAGE = 'CR';
 const LIVE_SIZE = 'L';
+
+test.beforeAll(async ({ request }) => {
+  const login = await request.post('/api/auth/login', { data: { zNumber: 'z002p22', pin: '1234' } });
+  const { token } = await login.json() as { token: string };
+  const res = await request.post('/api/staging/restage', {
+    headers: { 'X-Auth-Token': token },
+    data: { aisle: Number(LIVE_AISLE), types: [{ storageCode: LIVE_STORAGE, size: LIVE_SIZE, quantity: 0 }] },
+  });
+  expect(res.ok()).toBeTruthy();
+});
 
 /** Scopes one of the three stack boxes riding the forks (issue #81) by its visible label —
  *  "Staging" (front/rightmost, the only slot that ever computes locations or stages),
@@ -243,12 +258,9 @@ test.describe('STG — Stage Aisle', () => {
 
     await suggestionBtn.click();
     await expect(page.getByText('Reject suggested location?')).toBeVisible();
-    // Defaults to the "Blocked" reason code, editable via the dropdown before confirming.
-    // `exact: true` (GitHub #156) — unqualified `getByLabel('Reason')` also matches the
-    // field's own "Reason options" popup-toggle button (a substring match on aria-label by
-    // default). `toHaveText`, not `toHaveValue` (stale here) — this is a CodePickerField-
-    // family button, not a native input/select, so it has no `.value` to assert on.
-    await expect(page.getByLabel('Reason', { exact: true })).toHaveText('B05');
+    // Pre-filled with the Blocked Location reason (W + 70 since the #84 reason-code
+    // redesign; was 'B05'), editable before confirming.
+    await expect(page.getByRole('button', { name: 'Reason Number', exact: true })).toHaveText('70');
     await page.getByRole('button', { name: 'Confirm Hold' }).click();
 
     await expect(page.getByText(new RegExp(`${rejected} held`))).toBeVisible();

@@ -45,15 +45,23 @@ async function pickDemoFilter(page: Page, label: string, optionLabel: string) {
 async function directPallet(page: Page, aisle: string, mode: 'put' | 'move'): Promise<DirectedResult> {
   await tapKeys(page, aisle);
   await page.getByRole('button', { name: 'Enter', exact: true }).click();
-  await page.getByRole('button', { name: 'Pallet ID by Status' }).click();
-  if (mode === 'move') await pickDemoFilter(page, 'Status', 'Stored');
-  await pickDemoFilter(page, 'Storage Code', 'Conveyable Reserve');
-  await pickDemoFilter(page, 'Size', 'Small');
-  const [resp] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/api/puts/directed') && r.ok()),
-    page.getByRole('button', { name: 'Find', exact: true }).click(),
-  ]);
-  return resp.json();
+  // A random demo pick can occasionally be undirectable (e.g. its own storage code/size
+  // has no open location left in this aisle on a late-day reseed, or a pull is pending) —
+  // retry with a fresh pick rather than waiting out a success that will never come (#197).
+  const codes: string[] = [];
+  for (let attempt = 1; ; attempt++) {
+    await page.getByRole('button', { name: 'Pallet ID by Status' }).click();
+    if (mode === 'move') await pickDemoFilter(page, 'Status', 'Stored');
+    await pickDemoFilter(page, 'Storage Code', 'Conveyable Reserve');
+    await pickDemoFilter(page, 'Size', 'Small');
+    const [resp] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/api/puts/directed')),
+      page.getByRole('button', { name: 'Find', exact: true }).click(),
+    ]);
+    if (resp.ok()) return resp.json();
+    codes.push(((await resp.json().catch(() => ({}))) as { error?: string }).error ?? String(resp.status()));
+    if (attempt >= 4) throw new Error(`directPallet: no directable ${mode} pallet after ${attempt} picks (${codes.join(', ')})`);
+  }
 }
 
 /**
@@ -101,6 +109,24 @@ function modal(page: Page) {
  * - CONF_OK / UN_OK -> NOT_FOUND (reservation expired): real 5-minute server-side timeout,
  *   not worth a real-clock-dependent test.
  */
+// Consolidating-mode puts skip STAGED locations, so they need EMPTY, unheld, uncontracted
+// CR/S stock in the live aisle — which the demo reseed's shift simulator can use up (every
+// EMPTY CR/S location in 304 contracted or held). Before the suite, re-stage 6 fewer than
+// are currently staged (STG's restage endpoint clears the type, then stages N), leaving
+// 6 fresh EMPTY locations while the regular put tests still land on STAGED ones (#197).
+test.beforeAll(async ({ request }) => {
+  const login = await request.post('/api/auth/login', { data: { zNumber: 'z002p22', pin: '1234' } });
+  const { token } = await login.json() as { token: string };
+  const headers = { 'X-Auth-Token': token };
+  const types = (await (await request.get(`/api/staging/staged-types?aisle=${LIVE_AISLE}`, { headers })).json()) as { storageCode: string; size: string; staged: number }[];
+  const crs = types.find((t) => t.storageCode === 'CR' && t.size === 'S');
+  if (!crs || crs.staged <= 6) return;
+  await request.post('/api/staging/restage', {
+    headers,
+    data: { aisle: Number(LIVE_AISLE), types: [{ storageCode: 'CR', size: 'S', quantity: crs.staged - 6 }] },
+  });
+});
+
 test.describe('SDP — System Directed Put flow', () => {
   test.use({ storageState: 'playwright/.auth/im.json' });
 
@@ -255,26 +281,18 @@ test.describe('SDP — System Directed Put flow', () => {
     await expect(page.getByText(/^Put complete/)).not.toBeVisible();
   });
 
-  // Node ACTION {Worker action?} -> Hold Location. Replaces the old "Blocked Put" test
-  // entirely (issue #151 — Hold Location embeds the shared HoldPanel and stops; no more
-  // auto-continue to a new location, no more hardcoded Hold Both).
-  test('Hold Location places a hold via the shared HoldPanel and returns to entry, no auto-continue', async ({ page }) => {
-    const { directedLocation } = await directPallet(page, LIVE_AISLE, 'move');
+  // Node ACTION {Worker action?} -> Hold Location. A locked Hold Both / reason-70 confirm
+  // (LockedHoldConfirmDialog, same shape as MNP's occupied-location gate), not the full
+  // HoldPanel; it stops once placed (no auto-continue to a new location).
+  test('Hold Location places Hold Both on the reserved location and returns to entry, no auto-continue', async ({ page }) => {
+    const { directedLocation } = await directPallet(page, LIVE_AISLE, 'put');
     await modal(page).getByRole('button', { name: 'Hold Location' }).click();
 
-    // HoldPanel itself (same component PIP/MNP/WLH already use) — pick a type, a reason
-    // code, and confirm.
-    // Not `exact: true` — the button's accessible name is its type name plus its "blocks"
-    // description span concatenated ("Hold BothBlocks puts and new label generation"), same
-    // pattern as the demo popup's own Size options ("XS\n— Extra Small (Hand Put)"). No other
-    // Hold Type name starts with "Hold Both", so an anchored prefix regex is unambiguous.
-    await expect(page.getByText('Hold Type', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: /^Hold Both/ }).click();
-    await pickCode(page, 'Reason Code', 'B01');
-    await page.getByRole('button', { name: 'Confirm Hold', exact: true }).click();
+    await expect(page.getByText('Place Hold Both — Blocked Location')).toBeVisible();
+    await pickCode(page, 'Reason Number', '70');
+    await page.getByRole('button', { name: 'Confirm', exact: true }).click();
 
     await expect(page.getByText(`Hold Both placed on ${fmtLocation(directedLocation)}`)).toBeVisible();
-    // No auto-continue — back to entry, not re-directed to a new location.
     await expect(modal(page)).not.toBeVisible();
   });
 

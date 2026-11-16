@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { selectPullFunction } from './helpers';
 
 /**
  * Covers the app-wide, cross-function 12-hour activity log overlay (issue #46). See
@@ -22,7 +23,7 @@ test.describe('App-wide activity log (issue #46)', () => {
   });
 
   test('completing a pull immediately shows a PULL entry in the log', async ({ page }) => {
-    await page.getByRole('button', { name: 'Carton Air' }).click();
+    await selectPullFunction(page, 'Carton Air');
     await page.getByRole('button', { name: '✓ Valid Label' }).click();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '✓ Scan PID' }).click();
@@ -30,13 +31,14 @@ test.describe('App-wide activity log (issue #46)', () => {
 
     await page.getByRole('button', { name: '☰ Activity' }).click();
     await expect(page.getByText('PULL', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(/^Pulled pallet from /).first()).toBeVisible();
+    // Detail line format: "CA Pull: Pulled {qty} from {pallet}" (activityFormat.ts).
+    await expect(page.getByText(/^CA Pull: Pulled .* from/).first()).toBeVisible();
   });
 
   // Issue #46's core promise: the log persists across reload (real DB storage, not
   // in-memory session state) and is identical regardless of which screen it's opened from.
   test('the log is unaffected by navigating to a different screen', async ({ page }) => {
-    await page.getByRole('button', { name: 'Carton Air' }).click();
+    await selectPullFunction(page, 'Carton Air');
     await page.getByRole('button', { name: '✓ Valid Label' }).click();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '✓ Scan PID' }).click();

@@ -88,3 +88,24 @@ export async function pickCode(page: Page, fieldAriaLabel: string, code: string)
   await page.getByRole('button', { name: `${fieldAriaLabel} options`, exact: true }).click();
   await page.getByRole('button', { name: new RegExp(`^${code} —`) }).click();
 }
+
+/**
+ * Closes whichever on-screen input panel is open, via the footer's own Keypad / Keyboard
+ * toggle (the same control a worker uses). Needed when a field keeps its panel open after
+ * a value is delivered and the panel would cover a control the test taps next.
+ */
+export async function dismissPanel(page: Page) {
+  if (await page.getByTestId('numpad-panel').isVisible()) {
+    await page.getByRole('button', { name: /Keypad/ }).click();
+  } else if (await page.getByTestId('keyboard-panel').isVisible()) {
+    await page.getByRole('button', { name: /Keyboard/ }).click();
+  }
+}
+
+/** Picks PIP's Pull Function from its dropdown (a no-op if already selected). */
+export async function selectPullFunction(page: Page, desc: string) {
+  const trigger = page.locator('div.relative.inline-flex').getByRole('button').first();
+  if ((await trigger.innerText()).includes(desc)) return;
+  await trigger.click();
+  await page.locator('div.absolute.z-50').getByRole('button', { name: desc }).click();
+}

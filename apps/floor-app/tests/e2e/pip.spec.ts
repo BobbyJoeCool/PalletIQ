@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { hardwareScan, tapKeys } from './helpers';
+import { hardwareScan, tapKeys, selectPullFunction } from './helpers';
 
 test.use({ storageState: 'playwright/.auth/worker.json' });
 
@@ -28,12 +28,8 @@ test.describe('PIP — Pallet ID Pull flow', () => {
    *  full-screen backdrop covering the page — the trigger and every option share the same
    *  "CODE — Desc" text, so option clicks are scoped to the open popup's own container to
    *  disambiguate from the closed trigger). */
-  async function selectFunction(page: import('@playwright/test').Page, desc: string) {
-    const trigger = page.locator('div.relative.inline-flex').getByRole('button').first();
-    if ((await trigger.innerText()).includes(desc)) return;
-    await trigger.click();
-    await page.locator('div.absolute.z-50').getByRole('button', { name: desc }).click();
-  }
+  // Pull Function dropdown helper lives in helpers.ts (shared with activity-log.spec).
+  const selectFunction = selectPullFunction;
 
   /** Scopes the Pallet ID/UPC/Location field-wrapper buttons by their label — same
    *  pattern used throughout this suite for every other screen's numpad-driven field. */
@@ -329,8 +325,9 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     // Before any pull, only a "current" location exists — Hold goes straight to the panel.
     await page.getByRole('button', { name: 'Hold', exact: true }).click();
     await expect(page.getByText('Place Hold').or(page.getByText('Hold', { exact: true }))).toBeVisible();
-    await page.keyboard.press('Escape').catch(() => {});
-    await page.getByRole('button', { name: 'Close' }).click().catch(() => {});
+    // The inline HoldPanel's close affordance is labeled "Cancel" (a missing "Close" button
+    // used to be swallowed by .catch() after waiting out the whole test timeout).
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 
     await page.getByRole('button', { name: '✓ Scan PID' }).click();
     await expect(page.getByText(/^Last Pull .* — /)).toBeVisible();
