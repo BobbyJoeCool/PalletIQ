@@ -391,3 +391,5 @@ data:
 Fields 1-4 are from `useDpciFields`/`useUpcField`; fields 14-16 are from
 `useExpirationDateFields`; fields 17-19 are inside the shared
 `LocationEntryFields` component.
+
+**(v1.11.0, #172)** The item's short description renders through the shared presentational `ItemDescription` and is always labeled **Description**, the app-wide standard (it was "Short Description" / "Item" / unlabeled, depending on the screen). PAR uses the component's stacked (label-above) layout.

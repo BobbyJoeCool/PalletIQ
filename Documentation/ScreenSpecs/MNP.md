@@ -210,3 +210,5 @@ both directions). Which fields are active depends on the screen state:
 3. Level
 
 The location fields are inside the shared `LocationEntryFields` component.
+
+**(v1.11.0, #172)** The item's short description renders through the shared presentational `ItemDescription` and is always labeled **Description**, the app-wide standard (it was "Short Description" / "Item" / unlabeled, depending on the screen).

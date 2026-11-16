@@ -21,7 +21,7 @@ async function scanPallet(page: Page, mode: 'put' | 'move') {
     await statusDropdown.getByRole('button', { name: 'Stored', exact: true }).click();
   }
   await page.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(page.getByText('Item', { exact: true })).toBeVisible();
+  await expect(page.getByText('Description', { exact: true })).toBeVisible();
 }
 
 async function pickDestination(page: Page, statusLabel: 'Empty' | 'Stored') {

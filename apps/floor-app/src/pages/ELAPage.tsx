@@ -14,6 +14,7 @@ import { useAisleField } from '../lib/useAisleField';
 import { useStorageCodes } from '../lib/useStorageCodes';
 import { useWorkstations, type Workstation } from '../lib/useWorkstations';
 import { AisleField } from '../components/shared/AisleField';
+import { StorageCodeDescription } from '../components/shared/StorageCodeDescription';
 
 type AisleRow = AisleSizeRow;
 type SortState = AisleSizeSort;
@@ -358,7 +359,7 @@ export function ELAPage() {
       {storageDesc != null && (
         <div className="shrink-0 py-2 text-center border-y border-[#2A2A2A]">
           <span className="font-ui text-[28px] font-bold text-white tracking-wide">
-            Displaying {storageCode}: {storageDesc}
+            Displaying <StorageCodeDescription code={storageCode} />
           </span>
         </div>
       )}

@@ -736,7 +736,7 @@ export function MNPPage() {
               <DataRow label="Pallet ID">
                 <LiveId type="pallet" id={String(scannedPallet.id)} />
               </DataRow>
-              <ItemDescription value={scannedPallet.descShort} label="Item" />
+              <ItemDescription value={scannedPallet.descShort} />
               <DataRow label="DPCI">
                 <div className="flex items-center gap-2">
                   <LiveId type="dpci" id={scannedPallet.dpci} />

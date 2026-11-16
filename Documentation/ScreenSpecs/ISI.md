@@ -162,3 +162,5 @@ both directions):
 2. Class
 3. Item
 4. UPC
+
+**(v1.11.0, #172)** The item's short description renders through the shared presentational `ItemDescription` and is always labeled **Description**, the app-wide standard (it was "Short Description" / "Item" / unlabeled, depending on the screen). ISI's once-above-the-list description is now a labeled Description row, not an unlabeled headline.

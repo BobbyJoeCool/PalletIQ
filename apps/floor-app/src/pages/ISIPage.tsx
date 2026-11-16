@@ -12,6 +12,7 @@ import { useDpciFields } from '../lib/useDpciFields';
 import { useUpcField } from '../lib/useUpcField';
 import { UpcField } from '../components/shared/UpcField';
 import { DpciEntry } from '../components/shared/DpciEntry';
+import { ItemDescription } from '../components/shared/ItemDescription';
 
 interface LocationsResponse {
   dpci: string;
@@ -189,7 +190,7 @@ export function ISIPage() {
       {loading && <p className="font-ui text-[16px] text-[#9A9A9A] animate-pulse">Loading…</p>}
 
       {search && !loading && (
-        <p className="font-data text-[26px] font-medium text-white max-w-[720px]">{search.descShort}</p>
+        <div className="max-w-[720px]"><ItemDescription value={search.descShort} /></div>
       )}
 
       {locations && !loading && (

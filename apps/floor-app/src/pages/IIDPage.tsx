@@ -169,8 +169,8 @@ export function IIDPage() {
             <DataRow label="DPCI">{item.dpci}</DataRow>
             <DataRow label="UPC">{item.upc}</DataRow>
             <DataRow label="Name">{item.name}</DataRow>
-            <ItemDescription value={item.descShort} label="Short Description" />
-            <DataRow label="Description">{item.desc}</DataRow>
+            <ItemDescription value={item.descShort} />
+            <DataRow label="Long Description">{item.desc}</DataRow>
             <DataRow label="Retail Price">${item.retailPrice.toFixed(2)}</DataRow>
             <DataRow label="Cost">${item.cost.toFixed(2)}</DataRow>
             <DataRow label="Unit Weight">{item.unitWeight != null ? `${item.unitWeight.toFixed(2)} lbs` : '—'}</DataRow>

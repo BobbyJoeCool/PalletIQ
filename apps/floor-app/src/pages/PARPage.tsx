@@ -30,6 +30,7 @@ import { UpcField } from '../components/shared/UpcField';
 import { DpciEntry } from '../components/shared/DpciEntry';
 import { PrinterField } from '../components/shared/PrinterField';
 import { DEFAULT_PRINTER } from '../lib/printerPrefixes';
+import { ItemDescription } from '../components/shared/ItemDescription';
 
 type Mode = 'single' | 'multiple';
 
@@ -769,7 +770,7 @@ export function PARPage() {
             </span>
           </div>
         )}
-        <PlainText label="Description" value={item?.descShort ?? ''} width="w-[600px]" />
+        <ItemDescription value={item?.descShort} layout="stacked" />
       </div>
 
       {/* Row 2 — VCP / SSP entry (shared VcpSspFields component — issue #165). */}

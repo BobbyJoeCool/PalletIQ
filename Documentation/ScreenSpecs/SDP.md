@@ -237,3 +237,5 @@ state.
 3. Storage Code *(IM+ only)*
 4. Zone *(IM+ only)*
 5. Pallet ID *(enabled only after an Aisle is entered)*
+
+**(v1.11.0, #172)** The item's short description renders through the shared presentational `ItemDescription` and is always labeled **Description**, the app-wide standard (it was "Short Description" / "Item" / unlabeled, depending on the screen). (Verify-Put Modal.)
