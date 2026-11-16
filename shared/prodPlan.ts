@@ -185,6 +185,8 @@ export interface DailyPlanView {
   shiftsOnDate: { day: string; night: string };
   departmentId: string;
   productiveHours: number;
+  /** Full shift length — the hours "Needs" uses (target ÷ (rate × shift hours)). */
+  shiftHours: number;
   drop: { functionCode: string; volume: number; unit: string }[];
   staffing: AttendanceSummary;
   otherDepartments: { departmentId: string; name: string; net: number; targets: { functionCode: string; targetVolume: number; unit: string }[] }[];

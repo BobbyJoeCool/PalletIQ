@@ -9,7 +9,7 @@ import {
   type DailyPlanView, type GoalRow, type ProdGoalsView, type RampingRow, type RampingView,
 } from '../../shared/prodPlan.js';
 import {
-  TIME_OFF_CODE, WAREHOUSE_FUNCTIONS, isoDateOf, localMidnight, requiredHeadcount, runsOn, shiftProductiveHours,
+  TIME_OFF_CODE, WAREHOUSE_FUNCTIONS, isoDateOf, localMidnight, requiredHeadcount, runsOn, shiftHours, shiftProductiveHours,
   shiftWindow, shiftsForDate, simulatedSchedule, simulatedTarget, volumeUnit, type ShiftCode,
 } from '../../shared/workforce.js';
 
@@ -223,6 +223,7 @@ export async function loadDailyPlan(departmentId: string, isoDate: string, shift
   if (!runsOn(shift, isoDate)) throw httpError('SHIFT_NOT_ON_DATE', 400);
   const date = dbDateFromIso(isoDate);
   const productiveHours = shiftProductiveHours(shift, isoDate);
+  const hours = shiftHours(shift, isoDate);
   const [goals, targets, departments] = await Promise.all([
     goalsInForce(isoDate),
     prisma.dailyPlanTarget.findMany({ where: { date, shiftCode: shift } }),
@@ -248,7 +249,7 @@ export async function loadDailyPlan(departmentId: string, isoDate: string, shift
       unit: entered?.unit ?? (goal ? volumeUnit(goal.unit) : null),
       target: entered?.targetVolume ?? null,
       simulatedTarget: simulated,
-      requiredHeadcount: effective != null && rate != null ? requiredHeadcount(effective, rate, productiveHours) : null,
+      requiredHeadcount: effective != null && rate != null ? requiredHeadcount(effective, rate, hours) : null,
     };
   });
 
@@ -266,7 +267,7 @@ export async function loadDailyPlan(departmentId: string, isoDate: string, shift
   }
 
   return {
-    date: isoDate, shiftCode: shift, shiftsOnDate: shiftsForDate(isoDate), departmentId, productiveHours,
+    date: isoDate, shiftCode: shift, shiftsOnDate: shiftsForDate(isoDate), departmentId, productiveHours, shiftHours: hours,
     drop, staffing: await departmentStaffing(departmentId, isoDate, shift), otherDepartments, lines,
   };
 }

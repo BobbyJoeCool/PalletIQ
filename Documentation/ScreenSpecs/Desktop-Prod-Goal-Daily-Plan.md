@@ -22,7 +22,7 @@ ICQA is excluded unless they hold one of those roles. Ramping and targets cover 
    - **Daily Drop** — simulated company-wide store-order volume per pull function (CA, CF, FP, BKP, BK), deterministic per date.
    - **Staffing** — the department's scheduled team members, minus anyone whose whole scheduled shift is Time Off on the Job/Function Assignment roster (broken down by attendance code), and the net available. Partial time off (e.g. VLE) still counts as available.
    - **Other departments** — each staffed department's net headcount and any targets it has. No per-worker detail.
-3. One target box per function that has a goal. A blank box shows the simulated target the roster uses as its placeholder. **Needs** updates live: target ÷ (goal rate × productive hours), rounded up.
+3. One target box per function that has a goal. A blank box shows the simulated target the roster uses as its placeholder. **Needs** updates live: target ÷ (goal rate × full shift hours), rounded up — 18,000 cartons at 180/hr on a 10-hour shift needs 10.
 4. **Save targets** writes the department's targets; clearing a box removes the entered target, and the roster goes back to the simulated one. Reference numbers never limit what can be entered.
 
 ### Ramping
