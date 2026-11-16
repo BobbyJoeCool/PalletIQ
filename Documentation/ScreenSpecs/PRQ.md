@@ -13,7 +13,7 @@ PRQ shows pull activity for an aisle, workstation, or aisle range — broken dow
 
 ## Container Status Scope
 
-Only three container statuses are queryable: **Available**, **Printed**, **Verified**. The status filter dropdown is limited to these three — Diverted, Canceled, and Purged containers cannot be looked up on this screen. The pull-detail popup's container list shows all six statuses since it reflects the full record for one specific pull.
+Only three container statuses are queryable: **Available**, **Printed**, **Verified**. **(v1.10.0, #213)** "Verified" filters on the stored status `PULLED` (shared `PRQ_STATUS_FILTERS`). Before this change it queried a `VERIFIED` status nothing writes, so it always came back empty. The pull-detail popup labels PULLED containers "VERIFIED". The status filter dropdown is limited to these three — Diverted, Canceled, and Purged containers cannot be looked up on this screen. The pull-detail popup's container list shows all six statuses since it reflects the full record for one specific pull.
 
 ## Entry Filters
 
@@ -94,6 +94,8 @@ Full-screen overlay showing complete detail for one pull:
 - `api/functions/pullRequest.ts` — summary + detail API endpoints
 
 ## Tab Order
+
+**(v1.10.0, #214)** Tab / Back Tab no longer follow a hand-written slot list. They move along the field boxes rendered on screen, in layout order (`lib/fieldSequence.ts`), wrapping at both ends and scoped to the topmost open modal. A field that isn't rendered (or is disabled) is skipped. The order below is what that produces.
 
 Tab / Back Tab navigates between numpad-driven fields in this order (wraps in
 both directions), inside the `PRQFilterBar` component:

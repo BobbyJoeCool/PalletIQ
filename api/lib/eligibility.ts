@@ -1,12 +1,8 @@
 import prisma from './prisma.js';
+import { whereOpenContainer } from './containerLifecycle.js';
 
-/**
- * Terminal Container statuses — a container in one of these is resolved and no longer
- * "open" against its pallet. Used as a `notIn` filter to find open containers; canonical
- * definition, every such check across the API should filter against this instead of
- * restating the literal list.
- */
-export const TERMINAL_CONTAINER_STATUSES = ['PULLED', 'DIVERTED', 'CANCELED', 'PURGED'];
+// The "open container" definition (formerly TERMINAL_CONTAINER_STATUSES here, used as a
+// notIn filter) lives in the container lifecycle (#213) — see whereOpenContainer().
 
 export interface EligibilityResult {
   eligible: true;
@@ -73,7 +69,7 @@ export async function checkPalletEligibility(palletId: number): Promise<Eligibil
   }
 
   const openContainerCount = await prisma.container.count({
-    where: { pid: palletId, status: { notIn: TERMINAL_CONTAINER_STATUSES } },
+    where: { pid: palletId, ...whereOpenContainer() },
   });
   if (openContainerCount > 0) {
     throw Object.assign(new Error('BLOCKED_BY_PENDING_PULL'), { status: 409 });

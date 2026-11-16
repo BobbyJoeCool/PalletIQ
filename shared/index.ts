@@ -3,22 +3,11 @@
 // ─── String unions (enum equivalents, kept as plain strings across the SQL Server →
 //     MySQL migration, GitHub #139, rather than switching to native Prisma enums) ─────
 
-export type Role = 'ADMIN' | 'MANAGER' | 'LEAD' | 'IM' | 'WORKER';
-
-// ─── Role hierarchy ───────────────────────────────────────────────────────────
-
-export const ROLE_RANK: Record<Role, number> = {
-  WORKER:  1,
-  IM:      2,
-  LEAD:    3,
-  MANAGER: 4,
-  ADMIN:   5,
-};
-
-/** Returns true if userRole meets or exceeds minRole in the hierarchy. */
-export function hasMinRole(userRole: Role, minRole: Role): boolean {
-  return ROLE_RANK[userRole] >= ROLE_RANK[minRole];
-}
+import type { Role } from './roles.js';
+export { type Role, ROLE_RANK, hasMinRole, isRole } from './roles.js';
+export { sspPerCarton, isValidVcpSspRatio, exceedsSspCap } from './vcpSsp.js';
+export * from './location.js';
+export { classifyExpirationDate, EXPIRATION_MIN_MONTHS, EXPIRATION_CONFIRM_MONTHS, type ExpirationClass } from './expiration.js';
 
 // HOLD_IN/HOLD_OUT/HOLD_BOTH/HOLD_PERM were removed from this union in Phase 10 — hold
 // state now lives in the independent `Location.holdCategory` field (see HoldCategory
@@ -32,7 +21,8 @@ export type LocationStatus =
 
 export type LocationSize = 'XS' | 'HS' | 'S' | 'M' | 'L';
 
-export type HoldCategory = 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM';
+import type { HoldCategory } from './locationPolicy.js';
+export * from './locationPolicy.js';
 
 // CA_PULL_PEND/FP_PULL_PEND (v1.6.9) replace the never-implemented generic 'PULL_PENDING'
 // pallet value — CA_PULL_PEND covers both CA (Carton Air) and CF (Carton Floor) pull
@@ -51,13 +41,8 @@ export type PalletStatus =
   | 'CANCELED'
   | 'CONSOLIDATED';
 
-export type ContainerStatus =
-  | 'AVAILABLE'
-  | 'PRINTED'
-  | 'PULLED'
-  | 'DIVERTED'
-  | 'CANCELED'
-  | 'PURGED';
+import type { ContainerStatus } from './containerStatus.js';
+export * from './containerStatus.js';
 
 export type ActionType = 'PULL' | 'PUT';
 

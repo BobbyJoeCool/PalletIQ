@@ -6,57 +6,17 @@ import { requireAuth, hasMinRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { checkPalletEligibility } from '../lib/eligibility.js';
 import { findNextLocation, resolveEffectiveCriteria } from '../lib/zoneLogic.js';
-import { parseLocationBarcode, formatLocationId as locationString } from '../lib/locationParser.js';
-import { clearLocation, putComplete, reservePut, zeroPallet } from '../lib/logicGate.js';
+import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId as locationString } from '../lib/locationParser.js';
+import { reservePut, confirmReservation, confirmReservationInto, releaseReservation, movePallet, consolidateInto } from '../lib/logicGate.js';
+import { findConsolidationTarget, listConsolidationCandidates } from '../lib/putRedirect.js';
+import { coercePalletId } from '../lib/palletId.js';
+import { formatDpci } from '../lib/dpci.js';
+import { putDecision } from '../lib/locationPolicy.js';
+import { putCompleted, consolidated } from '../lib/activityEvents.js';
 
-/**
- * Atomically stores a pallet at a new location (PUT_COMPLETE, via the Logic Gate — #149).
- * Clears the pallet's previous location (if any, via CLEAR_LOCATION) then marks the new
- * location STORED and updates the pallet's location fields/status (PUT_COMPLETE) — two
- * separate Gate calls, not one combined transaction, since they're independently-owned
- * intents; the pallet can still never observably appear in two locations, since nothing
- * reads pallet/location state between them.
- *
- * Also copies the target location's Storage Code/Size/Zone onto the pallet itself
- * (`Pallet.storageCode`/`.size`/`.zone`, inside `putComplete`) — the pallet's own source of
- * truth for these, read by Directed Put's default location search when no IM+ override is
- * given (see directedPut below). Kept in sync here since this is the one place both SDP
- * (confirmPut) and MNP (manualConfirm) funnel through to actually complete a put.
- *
- * @param palletId - Numeric pallet ID to move
- * @param newAisle - Target location aisle
- * @param newBin - Target location bin
- * @param newLevel - Target location level
- * @param workerZ - zNumber of the worker performing the put (written to pallet.putByZ)
- * @returns `{ wasMove: boolean; clearedLocation: string | null }` —
- *   wasMove is true if the pallet had a prior location; clearedLocation is that
- *   location's 8-digit ID string, or null for a first-time put
- */
-async function placePallet(
-  palletId: number,
-  newAisle: number,
-  newBin: number,
-  newLevel: number,
-  workerZ: string,
-) {
-  const pallet = await prisma.pallet.findUnique({
-    where: { pid: palletId },
-    select: { locationAisle: true, locationBin: true, locationLevel: true },
-  });
-
-  if (pallet?.locationAisle != null) {
-    await clearLocation({
-      aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel!,
-      excludePalletId: palletId,
-    });
-  }
-
-  await putComplete({ palletId, aisle: newAisle, bin: newBin, level: newLevel, workerZ });
-
-  return pallet?.locationAisle != null
-    ? { wasMove: true, clearedLocation: locationString(pallet.locationAisle, pallet.locationBin!, pallet.locationLevel!) }
-    : { wasMove: false, clearedLocation: null };
-}
+// Moving a pallet (clear its prior location + store it at the new one, atomically) is the
+// Logic Gate's movePallet / confirmReservation (#211) — formerly this file's placePallet,
+// which ran the two halves as separate transactions.
 
 // ── POST /api/puts/directed ───────────────────────────────────────────────────
 
@@ -176,7 +136,7 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
     directedLocationStorageCode: effective.storageCode,
     pallet: {
       id:              elig.pallet.pid,
-      dpci:            `${String(elig.pallet.dept).padStart(3,'0')}-${String(elig.pallet.class).padStart(2,'0')}-${String(elig.pallet.item).padStart(4,'0')}`,
+      dpci:            formatDpci(elig.pallet.dept, elig.pallet.class, elig.pallet.item),
       descShort:       elig.pallet.descShort,
       quantity: {
         pallets: elig.pallet.currentPallets,
@@ -190,6 +150,50 @@ async function directedPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
 }
 
 // ── POST /api/puts/:reservationId/confirm ────────────────────────────────────
+
+/**
+ * Completes an Exists Elsewhere redirect (#215): the scan must match the redirect target
+ * (aisle+bin), the target must still be a valid consolidation candidate, and then one Gate
+ * transaction claims the reservation, releases the reserved location, and consolidates the
+ * pallet into the target's occupant.
+ * @throws 400 LOCATION_MISMATCH / INVALID_INPUT, 409 NOT_A_CANDIDATE, 404 NOT_FOUND
+ */
+async function confirmRedirected(
+  workerZ: string,
+  reservationId: number,
+  body: { wasScanned?: boolean },
+  target: { aisle: number; bin: number; level: number },
+  scanned: { aisle: number; bin: number } | null,
+) {
+  const { reservation, targetPalletId, moved } = await confirmReservationInto(reservationId, async (res, tx) => {
+    if (!scanned) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    if (scanned.aisle !== target.aisle || scanned.bin !== target.bin) {
+      throw Object.assign(new Error('LOCATION_MISMATCH'), { status: 400 });
+    }
+    const occupant = await findConsolidationTarget(tx, res.palletId, target);
+    if (occupant == null) throw Object.assign(new Error('NOT_A_CANDIDATE'), { status: 409 });
+    return occupant;
+  });
+
+  await writeLog(consolidated({
+    userId: workerZ,
+    palletId: reservation.palletId,
+    locationAisle: target.aisle,
+    locationBin:   target.bin,
+    locationLevel: target.level,
+    details: {
+      targetPalletId,
+      sourcePalletId: reservation.palletId,
+      ...moved,
+      method: 'SDP_REDIRECT',
+      reservationId,
+      releasedLocation: locationString(reservation.locationAisle, reservation.locationBin, reservation.locationLevel),
+      verification: { pid: { scanned: reservation.pidWasScanned ?? false }, bin: { scanned: body.wasScanned === true } },
+    },
+  }));
+
+  return { consolidated: true, targetPalletId, location: locationString(target.aisle, target.bin, target.level) };
+}
 
 /**
  * Confirms a system-directed put by scanning the target location barcode.
@@ -229,35 +233,34 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
   const reservationId = parseInt(req.params.reservationId ?? '', 10);
   if (isNaN(reservationId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const body = await req.json() as { scannedLocation: string; wasScanned?: boolean };
+  const body = await req.json() as { scannedLocation: string; wasScanned?: boolean; targetLocation?: string };
   if (!body.scannedLocation) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
-  if (!reservation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  // Parse the scanned barcode and compare aisle+bin to the reserved location.
-  const parsed = parseLocationBarcode(body.scannedLocation);
-  if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-
-  if (parsed.aisle !== reservation.locationAisle || parsed.bin !== reservation.locationBin) {
-    throw Object.assign(new Error('LOCATION_MISMATCH'), { status: 400 });
+  // Exists Elsewhere redirect (#215): a targetLocation other than the reserved location
+  // completes the put as a consolidation into that location's occupant. The match, the
+  // candidate rule and the resolution all live server-side now (they were computed in
+  // SDPPage/SDPVerifyPutModal against manual/confirm, which had no reservation to check).
+  if (body.targetLocation) {
+    const target = parseFullLocationBarcode(body.targetLocation);
+    if (!target) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    const scanned = parseLocationBarcode(body.scannedLocation);
+    const pre = await prisma.reservation.findUnique({ where: { id: reservationId } });
+    if (!pre) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+    const isReserved = target.aisle === pre.locationAisle && target.bin === pre.locationBin && target.level === pre.locationLevel;
+    if (!isReserved) return confirmRedirected(auth.zNumber, reservationId, body, target, scanned);
   }
 
-  // Atomically claim the reservation before touching Location/Pallet state (#93) —
-  // deletes it now, rather than after placePallet, so a concurrent unassign/
-  // expiry-timer call racing on the same row can never win after this point and clobber
-  // the location this call is about to store into. deleteMany (not delete) so a lost
-  // race returns a count of 0 instead of throwing — something else already claimed it.
-  const claimed = await prisma.reservation.deleteMany({ where: { id: reservationId } });
-  if (claimed.count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  const { wasMove, clearedLocation } = await placePallet(
-    reservation.palletId,
-    reservation.locationAisle,
-    reservation.locationBin,
-    reservation.locationLevel,
-    auth.zNumber,
-  );
+  // Logic Gate confirmReservation (#211): verify the scan against the reservation, claim
+  // it (#93 race safety — a concurrent unassign/expiry loses with a clean 404), and move the
+  // pallet onto the reserved location, all in one transaction.
+  const { reservation, wasMove, clearedLocation } = await confirmReservation(reservationId, auth.zNumber, (res) => {
+    // Aisle+bin only — physical barcodes encode aisle+bin, never level.
+    const parsed = parseLocationBarcode(body.scannedLocation);
+    if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+    if (parsed.aisle !== res.locationAisle || parsed.bin !== res.locationBin) {
+      throw Object.assign(new Error('LOCATION_MISMATCH'), { status: 400 });
+    }
+  });
 
   // Only IM+ overrides set target fields on the Reservation (see directedPut) — a
   // plain directed put leaves them null, so their presence here means an override
@@ -274,15 +277,12 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
   // this tracking.
   const wasStaged = reservation.wasStaged !== false;
 
-  await writeLog({
+  await writeLog(putCompleted('SDP', {
     userId: auth.zNumber,
-    actionType: 'PUT',
     palletId: reservation.palletId,
     locationAisle: reservation.locationAisle,
     locationBin:   reservation.locationBin,
     locationLevel: reservation.locationLevel,
-    // IRP: this is a Rack Put (System Directed Put) — MNP's own PUT write below is HP.
-    functionCode: 'RP',
     details: {
       reservationId,
       wasMove,
@@ -296,7 +296,7 @@ async function confirmPut(req: HttpRequest, _ctx: InvocationContext): Promise<un
       },
       ...(Object.keys(override).length > 0 && { override }),
     },
-  });
+  }));
 
   return {
     location: locationString(reservation.locationAisle, reservation.locationBin, reservation.locationLevel),
@@ -329,18 +329,9 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
   const reservationId = parseInt(req.params.reservationId ?? '', 10);
   if (isNaN(reservationId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
-  if (!reservation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  // Atomically claim the reservation before touching Location state (#93) — same pattern
-  // as confirmPut: whichever of confirm/unassign/the expiry timer deletes this row first
-  // wins; the other gets a clean 404 instead of racing a stale read into a write.
-  const claimed = await prisma.reservation.deleteMany({ where: { id: reservationId } });
-  if (claimed.count === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-  const releasedStatus = await clearLocation({
-    aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel,
-  });
+  // Logic Gate releaseReservation (#211): claim (#93) + release the location to its revert
+  // status in one transaction; 404 if confirm/expiry already claimed it.
+  const { reservation, releasedStatus } = await releaseReservation(reservationId);
 
   await writeLog({
     userId: auth.zNumber,
@@ -356,6 +347,23 @@ async function unassignPut(req: HttpRequest, _ctx: InvocationContext): Promise<u
     location: locationString(reservation.locationAisle, reservation.locationBin, reservation.locationLevel),
     releasedStatus,
   };
+}
+
+// ── GET /api/puts/:reservationId/consolidation-candidates ──────────────────────
+
+/**
+ * Exists Elsewhere candidates for a live reservation (#215): same-DPCI pallets at XS
+ * locations with cartons on them, excluding the reserved location. Empty for a Rack Put.
+ * All roles (matches the consolidate resolution's own access).
+ * @throws 400 INVALID_INPUT, 404 NOT_FOUND if the reservation is gone
+ */
+async function getConsolidationCandidates(req: HttpRequest, _ctx: InvocationContext): Promise<unknown> {
+  await requireAuth(req);
+  const reservationId = parseInt(req.params.reservationId ?? '', 10);
+  if (isNaN(reservationId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
+  if (!reservation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+  return { locations: await listConsolidationCandidates(reservation) };
 }
 
 // ── POST /api/puts/manual/scan ────────────────────────────────────────────────
@@ -377,9 +385,7 @@ async function manualScan(req: HttpRequest, _ctx: InvocationContext): Promise<un
   const auth = await requireAuth(req);
 
   const body = await req.json() as { palletId: number | string };
-  const palletId = typeof body.palletId === 'string'
-    ? parseInt(body.palletId, 10)
-    : body.palletId;
+  const palletId = coercePalletId(body.palletId);
 
   if (isNaN(palletId)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
@@ -406,7 +412,7 @@ async function manualScan(req: HttpRequest, _ctx: InvocationContext): Promise<un
   return {
     pallet: {
       id:              elig.pallet.pid,
-      dpci:            `${String(elig.pallet.dept).padStart(3,'0')}-${String(elig.pallet.class).padStart(2,'0')}-${String(elig.pallet.item).padStart(4,'0')}`,
+      dpci:            formatDpci(elig.pallet.dept, elig.pallet.class, elig.pallet.item),
       descShort:       elig.pallet.descShort,
       quantity: {
         pallets: elig.pallet.currentPallets,
@@ -491,9 +497,7 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     resolution?: 'proceed' | 'consolidate';
   };
 
-  const palletId = typeof body.palletId === 'string'
-    ? parseInt(body.palletId, 10)
-    : body.palletId;
+  const palletId = coercePalletId(body.palletId);
 
   if (isNaN(palletId) || !body.destinationLocation || body.level == null) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
@@ -511,37 +515,17 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
   ]);
   if (!destLocation) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
-  // Contraction gate — blocks all puts to a contracted location; Worker cannot override,
-  // IM+ can after explicit acknowledgement.
-  if (destLocation.contraction) {
-    if (!hasMinRole(auth.role, 'IM')) {
-      throw Object.assign(new Error('CONTRACTED'), { status: 403 });
-    }
-    if (!body.acknowledgeContraction) {
-      throw Object.assign(new Error('CONTRACTION_CONFIRM_REQUIRED'), { status: 409 });
-    }
-  }
-
-  // Hold gate (#92) — mirrors findNextLocation's NOT_HELD_FILTER (zoneLogic.ts): HOLD_OUT
-  // never blocks a put (outbound-only). HOLD_IN/HOLD_BOTH use the same override pattern as
-  // Contraction above (Worker hard-blocked, IM+ can proceed after explicit acknowledgement).
-  // HOLD_PERM is a harder, no-override block for every role — matching how
-  // HOLD_REMOVE_MIN_ROLE already treats Permanent as the most protected hold tier
-  // elsewhere in the app (locations.ts) — per product decision, unlike Contraction there's
-  // no acknowledgement path that lets even an IM+ worker put onto a Hold Permanent location.
-  if (destLocation.holdCategory === 'HOLD_PERM') {
-    throw Object.assign(new Error('DESTINATION_HOLD_PERM'), { status: 403 });
-  }
-  if (destLocation.holdCategory === 'HOLD_IN' || destLocation.holdCategory === 'HOLD_BOTH') {
-    if (!hasMinRole(auth.role, 'IM')) {
-      throw Object.assign(new Error('DESTINATION_ON_HOLD'), { status: 403 });
-    }
-    if (!body.acknowledgeHold) {
-      throw Object.assign(new Error('HOLD_CONFIRM_REQUIRED'), {
-        status: 409,
-        data: { holdCategory: destLocation.holdCategory },
-      });
-    }
+  // Contraction + hold gates (#92) — the location acceptance policy's putDecision (#212):
+  // contracted → Worker denied, IM+ must acknowledge; HOLD_PERM → denied for every role;
+  // HOLD_IN/HOLD_BOTH → Worker denied, IM+ must acknowledge; HOLD_OUT never blocks a put.
+  const gate = putDecision(destLocation, auth.role, {
+    contraction: body.acknowledgeContraction, hold: body.acknowledgeHold,
+  });
+  if (gate.kind !== 'allow') {
+    throw Object.assign(new Error(gate.code), {
+      status: gate.httpStatus,
+      ...(gate.code === 'HOLD_CONFIRM_REQUIRED' && { data: { holdCategory: destLocation.holdCategory } }),
+    });
   }
 
   // Record whether the destination was already occupied or staged before the move.
@@ -572,7 +556,7 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
         data: {
           occupantPalletId: occupant?.pid ?? null,
           occupantDpci: occupant
-            ? `${String(occupant.dept).padStart(3,'0')}-${String(occupant.class).padStart(2,'0')}-${String(occupant.item).padStart(4,'0')}`
+            ? formatDpci(occupant.dept, occupant.class, occupant.item)
             : null,
           matchesDpci,
           wasStaged: destinationWasStaged,
@@ -585,53 +569,27 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
         throw Object.assign(new Error('CONSOLIDATE_MISMATCH'), { status: 409 });
       }
 
-      // The occupant's quantity merge is a plain, direct write — not a status change, so
-      // it's outside the Logic Gate's own scope (#149 owns Location/Pallet *status*
-      // transitions, not arbitrary field updates). Note this is no longer in the same
-      // transaction as the zeroPallet call below (previously all three writes here were
-      // one combined transaction) — a narrow, deliberate tradeoff: zeroPallet owns its own
-      // transaction internally (shared by every other ZERO_PALLET caller), and threading
-      // an external transaction through the Gate's API for this one call site's benefit
-      // wasn't worth the added complexity for a race that requires two concurrent
-      // consolidate attempts on the exact same two pallets to ever matter.
-      await prisma.pallet.update({
-        where: { pid: occupant.pid },
-        data: {
-          currentCartons: occupant.currentCartons + pallet.currentCartons,
-          currentPallets: occupant.currentPallets + pallet.currentPallets,
-          currentSSPs:    occupant.currentSSPs + pallet.currentSSPs,
-        },
-      });
+      // Logic Gate consolidateInto (#211): merge quantities onto the occupant, zero the
+      // incoming pallet as CONSOLIDATED, and free its prior location — one transaction
+      // (previously the merge and the zeroing were separate writes).
+      const moved = await consolidateInto({ sourcePalletId: pallet.pid, targetPalletId: occupant.pid });
 
-      // ZERO_PALLET (Logic Gate — #149): marks the incoming pallet CONSOLIDATED and frees
-      // its own prior location, if it had one (same dual-occupancy fallback to STORED
-      // instead of EMPTY, #86, as placePallet's own old-location clear).
-      await zeroPallet(
-        pallet.pid,
-        'CONSOLIDATED',
-        pallet.locationAisle != null
-          ? { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel! }
-          : null,
-      );
-
-      await writeLog({
+      await writeLog(consolidated({
         userId: auth.zNumber,
-        actionType: 'CONSOLID',
         palletId: pallet.pid,
         locationAisle: parsed.aisle,
         locationBin:   parsed.bin,
         locationLevel: body.level,
-        functionCode: 'CON',
         details: {
           targetPalletId: occupant.pid,
           sourcePalletId: pallet.pid,
-          cartons: pallet.currentCartons,
-          pallets: pallet.currentPallets,
-          ssps:    pallet.currentSSPs,
+          cartons: moved.cartons,
+          pallets: moved.pallets,
+          ssps:    moved.ssps,
           method:  'MNP',
           wasContracted: destLocation.contraction,
         },
-      });
+      }));
 
       return {
         consolidated:   true,
@@ -644,28 +602,21 @@ async function manualConfirm(req: HttpRequest, _ctx: InvocationContext): Promise
     // falls through to the normal placePallet path below unchanged.
   }
 
-  const { wasMove, clearedLocation } = await placePallet(
-    palletId,
-    parsed.aisle,
-    parsed.bin,
-    body.level,
-    auth.zNumber,
-  );
+  const { wasMove, clearedLocation } = await movePallet({
+    palletId, aisle: parsed.aisle, bin: parsed.bin, level: body.level, workerZ: auth.zNumber,
+  });
 
-  await writeLog({
+  await writeLog(putCompleted('MNP', {
     userId: auth.zNumber,
-    actionType: 'PUT',
     palletId,
     locationAisle: parsed.aisle,
     locationBin:   parsed.bin,
     locationLevel: body.level,
-    // IRP: this is a Hand Put (Manual Put) — SDP's own PUT write above is RP.
-    functionCode: 'HP',
     details: {
       wasMove, clearedLocation, destinationWasOccupied, destinationWasStaged, method: 'MNP',
       wasContracted: destLocation.contraction,
     },
-  });
+  }));
 
   return {
     location: locationString(parsed.aisle, parsed.bin, body.level),
@@ -706,9 +657,7 @@ async function manualCancel(req: HttpRequest, _ctx: InvocationContext): Promise<
     destinationLocation?: string;
   };
 
-  const palletId = typeof body.palletId === 'string'
-    ? parseInt(body.palletId, 10)
-    : body.palletId;
+  const palletId = coercePalletId(body.palletId);
 
   if (isNaN(palletId) || (body.stage !== 'pallet_scanned' && body.stage !== 'level_modal')) {
     throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
@@ -735,6 +684,13 @@ app.http('directedPut', {
   authLevel: 'anonymous',
   route: 'puts/directed',
   handler: withHandler(directedPut),
+});
+
+app.http('getConsolidationCandidates', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'puts/{reservationId:int}/consolidation-candidates',
+  handler: withHandler(getConsolidationCandidates),
 });
 
 app.http('confirmPut', {

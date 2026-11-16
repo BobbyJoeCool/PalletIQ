@@ -4,10 +4,9 @@ import { INVALID_WASH } from '../../lib/invalidWash';
 import { useNumpadField } from '../../lib/useNumpadField';
 import { checkVcpSspRatio } from '../../lib/vcpSspValidation';
 import { NumpadFieldBox } from './NumpadFieldBox';
+import { advanceField } from '../../lib/fieldSequence';
 
 export interface VcpSspFieldsHandle {
-  vcpFieldId: string;
-  sspFieldId: string;
   focusVcp: () => void;
   focusSsp: () => void;
   /** Set both field values externally (PII edit-mode initialization). */
@@ -128,7 +127,7 @@ export const VcpSspFields = forwardRef<VcpSspFieldsHandle, VcpSspFieldsProps>(fu
     vcpField.set(v);
     vcpValueRef.current = v;
     runCheck(v, sspValueRef.current);
-    setTimeout(() => focusSsp(), 50);
+    advanceField(); // VCP → SSP (field sequence, #214)
   }
 
   function handleSspConfirm(value: string) {
@@ -143,8 +142,6 @@ export const VcpSspFields = forwardRef<VcpSspFieldsHandle, VcpSspFieldsProps>(fu
   function focusSsp() { sspField.focus(handleSspConfirm); }
 
   useImperativeHandle(ref, () => ({
-    vcpFieldId: vcpField.fieldId,
-    sspFieldId: sspField.fieldId,
     focusVcp,
     focusSsp,
     set(vcp: string, ssp: string) {

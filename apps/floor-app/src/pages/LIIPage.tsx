@@ -9,8 +9,6 @@ import { useAuth } from '../context/AuthContext';
 import { useLII, type LIILocationData } from '../context/LIIContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
-import { playAlert } from '../lib/audio';
-import { useTabOrder } from '../lib/useTabOrder';
 import { RecordActivityPanel } from '../components/shared/RecordActivityPanel';
 
 const HOLD_NAMES: Record<string, string> = {
@@ -31,7 +29,7 @@ const HOLD_NAMES: Record<string, string> = {
  */
 export function LIIPage() {
   const { token } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { clearMessage, showError } = useMessageBar();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -41,11 +39,6 @@ export function LIIPage() {
   const [loading, setLoading] = useState(false);
   const locRef = useRef<LocationEntryFieldsHandle>(null);
 
-  useTabOrder([
-    { fieldId: locRef.current?.aisleFieldId ?? '', activate: () => locRef.current?.focusAisle() },
-    { fieldId: locRef.current?.binFieldId ?? '', activate: () => locRef.current?.focusBin() },
-    { fieldId: locRef.current?.levelFieldId ?? '', activate: () => locRef.current?.focusLevel() },
-  ]);
   const [entryKey, setEntryKey] = useState(0);
   const [palletIndex, setPalletIndex] = useState(0);
 
@@ -76,8 +69,7 @@ export function LIIPage() {
       });
       setPalletIndex(0);
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Location not found' });
+      showError('Location not found');
       setLoaded(null);
       setEntryKey((k) => k + 1); // remounts LocationEntryFields, clearing its fields
     } finally {

@@ -28,7 +28,7 @@ export interface DpciFieldsOptions<T> {
  * Shared Dept/Class/Item DPCI entry chain (issue #159) — numpad-driven, auto-advancing,
  * with an internal async existence-check (`GET /api/items/dpci/:dpci`-shaped, though the
  * exact endpoint/response is caller-supplied) replacing what PAR/IID/ISI each
- * independently re-implemented. `DpciField.tsx` (plain native inputs, built for a
+ * independently re-implemented. `DpciField.tsx` (removed in #216 — it was never adopted; plain native inputs, built for a
  * hypothetical infrequent-admin-edit context) was never actually adopted by any of the 4
  * real DPCI-entry screens — this hook is the pattern all 4 actually need instead.
  *

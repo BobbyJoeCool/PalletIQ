@@ -1,26 +1,11 @@
 import { jwtVerify } from 'jose';
 import type { HttpRequest } from './functionsRuntime.js';
-import type { JwtPayload, Role } from './jwt.js';
+import type { JwtPayload } from './jwt.js';
+import { hasMinRole, type Role } from '../../shared/roles.js';
 
-const ROLE_RANK: Record<Role, number> = {
-  WORKER:  1,
-  IM:      2,
-  LEAD:    3,
-  MANAGER: 4,
-  ADMIN:   5,
-};
-
-/**
- * Returns true if the given user role meets or exceeds the required minimum role.
- * Role hierarchy from lowest to highest: WORKER → IM → LEAD → MANAGER → ADMIN.
- *
- * @param userRole - The caller's current role
- * @param minRole - The minimum role required for the action
- * @returns True if userRole rank ≥ minRole rank
- */
-export function hasMinRole(userRole: Role, minRole: Role): boolean {
-  return ROLE_RANK[userRole] >= ROLE_RANK[minRole];
-}
+// Role rank/hierarchy is defined once in shared/roles.ts (#217); re-exported here so the
+// many existing `import { hasMinRole } from '../lib/permissions.js'` call sites keep working.
+export { hasMinRole };
 
 /** Reads the JWT signing secret from the environment as a Buffer for jose to consume. */
 const getSecret = () => Buffer.from(process.env.JWT_SECRET!, 'utf-8');

@@ -11,7 +11,6 @@ import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
 import { useNumpadField } from '../lib/useNumpadField';
-import { useTabOrder } from '../lib/useTabOrder';
 import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 
 interface Breakdown {
@@ -101,10 +100,6 @@ export function ELZPage() {
     });
   }, [aisleField, hidePanel, setAisle]);
 
-  useTabOrder([
-    { fieldId: aisleField.fieldId, activate: focusAisleField },
-    { fieldId: storageCodeRef.current?.fieldId ?? '', activate: () => storageCodeRef.current?.focus() },
-  ]);
 
   // Query trigger: grid loads from Aisle alone (issue #60 — Storage Code is no longer
   // required); re-runs on either field's change. When Storage Code is present the zone

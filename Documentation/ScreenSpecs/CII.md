@@ -76,7 +76,7 @@ Tappable links within detail views navigate to related screens:
 **Fields:** Status (badge), Pull Function, DPCI (tappable→IID), Item Description, Storage Code, Qty: Cartons, Qty: SSPs, Batch Date, Destination Store, Pallet ID (tappable→PII), Pallet Status (badge), Location (tappable→LII, if exists).
 
 **Actions (IM+):**
-- **Cancel Container** — visible when status is AVAILABLE or VERIFIED. Opens CIICancelModal with domain `CONTAINER_CANCEL`.
+- **Cancel Container** — visible when status is AVAILABLE or Verified. **(v1.10.0, #213)** "Verified" is stored as `PULLED` (verify-pull has always written PULLED; no code ever wrote a `VERIFIED` status, so before this change only AVAILABLE containers could actually be canceled). Eligibility comes from the shared `canCancelFullCase`, used by both the client and the API. A PULLED container's status badge reads **VERIFIED** via `containerStatusLabel`, as do the CII header and SSP master badges. Opens CIICancelModal with domain `CONTAINER_CANCEL`.
 - **Pallet release on cancel (v1.9.1, #210)** — in the same transaction as any cancel (Full Case or SSP Master), if the source pallet has no remaining open (`AVAILABLE`/`PRINTED`) containers and is `CA_PULL_PEND`/`FP_PULL_PEND`, it returns to `STORED` via the Logic Gate's `releasePullPendingIfNoOpenContainersTx`. Any other pallet status is left alone. The cancel response carries `palletReleased: boolean`.
 
 ### Overpack (92)

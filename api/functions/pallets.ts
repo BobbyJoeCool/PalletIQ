@@ -3,13 +3,17 @@ import type { HttpRequest, InvocationContext } from '../lib/functionsRuntime.js'
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth, requireRole } from '../lib/permissions.js';
-import { writeLog } from '../lib/activityLog.js';
+import { writeLog, serializeActivityRow } from '../lib/activityLog.js';
 import { generateUniquePid } from '../lib/palletId.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
-import { TERMINAL_CONTAINER_STATUSES } from '../lib/eligibility.js';
-import { parseDpci, formatDpci } from '../lib/dpci.js';
-import { storeLocationForCreate } from '../lib/logicGate.js';
+import { whereOpenContainer } from '../lib/containerLifecycle.js';
+import { parseDpci } from '../lib/dpci.js';
+import { storeReinstatedPallets } from '../lib/logicGate.js';
+import type { Prisma } from '../generated/prisma/index.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
+import { isValidVcpSspRatio, exceedsSspCap } from '../../shared/vcpSsp.js';
+import { classifyExpirationDate } from '../../shared/expiration.js';
+import { reinstateDecision } from '../lib/locationPolicy.js';
 
 /**
  * Retrieves all fields of a pallet, including item UPC/description, current location,
@@ -152,19 +156,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
     if (body.expirationDate === null) {
       newExpirationDate = null;
     } else {
-      const parsed = new Date(body.expirationDate);
-      if (isNaN(parsed.getTime())) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-      const oneMonthOut = new Date();
-      oneMonthOut.setMonth(oneMonthOut.getMonth() + 1);
-      const threeMonthsOut = new Date();
-      threeMonthsOut.setMonth(threeMonthsOut.getMonth() + 3);
-      if (parsed < oneMonthOut) {
-        throw Object.assign(new Error('EXPIRATION_TOO_SOON'), { status: 400 });
-      }
-      if (parsed < threeMonthsOut && !body.confirmNearExpiration) {
-        throw Object.assign(new Error('EXPIRATION_NEEDS_CONFIRM'), { status: 409 });
-      }
-      newExpirationDate = parsed;
+      newExpirationDate = parseAndGateExpirationDate(body.expirationDate, body.confirmNearExpiration);
     }
   }
 
@@ -186,12 +178,8 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   // specific fields change, so an edit never leaves the pallet in an inconsistent state.
   const newVcp = body.vcp ?? pallet.vcp;
   const newSsp = body.ssp ?? pallet.ssp;
-  if (newSsp <= 0 || newVcp % newSsp !== 0) {
-    throw Object.assign(new Error('INVALID_VCP_SSP_RATIO'), { status: 400 });
-  }
-  if (newSSPs >= newVcp / newSsp) {
-    throw Object.assign(new Error('SSPS_EXCEED_CARTON'), { status: 400 });
-  }
+  validateVcpRatio(newVcp, newSsp);
+  validateSspCap(newVcp, newSsp, newSSPs);
 
   // Determine whether the DPCI is actually changing (all three components must match).
   const dpciChanging =
@@ -203,7 +191,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   if (dpciChanging) {
     // Block the DPCI change if any containers are still open (not terminal).
     const pendingCount = await prisma.container.count({
-      where: { pid, status: { notIn: TERMINAL_CONTAINER_STATUSES } },
+      where: { pid, ...whereOpenContainer() },
     });
     if (pendingCount > 0) {
       throw Object.assign(new Error('BLOCKED_BY_PENDING_PULL'), { status: 409 });
@@ -223,7 +211,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
   if (quantityChanging) {
     // Sum up quantities already committed to open containers so we can enforce a floor.
     const pending = await prisma.container.aggregate({
-      where: { pid, status: { notIn: TERMINAL_CONTAINER_STATUSES } },
+      where: { pid, ...whereOpenContainer() },
       _sum: { cartonQuantity: true, sspQuantity: true },
     });
     const pendingCartons = pending._sum.cartonQuantity ?? 0;
@@ -335,7 +323,7 @@ async function editPallet(req: HttpRequest, _ctx: InvocationContext): Promise<un
 /** SSP must evenly divide VCP (vcp/ssp = SSPs-per-carton, an integer) — same rule
  *  editPallet enforces (v1.6.11 — PAR now validates this too instead of not at all). */
 function validateVcpRatio(vcp: number, ssp: number): void {
-  if (ssp <= 0 || vcp % ssp !== 0) {
+  if (!isValidVcpSspRatio(vcp, ssp)) {
     throw Object.assign(new Error('INVALID_VCP_SSP_RATIO'), { status: 400 });
   }
 }
@@ -344,7 +332,7 @@ function validateVcpRatio(vcp: number, ssp: number): void {
  *  carton's worth of loose SSPs should just be another carton. Same rule editPallet
  *  enforces on `currentSSPs`. */
 function validateSspCap(vcp: number, ssp: number, looseSSPs: number): void {
-  if (looseSSPs >= vcp / ssp) {
+  if (exceedsSspCap(vcp / ssp, looseSSPs)) {
     throw Object.assign(new Error('SSPS_EXCEED_CARTON'), { status: 400 });
   }
 }
@@ -363,14 +351,21 @@ function validateExpirationDate(
     if (requiresExpirationDate) throw Object.assign(new Error('EXPIRATION_REQUIRED'), { status: 400 });
     return null;
   }
+  return parseAndGateExpirationDate(raw, confirmNearExpiration);
+}
+
+/**
+ * Parses a submitted expiration date and applies the shared window rule
+ * (`shared/expiration.ts` — #217, one copy for editPallet and reinstatePallet).
+ * @throws 400 INVALID_INPUT (unparseable), 400 EXPIRATION_TOO_SOON (< 1 month out),
+ *   409 EXPIRATION_NEEDS_CONFIRM (1-3 months out without `confirmNearExpiration`)
+ */
+function parseAndGateExpirationDate(raw: string, confirmNearExpiration: boolean | undefined): Date {
   const parsed = new Date(raw);
   if (isNaN(parsed.getTime())) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-  const oneMonthOut = new Date();
-  oneMonthOut.setMonth(oneMonthOut.getMonth() + 1);
-  const threeMonthsOut = new Date();
-  threeMonthsOut.setMonth(threeMonthsOut.getMonth() + 3);
-  if (parsed < oneMonthOut) throw Object.assign(new Error('EXPIRATION_TOO_SOON'), { status: 400 });
-  if (parsed < threeMonthsOut && !confirmNearExpiration) {
+  const cls = classifyExpirationDate(parsed);
+  if (cls === 'TOO_SOON') throw Object.assign(new Error('EXPIRATION_TOO_SOON'), { status: 400 });
+  if (cls === 'NEEDS_CONFIRM' && !confirmNearExpiration) {
     throw Object.assign(new Error('EXPIRATION_NEEDS_CONFIRM'), { status: 409 });
   }
   return parsed;
@@ -527,9 +522,13 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
     // the worker types), so this endpoint doesn't need to communicate specifics back —
     // `confirmLocationStatus: true` alone is enough once the frontend has already shown
     // the worker why.
-    const needsConfirm = location.status !== 'EMPTY' || location.holdCategory != null || location.contraction;
-    if (needsConfirm && !body.confirmLocationStatus) {
-      throw Object.assign(new Error('LOCATION_NEEDS_CONFIRM'), { status: 409 });
+    // Location acceptance policy (#212): occupied / inbound-held / contracted / item-vs-
+    // location storage-code mismatch all raise the same warn-then-allow gate. HOLD_OUT no
+    // longer counts (outbound-only), and the storage mismatch is server-enforced (it was
+    // client-only before v1.10.0). The reasons ride along so the client can explain them.
+    const gate = reinstateDecision(location, itemStorageCode, !!body.confirmLocationStatus);
+    if (gate.kind === 'confirm') {
+      throw Object.assign(new Error(gate.code), { status: gate.httpStatus, data: { reasons: gate.reasons } });
     }
 
     locationAisle = parsed.aisle;
@@ -547,9 +546,8 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
   const pids: number[] = [];
   for (let i = 0; i < rows.length; i++) pids.push(await generateUniquePid());
 
-  const ops: ReturnType<typeof prisma.pallet.create>[] = rows.map((row, i) =>
-    prisma.pallet.create({
-      data: {
+  const creates: Prisma.PalletUncheckedCreateInput[] = rows.map((row, i) => (
+      {
         pid: pids[i], dept, class: cls, item: itm,
         receivedPallets: 1, currentPallets: 1,
         receivedCartons: row.cartons, currentCartons: row.cartons,
@@ -579,21 +577,17 @@ async function reinstatePallet(req: HttpRequest): Promise<unknown> {
         poNumber: null,
         apptNumber: null,
         expirationDate,
-      },
-    }),
-  );
-  await prisma.$transaction(ops);
+      }
+  ));
 
-  // PUT_COMPLETE's location-side half (Logic Gate — #149), for the create-a-new-pallet
-  // shape `putComplete` itself doesn't support (see `storeLocationForCreate`'s own doc
-  // comment). Only when placing directly onto a location that was genuinely EMPTY — an
-  // override onto an already-occupied/staged/reserved location (the warn-then-allow path
-  // above) leaves that location's own row completely untouched, same as before this
-  // migration. Deliberately outside the pallet-creation transaction above — a narrow,
-  // acceptable tradeoff, same as this Gate rollout's other migrated call sites.
-  if (locationAisle != null && locationWasEmpty) {
-    await storeLocationForCreate(locationAisle, locationBin!, locationLevel!);
-  }
+  // Logic Gate storeReinstatedPallets (#211): the new pallet rows and — only when placing
+  // directly onto a location that was EMPTY — the location's STORED write commit together
+  // (the location write previously ran after, outside the create transaction). An override
+  // onto an occupied/held/contracted location leaves the location row untouched.
+  await storeReinstatedPallets(
+    creates,
+    locationAisle != null ? { aisle: locationAisle, bin: locationBin!, level: locationLevel!, wasEmpty: locationWasEmpty } : null,
+  );
 
   for (let i = 0; i < rows.length; i++) {
     await writeLog({
@@ -670,21 +664,7 @@ async function getPalletActivity(req: HttpRequest, _ctx: InvocationContext): Pro
     orderBy: { timestamp: 'desc' },
   });
 
-  return entries.map((e) => ({
-    id: e.id,
-    timestamp: e.timestamp,
-    userId: e.userId,
-    actionType: e.actionType,
-    palletId: e.palletId,
-    locationAisle: e.locationAisle,
-    location: e.locationAisle != null && e.locationBin != null && e.locationLevel != null
-      ? formatLocationId(e.locationAisle, e.locationBin, e.locationLevel)
-      : null,
-    dpci: e.dept != null ? formatDpci(e.dept, e.class!, e.item!) : null,
-    reasonPrefix: e.reasonPrefix,
-    reasonNumber: e.reasonNumber,
-    details: e.details ? JSON.parse(e.details) as unknown : null,
-  }));
+  return entries.map(serializeActivityRow); // shared serializer (#218)
 }
 
 app.http('getPalletActivity', {

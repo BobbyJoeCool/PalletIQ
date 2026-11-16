@@ -19,8 +19,8 @@ import { playAlert } from '../lib/audio';
 import { useDigitInput } from '../lib/useDigitInput';
 import { fmtLocation } from '../lib/fmt';
 import { splitReasonCode } from '../lib/reasonCode';
-import { useTabOrder } from '../lib/useTabOrder';
 import { hasMinRole, type Role } from '@shared/index';
+import { splitLocationId, withLevel } from '@shared/location';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -255,7 +255,7 @@ type ScreenState = 'ready' | 'pallet_scanned' | 'level_modal';
  */
 export function MNPPage() {
   const { token, user } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { setMessage, clearMessage, showError } = useMessageBar();
 
   const [screenState, setScreenState] = useState<ScreenState>('ready');
   // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
@@ -326,12 +326,6 @@ export function MNPPage() {
     palletFieldRef.current?.focus();
   }, []);
 
-  useTabOrder([
-    { fieldId: palletFieldRef.current?.fieldId ?? '', activate: focusPalletField, enabled: screenState === 'ready' },
-    { fieldId: locRef.current?.aisleFieldId ?? '', activate: () => locRef.current?.focusAisle(), enabled: screenState === 'pallet_scanned' },
-    { fieldId: locRef.current?.binFieldId ?? '', activate: () => locRef.current?.focusBin(), enabled: screenState === 'pallet_scanned' },
-    { fieldId: locRef.current?.levelFieldId ?? '', activate: () => locRef.current?.focusLevel(), enabled: screenState === 'pallet_scanned' },
-  ]);
 
   useEffect(() => {
     if (screenState === 'ready') {
@@ -423,7 +417,7 @@ export function MNPPage() {
     try {
       await apiFetch(`/api/locations/${encodeURIComponent(locationId)}`, token!);
       setPendingLocation(locationId);
-      setLevelHint(locationId.length === 8 ? parseInt(locationId.slice(6, 8), 10) : demoLevel ?? null);
+      setLevelHint(locationId.length === 8 ? parseInt(splitLocationId(locationId).level!, 10) : demoLevel ?? null);
       setLocationInvalid(false);
       setScreenState('level_modal');
       clearMessage();
@@ -527,8 +521,7 @@ export function MNPPage() {
       const code = err instanceof Error ? err.message : '';
 
       if (code === 'CONTRACTED') {
-        playAlert('error');
-        setMessage({ type: 'error', text: 'This location is on contraction — put not allowed' });
+        showError('This location is on contraction — put not allowed');
         cancelToDestinationEntry();
         return;
       }
@@ -537,14 +530,12 @@ export function MNPPage() {
         return;
       }
       if (code === 'DESTINATION_HOLD_PERM') {
-        playAlert('error');
-        setMessage({ type: 'error', text: 'This location is on Hold Permanent — put not allowed' });
+        showError('This location is on Hold Permanent — put not allowed');
         cancelToDestinationEntry();
         return;
       }
       if (code === 'DESTINATION_ON_HOLD') {
-        playAlert('error');
-        setMessage({ type: 'error', text: 'This location is on hold — put not allowed' });
+        showError('This location is on hold — put not allowed');
         cancelToDestinationEntry();
         return;
       }
@@ -566,8 +557,7 @@ export function MNPPage() {
         return;
       }
 
-      playAlert('error');
-      setMessage({ type: 'error', text: code === 'NOT_FOUND' ? 'Location not found' : 'Confirm failed — please try again' });
+      showError(code === 'NOT_FOUND' ? 'Location not found' : 'Confirm failed — please try again');
       cancelToDestinationEntry();
     } finally {
       setLoading(false);
@@ -620,7 +610,7 @@ export function MNPPage() {
     const level = pendingLevelRef.current;
     if (!loc || level == null || loadingRef.current) return;
 
-    const fullLocationId = loc.length === 8 ? loc : loc.slice(0, 6) + String(level).padStart(2, '0');
+    const fullLocationId = loc.length === 8 ? loc : withLevel(loc, level);
     const { prefix: reasonPrefix, number: reasonNumber } = splitReasonCode(reasonCode);
 
     setLoading(true);
@@ -633,8 +623,7 @@ export function MNPPage() {
       setMessage({ type: 'warning', text: `Hold Both placed on ${fmtLocation(fullLocationId)} — put canceled` });
       cancelToDestinationEntry();
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Failed to place hold — please try again' });
+      showError('Failed to place hold — please try again');
     } finally {
       setLoading(false);
     }

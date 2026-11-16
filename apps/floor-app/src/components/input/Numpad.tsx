@@ -31,9 +31,9 @@ const ROWS: NumpadKey[][] = [
  *
  * Tab/Back Tab (issue #199) dispatch `'Tab'`/`'Back Tab'` key strings into
  * `NumpadContext.handleKey`, which intercepts them before the active field's own handler
- * and routes them to the screen's `useTabOrder` hook (see `useTabOrder.ts`). Each screen
- * declares its own ordered slot list; Tab advances forward, Back Tab backward, wrapping
- * at both ends. Screens without a `useTabOrder` call ignore Tab/Back Tab silently.
+ * and moves along the field sequence (`lib/fieldSequence.ts`, #214): the enabled field
+ * boxes on screen in layout order, scoped to the topmost open modal. Tab advances, Back
+ * Tab goes back, wrapping at both ends.
  *
  * `z-[60]` (issue #84 fix, 2026-08-03) — every full-screen dialog in the app
  * (`ModalOverlay`, `HotJump`) tops out at `z-50`, which otherwise sits on top of this panel

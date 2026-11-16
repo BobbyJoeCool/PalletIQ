@@ -4,6 +4,7 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 
 ## Table of Contents
 
+- [1.3.0 — 2026-11-15](#130--2026-11-15)
 - [1.2.7 — 2026-11-15](#127--2026-11-15)
 - [1.2.6 — 2026-08-28](#126--2026-08-28)
 - [1.2.5 — 2026-08-26](#125--2026-08-26)
@@ -14,6 +15,36 @@ All notable changes to the PalletIQ **API** (`api/` — Azure Functions backend 
 - [1.2.0 — 2026-08-02](#120--2026-08-02)
 - [1.1.0 — 2026-08-02](#110--2026-08-02)
 - [1.0.0 — 2026-07-26](#100--2026-07-26)
+
+---
+
+## [1.3.0] — 2026-11-15
+
+Backend for floor-app's `[1.10.0]` entry — architecture refactors #211–#218.
+
+### 1.3.0 — Changed
+
+- **Build** (#217): `shared/` now compiles into the API (`rootDir` = repo root; output in
+  `dist/api` + `dist/shared`; a `dist/index.js` shim keeps `node dist/index.js` working).
+- **Logic Gate** (#211): one operation per lifecycle event, each owning its claim and
+  transaction (`confirmReservation`, `releaseReservation`, `expireReservation`,
+  `movePallet`, `consolidateInto`, `storeReinstatedPallets`, holds, staging). Moves,
+  consolidation and PAR's location write are now atomic; every hold write goes through it.
+- **Location acceptance policy** (#212) in `shared/locationPolicy.ts`; PAR's
+  `LOCATION_NEEDS_CONFIRM` now carries `reasons[]` and includes storage-code mismatch;
+  HOLD_OUT no longer counts.
+- **Container lifecycle** (#213): pull/cancel recompute pallet pull-pending status in the
+  same transaction; one definition of "open"; PRQ `status=VERIFIED` queries PULLED; CII
+  full-case cancel allows AVAILABLE or PULLED.
+- **Typed activity events** (#218) own `functionCode`; one activity-row serializer;
+  `writeScanLog` for CII.
+
+### 1.3.0 — Added
+
+- `GET /api/puts/{id}/consolidation-candidates`; `POST /api/puts/{id}/confirm` accepts
+  `targetLocation` to complete an Exists Elsewhere redirect (`409 NOT_A_CANDIDATE`) (#215).
+- Tests: `npm test` (node:test unit tests, 19) and `npm run test:db` (11 tests inside
+  rolled-back transactions on the local DB).
 
 ---
 

@@ -1,6 +1,9 @@
 import { SignJWT, jwtVerify } from 'jose';
 
-export type Role = 'ADMIN' | 'MANAGER' | 'LEAD' | 'IM' | 'WORKER';
+import type { Role } from '../../shared/roles.js';
+
+// Defined once in shared/roles.ts (#217); re-exported for existing importers.
+export type { Role };
 
 export interface JwtPayload {
   zNumber: string;

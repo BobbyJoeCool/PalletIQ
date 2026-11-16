@@ -6,7 +6,8 @@ import { requireAuth, requireRole } from '../lib/permissions.js';
 import { validateReasonCode } from '../lib/reasonCodes.js';
 import { formatDpci } from '../lib/dpci.js';
 import { parseCidOrThrow, CID_TYPE, CID_TYPE_LABELS, type CidTypeCode } from '../lib/cidParser.js';
-import { releasePullPendingIfNoOpenContainersTx } from '../lib/logicGate.js';
+import { cancelContainerTx } from '../lib/containerLifecycle.js';
+import { writeScanLog } from '../lib/activityLog.js';
 
 // ─── Inquiry (GET) ──────────────────────────────────────────────────────────
 
@@ -427,34 +428,16 @@ async function cancelContainer(req: HttpRequest, _ctx: InvocationContext): Promi
   await validateReasonCode(auth.zNumber, auth.role, 'CONTAINER_CANCEL', reasonPrefix, reasonNumber);
 
   return prisma.$transaction(async (tx) => {
-    const container = await tx.container.findUnique({ where: { cid: canonical } });
-    if (!container) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
-
-    const eligible = type === CID_TYPE.FULL_CASE
-      ? ['AVAILABLE', 'VERIFIED'].includes(container.status)
-      : container.status !== 'PACKED' && container.status !== 'CANCELED' && container.status !== 'PURGED';
-
-    if (!eligible) {
-      throw Object.assign(new Error('NOT_ELIGIBLE'), { status: 409, data: { currentStatus: container.status } });
-    }
-
-    await tx.container.update({ where: { cid: canonical }, data: { status: 'CANCELED' } });
+    // CANCEL (container lifecycle — #213): eligibility for the type, → CANCELED, and the
+    // pallet's pull-pending recompute (#210), all inside this transaction.
+    const { palletReleased } = await cancelContainerTx(tx, canonical, type);
     await tx.containerEvent.create({
       data: {
         containerId: canonical, eventType: 'CANCELED', userZ: auth.zNumber,
         reasonPrefix, reasonNumber, reasonNote: reasonNote ?? null,
       },
     });
-    await tx.scanLog.create({
-      data: {
-        zNumber: auth.zNumber, actionType: 'CONTAINER_CANCEL',
-        details: JSON.stringify({ cid: canonical, type: CID_TYPE_LABELS[type], reasonPrefix, reasonNumber }),
-      },
-    });
-
-    // Issue #210: if this was the pallet's last open container, return the pallet from
-    // CA_PULL_PEND/FP_PULL_PEND to STORED in this same transaction (Logic Gate).
-    const palletReleased = await releasePullPendingIfNoOpenContainersTx(tx, container.pid);
+    await writeScanLog(tx, { zNumber: auth.zNumber, actionType: 'CONTAINER_CANCEL', details: { cid: canonical, type: CID_TYPE_LABELS[type], reasonPrefix, reasonNumber } });
 
     if (type === CID_TYPE.SSP_PULL_MASTER) {
       const pendingChildren = await tx.sSPUnit.findMany({
@@ -508,12 +491,7 @@ async function forceCloseOverpack(req: HttpRequest, _ctx: InvocationContext): Pr
         reasonPrefix, reasonNumber, reasonNote: reasonNote ?? null,
       },
     });
-    await tx.scanLog.create({
-      data: {
-        zNumber: auth.zNumber, actionType: 'OVERPACK_FORCE_CLOSE',
-        details: JSON.stringify({ cid: canonical, reasonPrefix, reasonNumber }),
-      },
-    });
+    await writeScanLog(tx, { zNumber: auth.zNumber, actionType: 'OVERPACK_FORCE_CLOSE', details: { cid: canonical, reasonPrefix, reasonNumber } });
 
     return { cid: canonical, action: 'FORCE_CLOSE' };
   });
@@ -548,12 +526,7 @@ async function reopenOverpack(req: HttpRequest, _ctx: InvocationContext): Promis
         reasonPrefix, reasonNumber, reasonNote: reasonNote ?? null,
       },
     });
-    await tx.scanLog.create({
-      data: {
-        zNumber: auth.zNumber, actionType: 'OVERPACK_REOPEN',
-        details: JSON.stringify({ cid: canonical, reasonPrefix, reasonNumber }),
-      },
-    });
+    await writeScanLog(tx, { zNumber: auth.zNumber, actionType: 'OVERPACK_REOPEN', details: { cid: canonical, reasonPrefix, reasonNumber } });
 
     return { cid: canonical, action: 'REOPEN' };
   });
@@ -593,12 +566,7 @@ async function reassignStrayEach(req: HttpRequest, _ctx: InvocationContext): Pro
         reassignedByZ: auth.zNumber,
       },
     });
-    await tx.scanLog.create({
-      data: {
-        zNumber: auth.zNumber, actionType: 'STRAY_REASSIGN',
-        details: JSON.stringify({ cid: canonical, previousStore, newStore, reasonPrefix, reasonNumber }),
-      },
-    });
+    await writeScanLog(tx, { zNumber: auth.zNumber, actionType: 'STRAY_REASSIGN', details: { cid: canonical, previousStore, newStore, reasonPrefix, reasonNumber } });
 
     return { cid: canonical, previousStore, newStore };
   });

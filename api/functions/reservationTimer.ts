@@ -2,7 +2,7 @@ import { app } from '../lib/functionsRuntime.js';
 import type { Timer, InvocationContext } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { writeLog } from '../lib/activityLog.js';
-import { clearLocation } from '../lib/logicGate.js';
+import { expireReservation } from '../lib/logicGate.js';
 
 const TIMEOUT_MINUTES = 5;
 
@@ -47,14 +47,10 @@ async function clearExpiredReservations(_timer: Timer, ctx: InvocationContext): 
   // of the batch.
   for (const res of expired) {
     try {
-      const claimed = await prisma.reservation.deleteMany({ where: { id: res.id } });
-      if (claimed.count === 0) continue; // already claimed by confirm/unassign (#93)
-
-      // CLEAR_LOCATION (Logic Gate — #149) — also clears the location's own statusExpiry/
-      // revertStatus mirror, which a plain status write wouldn't have (this reservation
-      // row is already gone via the claim above, so clearLocation's own defensive
-      // reservation.deleteMany is a harmless no-op here, same as every other caller).
-      await clearLocation({ aisle: res.locationAisle, bin: res.locationBin, level: res.locationLevel });
+      // Logic Gate expireReservation (#211): claim (#93) + release the location in one
+      // transaction; null when confirm/unassign already claimed it.
+      const expired = await expireReservation(res.id);
+      if (!expired) continue;
 
       await writeLog({
         userId:        res.workerZ,

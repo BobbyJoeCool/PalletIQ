@@ -11,8 +11,8 @@ import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
 import { useAisleField } from '../lib/useAisleField';
 import { useNumpadField } from '../lib/useNumpadField';
-import { useTabOrder } from '../lib/useTabOrder';
 import { isRangeEndValid } from '../lib/rangeValidation';
+import { containerStatusLabel } from '@shared/containerStatus';
 
 // ─── API response types ──────────────────────────────────────────────────────
 
@@ -97,15 +97,10 @@ function formatDpci(dept: number, cls: number, item: number): string {
 /** @param batchDates - distinct batch dates from the current L1 summary, used as the options
  *   for L2/L3's editable Batch Date filter (PRQ.md: drill-down pre-fills stay editable). */
 function PRQFilterBar({ batchDates }: { batchDates: number[] }) {
-  const { token } = useAuth();
   const { filters, setFilters, currentLevel, setCurrentLevel, setSelectedIndex } = usePRQ();
   const { setMessage } = useMessageBar();
 
   const aisleStart = useAisleField({
-    fetch: async (aisle) => {
-      const res = await apiFetch<{ exists: boolean; breakdown: unknown[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!);
-      return { exists: res.exists, breakdown: [] };
-    },
     onResolved: (aisle) => {
       setFilters((f) => ({ ...f, aisleStart: aisle, workstation: '' }));
     },
@@ -115,10 +110,6 @@ function PRQFilterBar({ batchDates }: { batchDates: number[] }) {
   });
 
   const aisleEnd = useAisleField({
-    fetch: async (aisle) => {
-      const res = await apiFetch<{ exists: boolean; breakdown: unknown[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!);
-      return { exists: res.exists, breakdown: [] };
-    },
     onResolved: (aisle) => {
       if (!isRangeEndValid(filters.aisleStart, aisle, false)) {
         setMessage({ type: 'error', text: 'End aisle must be higher than the start aisle.' });
@@ -166,16 +157,6 @@ function PRQFilterBar({ batchDates }: { batchDates: number[] }) {
   };
   const workstationRef = useRef<CodePickerFieldHandle>(null);
 
-  useTabOrder([
-    { fieldId: aisleStart.field.fieldId, activate: aisleStart.focusField },
-    { fieldId: aisleEnd.field.fieldId, activate: aisleEnd.focusField },
-    { fieldId: workstationRef.current?.fieldId ?? '', activate: () => workstationRef.current?.focus() },
-    { fieldId: binStartField.fieldId, activate: () => binStartField.focus(confirmBinStart), enabled: currentLevel === 3 },
-    { fieldId: binEndField.fieldId, activate: () => binEndField.focus(confirmBinEnd), enabled: currentLevel === 3 },
-    { fieldId: levelField.fieldId, activate: () => levelField.focus((v: string) => { setFilters((f) => ({ ...f, level: v })); }), enabled: currentLevel === 3 },
-    { fieldId: cartonMinField.fieldId, activate: () => cartonMinField.focus(confirmCartonMin), enabled: currentLevel === 3 },
-    { fieldId: cartonMaxField.fieldId, activate: () => cartonMaxField.focus(confirmCartonMax), enabled: currentLevel === 3 },
-  ]);
 
   const handleWorkstationChange = useCallback((ws: string) => {
     setFilters((f) => ({ ...f, workstation: ws, aisleStart: '', aisleEnd: '' }));
@@ -604,7 +585,7 @@ function PullDetailPopup({ location, filters, onClose }: { location: DetailLocat
                     >
                       {c.cid}
                     </button>
-                    <StatusBadge status={c.status} />
+                    <StatusBadge status={c.status} label={containerStatusLabel(c.status)} />
                     <span className="font-data text-[13px] text-[#9A9A9A]">
                       {c.cartonQuantity} ctn / {c.palletQuantity} plt / {c.sspQuantity} ssp
                     </span>

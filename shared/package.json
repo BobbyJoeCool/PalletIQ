@@ -1,0 +1,6 @@
+{
+  "name": "@palletiq/shared",
+  "private": true,
+  "description": "Pure domain rules and types shared by the floor app (via the @shared alias) and the API (compiled into api/dist/shared). No runtime dependencies.",
+  "type": "module"
+}

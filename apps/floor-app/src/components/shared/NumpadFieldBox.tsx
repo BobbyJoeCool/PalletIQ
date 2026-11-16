@@ -1,4 +1,5 @@
 import { INVALID_WASH, VALID_WASH } from '../../lib/invalidWash';
+import { fieldBoxAttrs } from '../../lib/fieldSequence';
 
 export interface NumpadFieldBoxProps {
   /** Current field value; renders an em-dash placeholder when empty. */
@@ -29,12 +30,20 @@ export interface NumpadFieldBoxProps {
   width?: string;
   /** Box height/padding/corner-radius classes, e.g. `h-[72px] px-5 rounded-[12px]` —
    *  every screen sizes its boxes slightly differently, so this has no default. */
-  boxClass: string;
+  /** Box dimension classes. Optional when `size` gives a preset. */
+  boxClass?: string;
   /** Value text classes (size/weight/tracking), e.g. `text-[32px] font-medium
    *  tracking-[0.04em]` — appended to the shared `font-data text-white` base. */
-  valueClass: string;
+  valueClass?: string;
   /** Caret bar width+height classes, e.g. `w-[3px] h-[38px]`. */
-  caretClass: string;
+  caretClass?: string;
+  /**
+   * Named size preset (#216 — replaces the page-local FieldBox/FieldDisplay wrappers that
+   * only baked in these three class strings). Explicit boxClass/valueClass/caretClass win.
+   */
+  size?: NumpadFieldBoxSize;
+  /** Accessible name for the box button (e.g. a DPCI segment's "Dept"). */
+  ariaLabel?: string;
   /** Label text size class. Defaults to `text-[14px]` (PIP/SDP/MNP's shared size). */
   labelClass?: string;
   /** Centers the value/caret within the box and the label above it — STG's Master
@@ -52,6 +61,17 @@ export interface NumpadFieldBoxProps {
  * shared *behavior* (active/disabled/invalid precedence, caret visibility, placeholder)
  * so a future behavioral change only needs editing here instead of in 7 files.
  */
+export type NumpadFieldBoxSize = 'compact' | 'entry' | 'medium' | 'large' | 'xlarge';
+
+/** Box/value/caret classes per size preset. */
+const SIZE_PRESETS: Record<NumpadFieldBoxSize, { box: string; value: string; caret: string }> = {
+  compact: { box: 'h-[52px] px-3 rounded-[10px]', value: 'text-[20px] font-medium', caret: 'w-[2px] h-[22px]' },
+  entry:   { box: 'h-[54px] px-4 rounded-[10px]', value: 'text-[20px] font-medium', caret: 'w-[2px] h-[20px]' },
+  medium:  { box: 'h-[60px] px-4 rounded-[12px]', value: 'text-[26px] font-medium tracking-[0.04em]', caret: 'w-[3px] h-[30px]' },
+  large:   { box: 'h-[72px] px-5 rounded-[12px]', value: 'text-[32px] font-medium tracking-[0.04em]', caret: 'w-[3px] h-[38px]' },
+  xlarge:  { box: 'h-[88px] px-5 rounded-[12px]', value: 'text-[40px] font-medium tracking-[0.04em]', caret: 'w-[3px] h-[46px]' },
+};
+
 export function NumpadFieldBox({
   value,
   onFocus,
@@ -66,14 +86,22 @@ export function NumpadFieldBox({
   caretClass,
   labelClass = 'text-[14px]',
   centered = false,
+  size,
+  ariaLabel,
 }: NumpadFieldBoxProps) {
   const hasWrapper = label !== undefined;
+  const preset = size ? SIZE_PRESETS[size] : undefined;
+  boxClass = boxClass ?? preset?.box ?? '';
+  valueClass = valueClass ?? preset?.value ?? '';
+  caretClass = caretClass ?? preset?.caret ?? '';
 
   const box = (
     <button
       type="button"
       onClick={onFocus}
       disabled={disabled}
+      aria-label={ariaLabel}
+      {...fieldBoxAttrs(active)}
       className={`flex items-center ${centered ? 'justify-center' : ''} ${boxClass} border-2 disabled:opacity-40 transition-colors ${!hasWrapper && width ? width : ''} ${
         invalid ? INVALID_WASH : valid ? VALID_WASH : active && !disabled ? 'border-[#CC0000] bg-[#0D0D0D]' : 'border-[#3A3A3A] bg-[#0D0D0D] hover:border-[#555]'
       }`}

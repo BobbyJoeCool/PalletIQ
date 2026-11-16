@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AisleSizeTable, type AisleSizeRow, type AisleSizeSort } from '../components/shared/AisleSizeTable';
-import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import type { CodePickerFieldHandle } from '../components/shared/CodePickerField';
 import { SizeField } from '../components/shared/SizeField';
 import { StorageCodeField } from '../components/shared/StorageCodeField';
@@ -11,10 +10,10 @@ import { useELA } from '../context/ELAContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
-import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
+import { useAisleField } from '../lib/useAisleField';
 import { useStorageCodes } from '../lib/useStorageCodes';
-import { useTabOrder } from '../lib/useTabOrder';
 import { useWorkstations, type Workstation } from '../lib/useWorkstations';
+import { AisleField } from '../components/shared/AisleField';
 
 type AisleRow = AisleSizeRow;
 type SortState = AisleSizeSort;
@@ -150,11 +149,9 @@ export function ELAPage() {
   // legitimately matching zero results isn't an error the way a single specific-aisle
   // field's bad value is; `invalid` only drives a visual hint, not a block.
   const aisleStartFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { setAisleStart(v); setSelected(null); hidePanel(); }, [setAisleStart, setSelected, hidePanel]),
   });
   const aisleEndFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { setAisleEnd(v); setSelected(null); hidePanel(); }, [setAisleEnd, setSelected, hidePanel]),
   });
   useEffect(() => { aisleStartFields.field.set(aisleStart); }, [aisleStart]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -171,13 +168,6 @@ export function ELAPage() {
     if (inv) setMessage({ type: 'error', text: 'Invalid Workstation' });
   }, [setMessage]);
 
-  useTabOrder([
-    { fieldId: storageCodeRef.current?.fieldId ?? '', activate: () => storageCodeRef.current?.focus() },
-    { fieldId: sizeFieldRef.current?.fieldId ?? '', activate: () => sizeFieldRef.current?.focus() },
-    { fieldId: aisleStartFields.field.fieldId, activate: aisleStartFields.focusField },
-    { fieldId: aisleEndFields.field.fieldId, activate: aisleEndFields.focusField },
-    { fieldId: workstationRef.current?.fieldId ?? '', activate: () => workstationRef.current?.focus() },
-  ]);
 
   /** Workstation exclude filter (GitHub #125) — toggling the filter chip itself, or
    *  toggling one workstation's membership in the excluded set. */
@@ -305,24 +295,16 @@ export function ELAPage() {
           <SizeField ref={sizeFieldRef} value={size} onChange={(v) => { setSize(v); setSelected(null); }} onValidityChange={setIsInvalidSize} />
           {/* Aisle Range (GitHub #124) — restricts results to aisles within [start, end]. */}
           <div className="flex items-end gap-2">
-            <NumpadFieldBox
+            <AisleField fields={aisleStartFields}
               label="Start Aisle"
-              value={aisleStartFields.field.value}
-              onFocus={aisleStartFields.focusField}
-              active={aisleStartFields.field.isActive}
-              invalid={aisleStartFields.invalid}
               width="w-[110px]"
               boxClass="h-[64px] px-4 rounded-[12px]"
               valueClass="text-[26px] font-medium"
               caretClass="w-[2px] h-[24px]"
             />
             <span className="font-ui text-[16px] text-[#555] pb-4">–</span>
-            <NumpadFieldBox
+            <AisleField fields={aisleEndFields}
               label="End Aisle"
-              value={aisleEndFields.field.value}
-              onFocus={aisleEndFields.focusField}
-              active={aisleEndFields.field.isActive}
-              invalid={aisleEndFields.invalid}
               width="w-[110px]"
               boxClass="h-[64px] px-4 rounded-[12px]"
               valueClass="text-[26px] font-medium"

@@ -16,8 +16,7 @@ const QWERTY_ROWS = [
  * `'Enter'`/`'OK'`/`'Blur'` as equivalent submit triggers, so the rename is label-only.
  *
  * Tab/Back Tab (issue #199) dispatch `'Tab'`/`'Back Tab'` into `NumpadContext.handleKey`,
- * routed to the screen's `useTabOrder` hook — see `Numpad.tsx`'s own doc comment for the
- * full mechanism.
+ * which moves along the field sequence (`lib/fieldSequence.ts`) — see `Numpad.tsx`.
  *
  * Used for free-text entry fields (Size and Storage Code overrides on SDP) where
  * alphanumeric input is needed rather than digits only.

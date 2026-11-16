@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.10.0 — 2026-11-15](#1100--2026-11-15)
 - [1.9.1 — 2026-11-15](#191--2026-11-15)
 - [1.9.0 — 2026-08-28](#190--2026-08-28)
 - [1.8.13 — 2026-08-28](#1813--2026-08-28)
@@ -160,6 +161,40 @@ No issues currently open in this category.
 ### Distant Future
 
 No issues currently open in this category.
+
+---
+
+## [1.10.0] — 2026-11-15
+
+Architecture refactor release (#211–#218, from the 2026-10-18 architecture review). API v1.3.0.
+Mostly internal; the user-visible changes are listed under Changed.
+
+### 1.10.0 — Changed
+
+- **PAR location warning** (#212): Hold Outbound no longer triggers the warn-then-allow
+  popup (outbound-only, same as every other inbound path); the storage-code mismatch is now
+  enforced server-side as well.
+- **"Verified" containers** (#213): PRQ's Verified filter now returns pulled containers
+  (it queried a status nothing writes and was always empty); CII can cancel a pulled
+  full-case container; pulled containers' badges read VERIFIED.
+- **SDP Exists Elsewhere** (#215): a redirect keeps the reservation alive — Unassign
+  works while redirected (the Cancel button is gone), Return to the reserved location
+  makes no server call, and confirm completes the consolidation server-side.
+- **Tab / Back Tab** (#214): move through the on-screen fields in layout order on every
+  screen, including STG and WLH Single Location (previously not wired); IID/ISI's DPCI
+  boxes are now reachable.
+
+### 1.10.0 — Refactored
+
+- Shared domain rules live once in `shared/` (#217): roles, VCP/SSP, expiration window,
+  location IDs, location acceptance policy (#212), container statuses (#213).
+- SDP put session module (`lib/usePutSession.ts` + typed `PutsClient`) is the only caller
+  of the puts endpoints; the Verify-Put Modal is render-only (#215).
+- Field sequence (`lib/fieldSequence.ts`) replaces all hand-written Tab slot lists and
+  next-field auto-advance timers (#214).
+- `showError`, built-in aisle lookup, `AisleField`/`UpcField`/`DpciEntry`, and
+  `NumpadFieldBox` size presets replace copied error pairs, fetch literals and page-local
+  box wrappers (#216).
 
 ---
 

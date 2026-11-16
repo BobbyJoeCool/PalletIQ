@@ -1,216 +1,105 @@
 import prisma from './prisma.js';
 import type { Prisma } from '../generated/prisma/index.js';
-import { NOT_HELD_FILTER } from './zoneLogic.js';
+import { whereAcceptsPut, acceptsInbound, type HoldCategory } from './locationPolicy.js';
 
 /**
- * The Logic Gate (GitHub #149, design doc `DevNotes/DesignPrompts/
- * Shared-Infrastructure-Design-Spec.md`) — the single owner of every status write to
- * `Location` and `Pallet`. No handler writes `status`/`holdCategory`-adjacent Location
- * fields or `Pallet.status` directly (outside `demo-reseed.ts`, an explicit carve-out —
- * see its own note below); every write instead calls one of the intents below.
+ * The Logic Gate — the reservation / location lifecycle module (GitHub #149, deepened by
+ * #211). The single owner of every status write to `Location` and `Pallet` (outside
+ * `demo-reseed.ts`, which fabricates edge-case seed state on purpose). Container status
+ * transitions live in `containerLifecycle.ts` (#213).
  *
- * Each intent is documented against the design spec's own Intent Reference tables
- * (preferred status, fallback chain, deny conditions, expiry/revert) — this file is the
- * authoritative implementation of those tables, not a paraphrase of them.
+ * **One operation per lifecycle event, and each operation owns its whole protocol** — the
+ * #93 reservation claim, the transaction, and every status write. A handler calls exactly
+ * one operation per event and never sequences Gate calls itself. Before #211 the handlers
+ * owned that protocol: the claim was copied into confirmPut, unassignPut and the expiry
+ * timer; a move ran clearLocation and putComplete as two transactions; consolidation and
+ * PAR's location write ran outside their transactions; and range holds bypassed the Gate
+ * entirely (bug #209).
+ *
+ * | Event                      | Operation                | Caller                       |
+ * |----------------------------|--------------------------|------------------------------|
+ * | SDP directs a put          | `reservePut`             | puts.ts directedPut          |
+ * | SDP confirms the put       | `confirmReservation`     | puts.ts confirmPut           |
+ * | SDP confirms a redirect    | `confirmReservationInto` | puts.ts confirmPut           |
+ * | SDP unassigns              | `releaseReservation`     | puts.ts unassignPut          |
+ * | Reservation times out      | `expireReservation`      | reservationTimer.ts          |
+ * | MNP puts / moves a pallet  | `movePallet`             | puts.ts manualConfirm        |
+ * | MNP consolidates           | `consolidateInto`        | puts.ts manualConfirm        |
+ * | PAR reinstates onto a loc  | `storeReinstatedPallets` | pallets.ts reinstatePallet   |
+ * | STG stages a location      | `stageLocation`          | staging.ts                   |
+ * | STG restage clears a type  | `unstageAisleType`       | staging.ts restageAisle      |
+ * | A hold is placed           | `placeHold`              | locations.ts placeHold       |
+ * | A range hold bucket lands  | `applyRangeHoldBucket`   | locations.ts placeRangeHold  |
+ * | A hold is removed          | `removeHold`             | locations.ts removeHold      |
+ * | A range release bucket     | `applyRangeReleaseBucket`| locations.ts releaseRangeHold|
+ *
+ * Operations with a `*Tx` core run inside a caller-supplied transaction client, so tests
+ * can run them inside a rolled-back transaction on the local DB (tests/db/).
  *
  * **`statusExpiry`/`revertStatus` (#150) are a mirror, not the active enforcer.** SDP's
- * existing `Reservation` table (`createdAt` + `wasStaged`) plus `reservationTimer.ts`'s
- * per-minute cron (atomic `deleteMany`-claim, the "#93" race-safety pattern reused by
- * confirm/unassign) remains the sole *active* expiry mechanism for RESERVE_PUT —
- * this predates the design doc, which never mentions the Reservation table at all.
- * `reservePut` below still creates a `Reservation` row exactly as before; `statusExpiry`/
- * `revertStatus` are written alongside it for design-doc conformance and future lazy-check
- * use, not wired to any new active enforcement in this pass.
- *
- * **Scope of this pass:** every intent is implemented per the design doc's full contract,
- * but only the call sites with a real, currently-existing caller are migrated onto them
- * (see each intent's own doc comment for which). `receivePallet`, `reserveBulk`, and
- * `reserveReinstate` have no live caller yet (no receiving flow, Bulk Pull #137, and PAR's
- * reinstate flow all predate/exceed this pass) — implemented per spec, ready for whoever
- * builds those callers. `demo-reseed.ts` (the seed/reseed generator) is explicitly left on
- * direct writes — it fabricates deliberately-edge-case initial/reset state a validating
- * Gate would likely reject, not a real workflow action to police.
+ * `Reservation` row (`createdAt` + `wasStaged`) plus `reservationTimer.ts`'s per-minute cron
+ * remain the active expiry mechanism; the location columns are written alongside for
+ * design-doc conformance.
  */
 
-// ── Shared helpers ──────────────────────────────────────────────────────────────
+// ── Shared types & helpers ─────────────────────────────────────────────────────
 
 export type LocationCoords = { aisle: number; bin: number; level: number };
+type Tx = Prisma.TransactionClient;
 
 const RESERVE_PUT_EXPIRY_MINUTES = 5;
 const CONSOLIDATION_EXPIRY_MINUTES = 15;
-const RESERVE_REINSTATE_EXPIRY_MINUTES = 30;
 
-/** Statuses that deny any of the RESERVE_ or STAGE_LOCATION intents outright — same three
- *  hold categories `manualConfirm`'s own hold gate and every RESERVE_ intent in the
- *  design doc use (HOLD_OUT is deliberately excluded — outbound-only, never blocks a
- *  put/stage/reserve, matching `zoneLogic.ts`'s NOT_HELD_FILTER elsewhere in the app). */
-const DENYING_HOLD_CATEGORIES = new Set(['HOLD_IN', 'HOLD_BOTH', 'HOLD_PERM']);
-
-function deniesReservation(location: { holdCategory: string | null; contraction: boolean }): boolean {
-  return location.contraction || (location.holdCategory != null && DENYING_HOLD_CATEGORIES.has(location.holdCategory));
+function locationKey({ aisle, bin, level }: LocationCoords) {
+  return { LocationID: { aisle, bin, level } };
 }
 
-// ── Pallet-side intents ─────────────────────────────────────────────────────────
+/** Formats coords as the 8-digit location ID string handlers report back. */
+function locationString({ aisle, bin, level }: LocationCoords): string {
+  return String(aisle).padStart(3, '0') + String(bin).padStart(3, '0') + String(level).padStart(2, '0');
+}
 
-/**
- * RECEIVE_PALLET — preferred `PUT_PENDING`, no fallback, no deny condition (a pure
- * derivation: cartons > 0, no location assigned yet). No live caller exists in this
- * codebase today (receiving isn't a built flow) — implemented per spec for whenever one is.
- */
-export async function receivePallet(palletId: number): Promise<void> {
-  await prisma.pallet.update({ where: { pid: palletId }, data: { status: 'PUT_PENDING' } });
+/** Error thrown when a reservation was already claimed (confirmed, unassigned or expired). */
+function reservationGone(): Error {
+  return Object.assign(new Error('NOT_FOUND'), { status: 404 });
 }
 
 /**
- * ZERO_PALLET — preferred `CONSOLIDATED`, fallback `CANCELED`; cascades to
- * `clearLocation` on the pallet's own prior location, if any. The design doc frames the
- * CONSOLIDATED/CANCELED choice as resolved "via pointer-field lookup," but no such pointer
- * field exists on `Pallet` in this schema (the consolidate branch that zeroes an incoming
- * pallet today, `manualConfirm` in `puts.ts`, never records which occupant it was merged
- * into). Since the only live caller already knows unambiguously which case applies (it's
- * inside its own `resolution === 'consolidate'` branch), this takes an explicit `outcome`
- * from the caller instead of inferring one from nonexistent data — no external behavior
- * changes, this only avoids a needless net-new schema field with no other consumer.
+ * The #93 claim: deletes the reservation row inside the transaction before any location or
+ * pallet write. Whichever of confirm / unassign / the expiry timer deletes the row first
+ * wins; under MySQL row locking a concurrent claimer blocks, then sees count 0.
+ * `deleteMany` (not `delete`) so a lost race returns 0 instead of throwing.
+ * @returns the claimed reservation, or null if it was already gone
  */
-export async function zeroPallet(
-  palletId: number,
-  outcome: 'CONSOLIDATED' | 'CANCELED',
-  priorLocation: LocationCoords | null,
-): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    await tx.pallet.update({
-      where: { pid: palletId },
-      data: {
-        currentPallets: 0, currentCartons: 0, currentSSPs: 0,
-        status: outcome,
-        locationAisle: null, locationBin: null, locationLevel: null,
-        storageCode: null, size: null, zone: null,
-      },
-    });
-    if (priorLocation) {
-      await clearLocationTx(tx, { ...priorLocation, excludePalletId: palletId });
-    }
-  });
+async function claimReservationTx(tx: Tx, reservationId: number) {
+  const reservation = await tx.reservation.findUnique({ where: { id: reservationId } });
+  if (!reservation) return null;
+  const claimed = await tx.reservation.deleteMany({ where: { id: reservationId } });
+  return claimed.count === 0 ? null : reservation;
 }
+
+/** The claimed reservation row, as the confirm/release operations return it. */
+export type ClaimedReservation = NonNullable<Awaited<ReturnType<typeof claimReservationTx>>>;
+
+/** Pre-claim check a confirm runs inside its transaction; throwing aborts without claiming. */
+export type VerifyReservation = (reservation: ClaimedReservation, tx: Tx) => void | Promise<void>;
 
 /**
- * The location-side half of PUT_COMPLETE — marks a location STORED and clears any
- * RESERVED-related `statusExpiry`/`revertStatus`. Split out from `putComplete` below so a
- * caller that isn't moving an *existing* pallet (PAR's `reinstatePallet`, which creates a
- * brand-new `Pallet` row rather than updating one) can still route its location write
- * through the Gate without forcing a pallet-update shape that doesn't fit.
+ * CLEAR_LOCATION — preferred `EMPTY`; falls back to `STORED` if another pallet still
+ * occupies the exact location (#86). Resolves its non-occupied target from
+ * `overrideRevert` if given, else the location's own `revertStatus` mirror, else `EMPTY`,
+ * and always clears `statusExpiry`/`revertStatus`. Also deletes any stray Reservation row
+ * for the location (a no-op for callers that already claimed theirs). Internal: callers
+ * reach it through the lifecycle operations below.
+ * @returns the status the location resolved to
  */
-async function storeLocation(aisle: number, bin: number, level: number): Promise<void> {
-  await prisma.location.update({
-    where: { LocationID: { aisle, bin, level } },
-    data: { status: 'STORED', statusExpiry: null, revertStatus: null },
-  });
-}
-
-/**
- * PUT_COMPLETE — preferred `STORED`; clears `RESERVED` on the target location (via
- * `storeLocation`) in the same call. Wired to `placePallet`'s "store at the new location"
- * half (`puts.ts`, shared by SDP `confirmPut` and MNP `manualConfirm`).
- *
- * PAR's `reinstatePallet` does **not** call this — it creates a new `Pallet` row rather
- * than updating an existing one, which this function's pallet-side write doesn't support.
- * Its location write instead calls `storeLocationForCreate` below.
- */
-export async function putComplete(params: {
-  palletId: number; aisle: number; bin: number; level: number; workerZ: string;
-}): Promise<void> {
-  const { palletId, aisle, bin, level, workerZ } = params;
-  const newLoc = await prisma.location.findUniqueOrThrow({
-    where: { LocationID: { aisle, bin, level } },
-    select: { storageCode: true, size: true, zone: true },
-  });
-  await prisma.$transaction([
-    prisma.location.update({
-      where: { LocationID: { aisle, bin, level } },
-      data: { status: 'STORED', statusExpiry: null, revertStatus: null },
-    }),
-    prisma.pallet.update({
-      where: { pid: palletId },
-      data: {
-        locationAisle: aisle, locationBin: bin, locationLevel: level,
-        storageCode: newLoc.storageCode, size: newLoc.size, zone: newLoc.zone,
-        status: 'STORED', putByZ: workerZ, putAt: new Date(),
-      },
-    }),
-  ]);
-}
-
-/**
- * PAR-specific: the location-side half of PUT_COMPLETE, for a pallet being *created*
- * already-STORED (see `putComplete`'s own doc comment for why PAR can't use that function
- * directly). Only ever called when placing directly onto a previously-EMPTY location — no
- * reservation exists to clear in that case, so this is a bare status write, not a full
- * `clearLocation`-then-store sequence.
- */
-export async function storeLocationForCreate(aisle: number, bin: number, level: number): Promise<void> {
-  await storeLocation(aisle, bin, level);
-}
-
-/**
- * COMPLETE_PULL — preferred `STORED` or `PULLED`, fallback `PULL_PENDING` (in practice
- * `CA_PULL_PEND`/`FP_PULL_PEND` — see the module-level note on those values); cascades to
- * `clearLocation` if resolved `PULLED`. Wired to PIP's `verifyPull` (`pulls.ts`), called
- * only for its one actual live trigger today — every outstanding container against the
- * pallet has now been pulled, attempt `STORED` — not extended to also detect/produce
- * `PULLED` (a fully-emptied pallet), since nothing in the current codebase does that
- * detection and adding it here would be a silent behavior change, not a migration.
- */
-export async function completePull(palletId: number): Promise<void> {
-  await prisma.pallet.update({ where: { pid: palletId }, data: { status: 'STORED' } });
-}
-
-/** Pull-pending statuses `releasePullPendingIfNoOpenContainersTx` is allowed to revert. */
-const PULL_PENDING_STATUSES = ['CA_PULL_PEND', 'FP_PULL_PEND'];
-
-/**
- * COMPLETE_PULL, transaction-scoped and conditional: if the pallet has no remaining open
- * (`AVAILABLE`/`PRINTED`) containers and is currently `CA_PULL_PEND`/`FP_PULL_PEND`, returns
- * it to `STORED` inside the caller's transaction. Any other pallet status is left alone — a
- * cancel must never flip, say, a held or already-`STORED` pallet.
- *
- * Wired to CII's `cancelContainer` (issue #210 — canceling a pallet's last open container
- * previously left the pallet stuck pull-pending, since only `verifyPull` ran this recompute).
- * The broader single-home consolidation of this rule is #213.
- *
- * @returns true if the pallet was returned to `STORED`
- */
-export async function releasePullPendingIfNoOpenContainersTx(
-  tx: Prisma.TransactionClient,
-  palletId: number,
-): Promise<boolean> {
-  const remainingOpen = await tx.container.count({
-    where: { pid: palletId, status: { in: ['AVAILABLE', 'PRINTED'] } },
-  });
-  if (remainingOpen > 0) return false;
-  const { count } = await tx.pallet.updateMany({
-    where: { pid: palletId, status: { in: PULL_PENDING_STATUSES } },
-    data: { status: 'STORED' },
-  });
-  return count > 0;
-}
-
-// ── Location-side intents ───────────────────────────────────────────────────────
-
 async function clearLocationTx(
-  tx: Prisma.TransactionClient,
-  params: { aisle: number; bin: number; level: number; excludePalletId?: number; overrideRevert?: 'EMPTY' },
+  tx: Tx,
+  params: LocationCoords & { excludePalletId?: number; overrideRevert?: 'EMPTY' },
 ): Promise<'EMPTY' | 'STORED' | 'STAGED'> {
   const { aisle, bin, level, excludePalletId, overrideRevert } = params;
-
-  // Any caller's clearLocation also cleans up a stray Reservation row for this location —
-  // harmless no-op (count 0) for SDP's own unassign/confirm/block, which already claimed
-  // (deleted) their own Reservation row before calling this (the #93 race-safety pattern,
-  // preserved unchanged in puts.ts); this is what makes clearLocation safe for a caller
-  // like WLH's hold placement, which has never touched Reservation at all.
   await tx.reservation.deleteMany({ where: { locationAisle: aisle, locationBin: bin, locationLevel: level } });
 
-  // #86's fix, generalized: fall back to STORED instead of the resolved revert target if
-  // another pallet still occupies this exact location.
   const stillOccupied = await tx.pallet.count({
     where: {
       locationAisle: aisle, locationBin: bin, locationLevel: level,
@@ -218,91 +107,48 @@ async function clearLocationTx(
     },
   });
   if (stillOccupied > 0) {
-    await tx.location.update({
-      where: { LocationID: { aisle, bin, level } },
-      data: { status: 'STORED', statusExpiry: null, revertStatus: null },
-    });
+    await tx.location.update({ where: locationKey(params), data: { status: 'STORED', statusExpiry: null, revertStatus: null } });
     return 'STORED';
   }
 
-  const current = await tx.location.findUniqueOrThrow({
-    where: { LocationID: { aisle, bin, level } },
-    select: { revertStatus: true },
-  });
+  const current = await tx.location.findUniqueOrThrow({ where: locationKey(params), select: { revertStatus: true } });
   const resolved = (overrideRevert ?? current.revertStatus ?? 'EMPTY') as 'EMPTY' | 'STAGED';
-  await tx.location.update({
-    where: { LocationID: { aisle, bin, level } },
-    data: { status: resolved, statusExpiry: null, revertStatus: null },
-  });
+  await tx.location.update({ where: locationKey(params), data: { status: resolved, statusExpiry: null, revertStatus: null } });
   return resolved;
 }
 
-/**
- * CLEAR_LOCATION — preferred `EMPTY`; falls back to `STORED` if another pallet still
- * occupies the exact location (#86's existing fix, generalized from `vacatedLocationStatus`
- * in `puts.ts`). Resolves its non-occupied target from `overrideRevert` if given, else the
- * location's own stored `revertStatus` mirror, else `EMPTY` — always clears `statusExpiry`/
- * `revertStatus` in the same write. `excludePalletId` matters when the pallet being placed
- * elsewhere is itself still (momentarily) pointing at the location being cleared.
- *
- * Reused by: `placePallet`'s old-location clear, SDP's `unassignPut`, MNP's
- * consolidate-vacate (via `zeroPallet`), STG's per-location restage step, and WLH's
- * hold-placement side effect (`overrideRevert: 'EMPTY'`, per the design doc's "placing a
- * hold also calls the Gate... forcing the reservation to revert to EMPTY regardless of
- * what its stored revert-to value would otherwise have been") — the same side effect
- * that makes SDP's own Hold Location button (Verify-Put Modal, #151) need no API call
- * of its own beyond embedding the shared `HoldPanel`.
- *
- * @returns the status the location actually resolved to — a caller like `unassignPut`
- *   reports this back to the worker (e.g. "released to STAGED/EMPTY"); `STORED` is the
- *   rare dual-occupancy fallback, not the common case for a plain release
- */
-export async function clearLocation(params: {
-  aisle: number; bin: number; level: number; excludePalletId?: number; overrideRevert?: 'EMPTY';
-}): Promise<'EMPTY' | 'STORED' | 'STAGED'> {
-  return prisma.$transaction((tx) => clearLocationTx(tx, params));
+/** Marks a location STORED and clears the reservation mirror columns. */
+async function storeLocationTx(tx: Tx, coords: LocationCoords): Promise<void> {
+  await tx.location.update({ where: locationKey(coords), data: { status: 'STORED', statusExpiry: null, revertStatus: null } });
 }
 
+// ── Reservations (SDP) ─────────────────────────────────────────────────────────
+
 /**
- * RESERVE_PUT — preferred `RESERVED`; denied outright (no fallback) if the location is
- * currently held `HOLD_IN`/`HOLD_BOTH`/`HOLD_PERM` or contracted (`HOLD_OUT` never denies —
- * outbound-only, matches `zoneLogic.ts`'s search-time filter). This re-check closes a real
- * gap in today's code: `findNextLocation`'s search already excludes held/contracted
- * candidates, but the reserve write itself never re-verified between search and write —
- * this is a genuine new race-safety improvement, not just a refactor. On success: creates
- * the `Reservation` row exactly as `directedPut` does today, sets `status = 'RESERVED'`,
- * `statusExpiry = now + 5min`, `revertStatus = wasStaged ? 'STAGED' : 'EMPTY'`.
- *
- * Wired to SDP's `directedPut` (`puts.ts`), which builds this same Reservation row +
- * status write inline.
- *
- * @throws Error('LOCATION_UNAVAILABLE') if denied — caller decides how to surface it
+ * RESERVE_PUT — `RESERVED`, denied (no fallback) if the location is contracted or
+ * inbound-held (location acceptance policy, #212). Re-checks at write time, closing the
+ * gap between `findNextLocation`'s search and the write. Creates the `Reservation` row and
+ * sets `statusExpiry` (5 min, 15 when consolidating) / `revertStatus` (STAGED or EMPTY).
+ * @throws 409 LOCATION_UNAVAILABLE if denied
  */
-export async function reservePut(params: {
-  aisle: number; bin: number; level: number; palletId: number; workerZ: string;
+export async function reservePut(params: LocationCoords & {
+  palletId: number; workerZ: string;
   targetAisle: number; targetSize: string | null; targetStorage: string | null; targetZone: number | null;
   consolidating: boolean; wasScanned: boolean | null; wasStaged: boolean;
 }): Promise<{ reservationId: number }> {
   const { aisle, bin, level } = params;
   return prisma.$transaction(async (tx) => {
-    const loc = await tx.location.findUniqueOrThrow({
-      where: { LocationID: { aisle, bin, level } },
-      select: { holdCategory: true, contraction: true },
-    });
-    if (deniesReservation(loc)) {
-      throw Object.assign(new Error('LOCATION_UNAVAILABLE'), { status: 409 });
-    }
+    const loc = await tx.location.findUniqueOrThrow({ where: locationKey(params), select: { holdCategory: true, contraction: true } });
+    if (!acceptsInbound(loc)) throw Object.assign(new Error('LOCATION_UNAVAILABLE'), { status: 409 });
 
-    const revertStatus = params.wasStaged ? 'STAGED' : 'EMPTY';
     await tx.location.update({
-      where: { LocationID: { aisle, bin, level } },
+      where: locationKey(params),
       data: {
         status: 'RESERVED',
         statusExpiry: new Date(Date.now() + (params.consolidating ? CONSOLIDATION_EXPIRY_MINUTES : RESERVE_PUT_EXPIRY_MINUTES) * 60_000),
-        revertStatus,
+        revertStatus: params.wasStaged ? 'STAGED' : 'EMPTY',
       },
     });
-
     const reservation = await tx.reservation.create({
       data: {
         locationAisle: aisle, locationBin: bin, locationLevel: level,
@@ -316,79 +162,277 @@ export async function reservePut(params: {
   });
 }
 
+/** Result of moving a pallet: whether it had a prior location, and that location's ID. */
+export interface MoveResult { wasMove: boolean; clearedLocation: string | null }
+
 /**
- * RESERVE_BULK — preferred `RESERVED`, accepted only if `EMPTY` (denied otherwise, no
- * fallback — stricter than RESERVE_PUT, which also accepts STAGED), same hold/contraction
- * deny as `reservePut`. No expiry. No live caller yet — Bulk Pull (#137) isn't built;
- * implemented per spec for that future work.
+ * Moves a pallet onto a location in the caller's transaction: frees its prior location
+ * (CLEAR_LOCATION, dual-occupancy aware) and stores it at the new one (PUT_COMPLETE —
+ * location STORED, pallet inherits the location's storage code/size/zone).
  */
-export async function reserveBulk(aisle: number, bin: number, level: number): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    const loc = await tx.location.findUniqueOrThrow({
-      where: { LocationID: { aisle, bin, level } },
-      select: { status: true, holdCategory: true, contraction: true },
-    });
-    if (loc.status !== 'EMPTY' || deniesReservation(loc)) {
-      throw Object.assign(new Error('LOCATION_UNAVAILABLE'), { status: 409 });
-    }
-    await tx.location.update({ where: { LocationID: { aisle, bin, level } }, data: { status: 'RESERVED' } });
+export async function movePalletTx(tx: Tx, params: LocationCoords & { palletId: number; workerZ: string }): Promise<MoveResult> {
+  const { palletId, workerZ } = params;
+  const pallet = await tx.pallet.findUniqueOrThrow({
+    where: { pid: palletId },
+    select: { locationAisle: true, locationBin: true, locationLevel: true },
   });
+  const prior = pallet.locationAisle != null
+    ? { aisle: pallet.locationAisle, bin: pallet.locationBin!, level: pallet.locationLevel! }
+    : null;
+  if (prior) await clearLocationTx(tx, { ...prior, excludePalletId: palletId });
+
+  const dest = await tx.location.findUniqueOrThrow({ where: locationKey(params), select: { storageCode: true, size: true, zone: true } });
+  await storeLocationTx(tx, params);
+  await tx.pallet.update({
+    where: { pid: palletId },
+    data: {
+      locationAisle: params.aisle, locationBin: params.bin, locationLevel: params.level,
+      storageCode: dest.storageCode, size: dest.size, zone: dest.zone,
+      status: 'STORED', putByZ: workerZ, putAt: new Date(),
+    },
+  });
+  return prior ? { wasMove: true, clearedLocation: locationString(prior) } : { wasMove: false, clearedLocation: null };
 }
 
 /**
- * RESERVE_REINSTATE — preferred `RESERVED`/`PENDING_REINSTATE`, accepted only if `EMPTY`,
- * same hold/contraction deny, 30-min expiry, revert `EMPTY`. Implemented per spec; **not
- * wired to PAR's `reinstatePallet` this round** — PAR creates its Pallet row and (if
- * placing directly) its Location write in one direct step today, with no pending/expiring
- * intermediate state at all. Routing PAR onto this intent would introduce a genuinely new
- * two-phase reserve-then-confirm behavior, not migrate an existing write mechanism — left
- * for a future PAR redesign that actually wants that behavior; PAR's own call site below
- * uses `putComplete` instead, which reproduces its current direct-to-STORED behavior exactly.
+ * SDP confirm, in the caller's transaction: claims the reservation and moves its pallet
+ * onto the reserved location atomically.
+ * @param verify - check run against the reservation before the claim (e.g. the scanned-
+ *   location match); throwing from it aborts without claiming
+ * @throws 404 NOT_FOUND if the reservation was already claimed
  */
-export async function reserveReinstate(aisle: number, bin: number, level: number): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    const loc = await tx.location.findUniqueOrThrow({
-      where: { LocationID: { aisle, bin, level } },
-      select: { status: true, holdCategory: true, contraction: true },
-    });
-    if (loc.status !== 'EMPTY' || deniesReservation(loc)) {
-      throw Object.assign(new Error('LOCATION_UNAVAILABLE'), { status: 409 });
-    }
-    await tx.location.update({
-      where: { LocationID: { aisle, bin, level } },
-      data: {
-        status: 'RESERVED',
-        statusExpiry: new Date(Date.now() + RESERVE_REINSTATE_EXPIRY_MINUTES * 60_000),
-        revertStatus: 'EMPTY',
-      },
-    });
+export async function confirmReservationTx(
+  tx: Tx,
+  reservationId: number,
+  workerZ: string,
+  verify?: VerifyReservation,
+): Promise<{ reservation: ClaimedReservation } & MoveResult> {
+  const existing = await tx.reservation.findUnique({ where: { id: reservationId } });
+  if (!existing) throw reservationGone();
+  await verify?.(existing, tx);
+  const reservation = await claimReservationTx(tx, reservationId);
+  if (!reservation) throw reservationGone();
+  const move = await movePalletTx(tx, {
+    palletId: reservation.palletId,
+    aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel,
+    workerZ,
   });
+  return { reservation, ...move };
+}
+
+/** SDP confirm in its own transaction (see `confirmReservationTx`). */
+export async function confirmReservation(reservationId: number, workerZ: string, verify?: VerifyReservation) {
+  return prisma.$transaction((tx) => confirmReservationTx(tx, reservationId, workerZ, verify));
 }
 
 /**
- * STAGE_LOCATION — preferred `STAGED`; denied outright (no fallback) if the location isn't
- * currently `EMPTY`, or is held `IN`/`BOTH`/`PERM`, or contracted. Uses an atomic
- * conditional `updateMany` (not a separate read-then-write) — `stageLocations`' own
- * existing per-location loop already relies on this shape for concurrency safety across
- * multiple GPMers staging into the same aisle at once; preserved here rather than
- * downgraded to a read-then-write that would reintroduce that race. No separate
- * `UNSTAGE_LOCATION` intent — clearing a staged location, wherever it happens, goes
- * through `clearLocation` (per the design doc's own note).
- *
- * Wired to STG's `stageLocations` (its existing guarded-`updateMany` shape, now including
- * the hold-category check the design doc calls for that today's code doesn't) and
- * `restageAisle`'s per-location re-stage step (`staging.ts`) — NOT `restageAisle`'s own
- * *bulk* unstage-all-of-type-back-to-EMPTY step, which operates on a whole aisle's worth of
- * locations in one `updateMany` and has no natural single-location Gate-intent shape;
- * left as a direct write, a deliberate scope line rather than an oversight.
- *
- * @returns true if staged, false if denied (today's `stageLocations` treats a per-location
- *   denial as an expected, silently-skipped shortfall, not a thrown error)
+ * SDP confirm onto a redirect target (Exists Elsewhere, #215), in the caller's transaction:
+ * `resolveTarget` runs before the claim — it verifies the scan and re-checks the candidate
+ * rule, returning the occupant pallet to consolidate into (throwing aborts without
+ * claiming). Then: claim the reservation, release the reserved location to its revert
+ * status, and consolidate the reservation's pallet into the occupant.
+ * @throws 404 NOT_FOUND if the reservation was already claimed
+ */
+export async function confirmReservationIntoTx(
+  tx: Tx,
+  reservationId: number,
+  resolveTarget: (reservation: ClaimedReservation, tx: Tx) => Promise<number>,
+): Promise<{ reservation: ClaimedReservation; targetPalletId: number; moved: { cartons: number; pallets: number; ssps: number } }> {
+  const existing = await tx.reservation.findUnique({ where: { id: reservationId } });
+  if (!existing) throw reservationGone();
+  const targetPalletId = await resolveTarget(existing, tx);
+  const claimed = await claimAndClearTx(tx, reservationId);
+  if (!claimed) throw reservationGone();
+  const moved = await consolidateIntoTx(tx, { sourcePalletId: claimed.reservation.palletId, targetPalletId });
+  return { reservation: claimed.reservation, targetPalletId, moved };
+}
+
+export async function confirmReservationInto(
+  reservationId: number,
+  resolveTarget: (reservation: ClaimedReservation, tx: Tx) => Promise<number>,
+) {
+  return prisma.$transaction((tx) => confirmReservationIntoTx(tx, reservationId, resolveTarget));
+}
+
+/** Claims a reservation and clears its location; null when it was already claimed. */
+async function claimAndClearTx(tx: Tx, reservationId: number) {
+  const reservation = await claimReservationTx(tx, reservationId);
+  if (!reservation) return null;
+  const releasedStatus = await clearLocationTx(tx, {
+    aisle: reservation.locationAisle, bin: reservation.locationBin, level: reservation.locationLevel,
+  });
+  return { reservation, releasedStatus };
+}
+
+/**
+ * SDP unassign: claims the reservation and releases its location to its revert status.
+ * @throws 404 NOT_FOUND if the reservation was already claimed
+ */
+export async function releaseReservationTx(tx: Tx, reservationId: number) {
+  const result = await claimAndClearTx(tx, reservationId);
+  if (!result) throw reservationGone();
+  return result;
+}
+
+export async function releaseReservation(reservationId: number) {
+  return prisma.$transaction((tx) => releaseReservationTx(tx, reservationId));
+}
+
+/**
+ * Reservation timeout: same as release, but a lost race (already confirmed or unassigned)
+ * is expected and returns null instead of throwing.
+ */
+export async function expireReservationTx(tx: Tx, reservationId: number) {
+  return claimAndClearTx(tx, reservationId);
+}
+
+export async function expireReservation(reservationId: number) {
+  return prisma.$transaction((tx) => expireReservationTx(tx, reservationId));
+}
+
+// ── Pallet moves (MNP / PAR) ───────────────────────────────────────────────────
+
+/** MNP put / move in its own transaction (see `movePalletTx`). */
+export async function movePallet(params: LocationCoords & { palletId: number; workerZ: string }): Promise<MoveResult> {
+  return prisma.$transaction((tx) => movePalletTx(tx, params));
+}
+
+/**
+ * MNP consolidate, in the caller's transaction: adds the source pallet's quantities onto
+ * the target (occupant), zeroes the source as `CONSOLIDATED` (ZERO_PALLET), and frees the
+ * source's prior location if it had one. Quantities are read inside the transaction.
+ * @returns the quantities moved
+ */
+export async function consolidateIntoTx(
+  tx: Tx,
+  params: { sourcePalletId: number; targetPalletId: number },
+): Promise<{ cartons: number; pallets: number; ssps: number }> {
+  const source = await tx.pallet.findUniqueOrThrow({ where: { pid: params.sourcePalletId } });
+  const target = await tx.pallet.findUniqueOrThrow({ where: { pid: params.targetPalletId } });
+  await tx.pallet.update({
+    where: { pid: target.pid },
+    data: {
+      currentCartons: target.currentCartons + source.currentCartons,
+      currentPallets: target.currentPallets + source.currentPallets,
+      currentSSPs:    target.currentSSPs + source.currentSSPs,
+    },
+  });
+  await tx.pallet.update({
+    where: { pid: source.pid },
+    data: {
+      currentPallets: 0, currentCartons: 0, currentSSPs: 0,
+      status: 'CONSOLIDATED',
+      locationAisle: null, locationBin: null, locationLevel: null,
+      storageCode: null, size: null, zone: null,
+    },
+  });
+  if (source.locationAisle != null) {
+    await clearLocationTx(tx, {
+      aisle: source.locationAisle, bin: source.locationBin!, level: source.locationLevel!,
+      excludePalletId: source.pid,
+    });
+  }
+  return { cartons: source.currentCartons, pallets: source.currentPallets, ssps: source.currentSSPs };
+}
+
+export async function consolidateInto(params: { sourcePalletId: number; targetPalletId: number }) {
+  return prisma.$transaction((tx) => consolidateIntoTx(tx, params));
+}
+
+/**
+ * PAR reinstate: creates the new pallet rows and — only when placing directly onto a
+ * location that was EMPTY — marks that location STORED, all in one transaction. An
+ * override onto an occupied/held/contracted location (the warn-then-allow path) leaves
+ * the location row untouched.
+ */
+export async function storeReinstatedPallets(
+  creates: Prisma.PalletUncheckedCreateInput[],
+  location: (LocationCoords & { wasEmpty: boolean }) | null,
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    for (const data of creates) await tx.pallet.create({ data });
+    if (location?.wasEmpty) await storeLocationTx(tx, location);
+  });
+}
+
+// ── Staging (STG) ──────────────────────────────────────────────────────────────
+
+/**
+ * STAGE_LOCATION — `STAGED`, denied if the location isn't EMPTY or doesn't accept inbound
+ * work. An atomic conditional `updateMany` (not read-then-write), so concurrent GPMers
+ * staging into the same aisle can't double-stage a location.
+ * @returns true if staged, false if denied (callers skip the candidate)
  */
 export async function stageLocation(aisle: number, bin: number, level: number): Promise<boolean> {
   const result = await prisma.location.updateMany({
-    where: { aisle, bin, level, status: 'EMPTY', contraction: false, ...NOT_HELD_FILTER },
+    where: { aisle, bin, level, status: 'EMPTY', ...whereAcceptsPut() },
     data: { status: 'STAGED' },
   });
   return result.count > 0;
+}
+
+// ── Holds (WLH / HoldPanel) ────────────────────────────────────────────────────
+
+/**
+ * Places a hold on one location: writes `holdCategory` and, if the location was RESERVED,
+ * clears its reservation (forced to EMPTY — "placing a hold also calls the Gate... forcing
+ * the reservation to revert to EMPTY"), in one transaction. Role checks are the caller's.
+ * @returns whether a reservation was cleared
+ */
+export async function placeHold(coords: LocationCoords, holdType: HoldCategory): Promise<{ reservationCleared: boolean }> {
+  return prisma.$transaction(async (tx) => {
+    const loc = await tx.location.findUniqueOrThrow({ where: locationKey(coords), select: { status: true } });
+    await tx.location.update({ where: locationKey(coords), data: { holdCategory: holdType } });
+    if (loc.status !== 'RESERVED') return { reservationCleared: false };
+    await clearLocationTx(tx, { ...coords, overrideRevert: 'EMPTY' });
+    return { reservationCleared: true };
+  });
+}
+
+/**
+ * Applies one range-hold bucket (every location matching `where`, which must pin the
+ * bucket's existing `holdCategory`): collects its RESERVED locations, sets `next` on the
+ * whole bucket, and clears each reservation (forced EMPTY) — one transaction (#209).
+ * @returns how many reservations were cleared
+ */
+export async function applyRangeHoldBucket(
+  where: Prisma.LocationWhereInput,
+  next: HoldCategory,
+): Promise<{ reservationsCleared: number }> {
+  return prisma.$transaction(async (tx) => {
+    const reserved = await tx.location.findMany({
+      where: { ...where, status: 'RESERVED' },
+      select: { aisle: true, bin: true, level: true },
+    });
+    await tx.location.updateMany({ where, data: { holdCategory: next } });
+    for (const loc of reserved) await clearLocationTx(tx, { ...loc, overrideRevert: 'EMPTY' });
+    return { reservationsCleared: reserved.length };
+  });
+}
+
+/** Removes the hold from one location. Role checks are the caller's. */
+export async function removeHold(coords: LocationCoords): Promise<void> {
+  await prisma.location.update({ where: locationKey(coords), data: { holdCategory: null } });
+}
+
+/**
+ * Applies one range-release bucket: sets every location matching `where` (which must pin
+ * the bucket's existing `holdCategory`) to `next` — null for a full release, or the
+ * remaining direction for a Both → In/Out downgrade.
+ */
+export async function applyRangeReleaseBucket(where: Prisma.LocationWhereInput, next: HoldCategory | null): Promise<void> {
+  await prisma.location.updateMany({ where, data: { holdCategory: next } });
+}
+
+/**
+ * STG restage's bulk unstage: returns every STAGED location of one storage code + size in
+ * an aisle to EMPTY (an atomic conditional updateMany — only rows still STAGED change).
+ * @returns how many locations were unstaged
+ */
+export async function unstageAisleType(params: { aisle: number; storageCode: string; size: string }): Promise<number> {
+  const { count } = await prisma.location.updateMany({
+    where: { aisle: params.aisle, status: 'STAGED', storageCode: params.storageCode, size: params.size },
+    data: { status: 'EMPTY' },
+  });
+  return count;
 }

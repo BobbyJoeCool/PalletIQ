@@ -3,6 +3,7 @@ import type { HttpRequest } from '../lib/functionsRuntime.js';
 import prisma from '../lib/prisma.js';
 import { withHandler } from '../lib/response.js';
 import { requireAuth } from '../lib/permissions.js';
+import { PRQ_STATUS_FILTERS, type PrqStatusFilter, type ContainerStatus } from '../lib/containerLifecycle.js';
 
 /** Fixed display order for pull functions on the PRQ screen. */
 const FUNCTION_ORDER = ['CA', 'CF', 'FP', 'BK'] as const;
@@ -45,7 +46,17 @@ async function resolveAisleFilter(params: URLSearchParams): Promise<{ gte?: numb
   return filter;
 }
 
-const VALID_STATUSES = ['AVAILABLE', 'PRINTED', 'VERIFIED'] as const;
+/**
+ * Parses PRQ's `status` query param (Available / Printed / Verified) to the stored container
+ * status it filters on — "Verified" is stored as PULLED (container lifecycle, #213; it used
+ * to query a VERIFIED status nothing ever writes, so the filter always came back empty).
+ * @throws 400 INVALID_INPUT for anything else
+ */
+function parsePrqStatus(raw: string | null): ContainerStatus {
+  const key = raw?.toUpperCase();
+  if (!key || !(key in PRQ_STATUS_FILTERS)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
+  return PRQ_STATUS_FILTERS[key as PrqStatusFilter];
+}
 
 /**
  * PRQ summary — aggregated pull data grouped by batchDate × pullFunction, scoped to an
@@ -69,10 +80,7 @@ async function getPullSummary(req: HttpRequest): Promise<unknown> {
   const params = new URL(req.url).searchParams;
   const aisleFilter = await resolveAisleFilter(params);
 
-  const status = params.get('status')?.toUpperCase();
-  if (!status || !(VALID_STATUSES as readonly string[]).includes(status)) {
-    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-  }
+  const status = parsePrqStatus(params.get('status'));
 
   const batchDateParam = params.get('batchDate');
   const pullFunctionParam = params.get('pullFunction')?.toUpperCase();
@@ -202,10 +210,7 @@ async function getPullDetail(req: HttpRequest): Promise<unknown> {
   const params = new URL(req.url).searchParams;
   let aisleFilter = await resolveAisleFilter(params);
 
-  const status = params.get('status')?.toUpperCase();
-  if (!status || !(VALID_STATUSES as readonly string[]).includes(status)) {
-    throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
-  }
+  const status = parsePrqStatus(params.get('status'));
 
   const batchDateParam = params.get('batchDate');
   const pullFunction = params.get('pullFunction')?.toUpperCase();

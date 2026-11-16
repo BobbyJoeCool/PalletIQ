@@ -20,7 +20,6 @@ interface ContainerIdFieldProps {
 
 export interface ContainerIdFieldHandle {
   focus: () => void;
-  fieldId: string;
 }
 
 export const ContainerIdField = forwardRef<ContainerIdFieldHandle, ContainerIdFieldProps>(function ContainerIdField({
@@ -46,7 +45,7 @@ export const ContainerIdField = forwardRef<ContainerIdFieldHandle, ContainerIdFi
     field.focus(handleSubmit);
   }
 
-  useImperativeHandle(ref, () => ({ focus: focusField, fieldId: field.fieldId }));
+  useImperativeHandle(ref, () => ({ focus: focusField }));
 
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;

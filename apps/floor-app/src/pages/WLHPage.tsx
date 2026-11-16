@@ -14,10 +14,10 @@ import { useWLH } from '../context/WLHContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { splitReasonCode } from '../lib/reasonCode';
-import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
+import { useAisleField } from '../lib/useAisleField';
 import { useLocationRangeFields } from '../lib/useLocationRangeFields';
 import { useNumpadField } from '../lib/useNumpadField';
-import { useTabOrder } from '../lib/useTabOrder';
+import { HOLD_CATEGORIES, HOLD_PLACE_MIN_ROLE } from '@shared/locationPolicy';
 
 type BinSide = 'ALL' | 'ODD' | 'EVEN';
 type RangeAction = 'PLACE' | 'RELEASE';
@@ -106,7 +106,7 @@ function holdName(type: HoldCategory | null): string {
  */
 function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
   const { token, user } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, showError } = useMessageBar();
   const { hidePanel } = useNumpad();
   const role = (user?.role ?? 'WORKER') as Role;
 
@@ -120,7 +120,6 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
   // `canReview` below, it doesn't block the worker from continuing to type the rest of
   // the range.
   const aisleFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { if (v.length === 3) rangeFields.focusStartBin(); }, [rangeFields.focusStartBin]),
   });
   const {
@@ -129,13 +128,6 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
     startBin, endBin, startLevel, endLevel, hasLevelRange, levelRangeValid,
   } = rangeFields;
 
-  useTabOrder([
-    { fieldId: aisleFields.field.fieldId, activate: aisleFields.focusField },
-    { fieldId: startBinField.fieldId, activate: focusStartBin },
-    { fieldId: endBinField.fieldId, activate: focusEndBin },
-    { fieldId: startLevelField.fieldId, activate: focusStartLevel },
-    { fieldId: endLevelField.fieldId, activate: focusEndLevel },
-  ]);
 
   const [binSide, setBinSide] = useState<BinSide>('ALL');
   const [action, setAction] = useState<RangeAction>('PLACE');
@@ -149,7 +141,8 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
   // clearing `reasonCode` alone wouldn't reset the field's own internal dropdown selection.
   const [reasonCodeKey, setReasonCodeKey] = useState(0);
 
-  const placeableTypes = (Object.keys(HOLD_LABELS) as HoldCategory[]).filter((t) => hasMinRole(role, HOLD_LABELS[t].placeRole));
+  // Range Place offers every type the role may place (shared policy, #212).
+  const placeableTypes = HOLD_CATEGORIES.filter((t) => hasMinRole(role, HOLD_PLACE_MIN_ROLE[t]));
 
   const aisle = aisleFields.field.value ? parseInt(aisleFields.field.value, 10) : NaN;
   // Combines this screen's own Aisle existence check (issue #161) with the shared hook's
@@ -235,8 +228,7 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
       setReasonCode('');
       setReasonCodeKey((k) => k + 1);
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Range action failed — please try again' });
+      showError('Range action failed — please try again');
     } finally {
       setSubmitting(false);
       setPreview(null);
@@ -378,7 +370,7 @@ function HoldLogPanel({ entries }: { entries: HoldLogEntry[] }) {
  */
 export function WLHPage() {
   const { token, user } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { clearMessage, showError } = useMessageBar();
   const { hidePanel: hideModeSwitchPanel } = useNumpad();
   const [searchParams] = useSearchParams();
   const role = (user?.role ?? 'WORKER') as Role;
@@ -426,8 +418,7 @@ export function WLHPage() {
       setLocationInvalid(false);
       clearMessage();
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Location not found' });
+      showError('Location not found');
       // Deliberately does NOT clear/remount the Aisle/Bin/Level entry boxes (direct
       // instruction) — a bad scan/entry should stay visible so the worker can see and
       // correct what they typed, matching PII's v1.6.7 "field clears on failed scan" fix.

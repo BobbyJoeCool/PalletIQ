@@ -49,6 +49,9 @@ export function statusVariant(status: string): StatusVariant {
 interface StatusBadgeProps {
   status: string;
   variant?: StatusVariant;
+  /** Display text override (e.g. `containerStatusLabel(status)` so a PULLED container reads
+   *  "VERIFIED"). Coloring follows the label when given. */
+  label?: string;
 }
 
 /**
@@ -57,13 +60,14 @@ interface StatusBadgeProps {
  * best guess; pass `variant` explicitly when a screen needs different semantics
  * (e.g. a status that reads as informational in one context and risky in another).
  */
-export function StatusBadge({ status, variant }: StatusBadgeProps) {
-  const resolved = variant ?? statusVariant(status);
+export function StatusBadge({ status, variant, label }: StatusBadgeProps) {
+  const text = label ?? status;
+  const resolved = variant ?? statusVariant(text);
   return (
     <span
       className={`inline-flex items-center px-2.5 py-1 rounded-[6px] border font-ui text-[13px] font-semibold uppercase tracking-wider ${VARIANT_STYLES[resolved]}`}
     >
-      {status.replace(/_/g, ' ')}
+      {text.replace(/_/g, ' ')}
     </span>
   );
 }

@@ -283,52 +283,21 @@ test.describe('SDP — System Directed Put flow', () => {
   // XS matches of the same DPCI would be too flaky against a shared, mutating dev DB to
   // rely on).
   //
-  // #151 follow-up (direct instruction, post-ship): picking a candidate must *retarget*
-  // the put, not silently complete it — the worker still has to confirm the new location
-  // like any other target. This test covers the full two-step shape: redirect (no
-  // completion, Unassign/Hold Location replaced by Cancel + Return to Original, exactly
-  // one unassign call) then a separate Confirm that actually completes it via
-  // `manual/confirm` with `resolution: 'consolidate'`.
-  //
-  // The mocked "same location as the one directed to" entry needs the *real* directed
-  // location (only known after `directPalletHand` resolves), not a hardcoded fake ID —
-  // the route handler is registered before `directPalletHand` (it must be, to catch the
-  // modal's own fetch-on-mount), but its response is deferred behind
-  // `resolveDirectedLocation` — the request just waits on the wire until that's called.
+  // #151 follow-up: picking a candidate must *retarget* the put, not complete it — the
+  // worker still confirms the new location. #215 keeps the reservation live through the
+  // redirect and completes it via confirmPut with a targetLocation.
   test('Exists Elsewhere redirects without completing, then Confirm finishes the consolidation', async ({ page }) => {
-    let resolveDirectedLocation!: (loc: string) => void;
-    const directedLocationPromise = new Promise<string>((res) => { resolveDirectedLocation = res; });
-
-    await page.route('**/api/items/dpci/*/locations', async (route) => {
-      const selfLocation = await directedLocationPromise;
+    // #215: candidates come from the server (already filtered — same DPCI, XS, cartons > 0,
+    // reserved location excluded), a redirect keeps the reservation (no unassign), and the
+    // confirm goes through confirmPut with the redirect target.
+    await page.route('**/api/puts/*/consolidation-candidates', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          dpci: '085-02-0006',
-          descShort: 'Test Item',
-          locations: [
-            { locationId: '20001901', palletId: 1, storageCode: 'BS', size: 'XS', currentPallets: 0, currentCartons: 12, currentSSPs: 0, vcp: 1, ssp: 1 },
-            // Same location as the one actually directed-to — must be filtered out of the
-            // popup rather than offered as its own "elsewhere."
-            { locationId: selfLocation, palletId: 2, storageCode: 'BS', size: 'XS', currentPallets: 0, currentCartons: 4, currentSSPs: 0, vcp: 1, ssp: 1 },
-            // Non-XS match — must also be filtered out (Hand Put only consolidates into
-            // other hand-stock locations).
-            { locationId: '20001903', palletId: 3, storageCode: 'BS', size: 'HS', currentPallets: 1, currentCartons: 40, currentSSPs: 0, vcp: 1, ssp: 1 },
-            // Zero-carton row — `buildItemLocations` (shared with ISI) returns every
-            // pallet row with a location for this DPCI regardless of quantity; a zeroed/
-            // consolidated pallet whose location was never cleared isn't a real
-            // consolidation target and must be filtered out too (found live-testing this
-            // round, not from any seed/mock issue).
-            { locationId: '20001904', palletId: 4, storageCode: 'BS', size: 'XS', currentPallets: 0, currentCartons: 0, currentSSPs: 0, vcp: 1, ssp: 1 },
-            // A second real candidate — needed to prove a *second* pick after the first
-            // redirect is still a pure client-side retarget. Picking '20001901' again
-            // isn't possible for this at that point — it's now the current target, so
-            // it's correctly excluded from its own list (same as `selfLocation` was
-            // originally).
-            { locationId: '20001905', palletId: 5, storageCode: 'BS', size: 'XS', currentPallets: 0, currentCartons: 9, currentSSPs: 0, vcp: 1, ssp: 1 },
-          ],
-        }),
+        body: JSON.stringify({ locations: [
+          { locationId: '20001901', storageCode: 'BS', currentCartons: 12, palletId: 1 },
+          { locationId: '20001905', storageCode: 'BS', currentCartons: 9, palletId: 5 },
+        ] }),
       });
     });
     let unassignCalls = 0;
@@ -336,90 +305,67 @@ test.describe('SDP — System Directed Put flow', () => {
       unassignCalls++;
       await route.continue();
     });
-    let confirmBody: { destinationLocation?: string; resolution?: string } | null = null;
-    await page.route('**/api/puts/manual/confirm', async (route) => {
+    let confirmBody: { scannedLocation?: string; targetLocation?: string } | null = null;
+    await page.route('**/api/puts/*/confirm', async (route) => {
       confirmBody = route.request().postDataJSON();
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ consolidated: true, targetPalletId: 1, sourcePalletId: 999, location: '20001901' }),
+        body: JSON.stringify({ consolidated: true, targetPalletId: 5, location: '20001905' }),
       });
     });
 
-    const { directedLocation } = await directPalletHand(page, LIVE_AISLE_XS);
-    resolveDirectedLocation(directedLocation);
+    await directPalletHand(page, LIVE_AISLE_XS);
 
     await modal(page).getByRole('button', { name: '⇄ Exists Elsewhere' }).click();
     await expect(page.getByText('Exists Elsewhere', { exact: true })).toBeVisible();
-    // The non-elsewhere (self), non-XS, and zero-carton rows are filtered client-side —
-    // only one row.
-    await expect(page.getByText('12 cartons')).toBeVisible();
-    await expect(page.getByText('4 cartons')).not.toBeVisible();
-    await expect(page.getByText('40 cartons')).not.toBeVisible();
-    await expect(page.getByText('0 cartons')).not.toBeVisible();
-
     await page.getByText('12 cartons').click();
 
-    // Redirect only — no completion yet.
+    // Redirect only — no completion, and the reservation stays live (no unassign).
     await expect(page.getByText('Redirected to 200-019-01 — confirm the new location to complete')).toBeVisible();
     await expect(modal(page)).toBeVisible();
     expect(confirmBody).toBeNull();
-    expect(unassignCalls).toBe(1);
+    expect(unassignCalls).toBe(0);
 
-    // Unassign/Hold Location replaced by Cancel; Return to Original now offered.
-    await expect(modal(page).getByRole('button', { name: 'Unassign' })).not.toBeVisible();
+    // Unassign still offered (it releases the live reservation); Hold Location hidden while
+    // redirected; Return to {reserved location} offered.
+    await expect(modal(page).getByRole('button', { name: 'Unassign' })).toBeVisible();
     await expect(modal(page).getByRole('button', { name: 'Hold Location' })).not.toBeVisible();
-    await expect(modal(page).getByRole('button', { name: 'Cancel' })).toBeVisible();
     await expect(modal(page).getByRole('button', { name: /^Return to/ })).toBeVisible();
 
-    // Picking a *second* candidate is a pure client-side retarget — no further unassign
-    // call, since there's nothing left to release. '20001901' (the first pick) is
-    // correctly excluded from its own list now that it's the current target, same as
-    // `selfLocation` was originally — '9 cartons' is the only other real candidate.
+    // A second pick is a local retarget too; the current target drops out of the list.
     await modal(page).getByRole('button', { name: '⇄ Exists Elsewhere' }).click();
     await expect(page.getByText('12 cartons')).not.toBeVisible();
     await page.getByText('9 cartons').click();
-    expect(unassignCalls).toBe(1);
+    expect(unassignCalls).toBe(0);
 
-    // Now actually confirm — completes via manual/confirm with resolution: consolidate.
+    // Confirm — confirmPut with the redirect target.
     await page.getByRole('button', { name: '✓ Location' }).click();
 
     await expect(page.getByText(/^Redirected — consolidated into/)).toBeVisible();
     await expect(modal(page)).not.toBeVisible();
     expect(confirmBody).not.toBeNull();
-    expect(confirmBody!.destinationLocation).toBe('20001905');
-    expect(confirmBody!.resolution).toBe('consolidate');
+    expect(confirmBody!.targetLocation).toBe('20001905');
   });
 
-  // #151 follow-up — Return to Original is a pure client-side swap, no server round-trip
-  // (the original location was only ever released, never reassigned to anyone else).
+  // Return to the reserved location is a local retarget — no server call at all (#215:
+  // the reservation was never released, so there's nothing to re-acquire).
   test('Return to Original swaps the target back with no further API call', async ({ page }) => {
-    let resolveDirectedLocation!: (loc: string) => void;
-    const directedLocationPromise = new Promise<string>((res) => { resolveDirectedLocation = res; });
-    await page.route('**/api/items/dpci/*/locations', async (route) => {
-      const selfLocation = await directedLocationPromise;
+    await page.route('**/api/puts/*/consolidation-candidates', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          dpci: '085-02-0006',
-          descShort: 'Test Item',
-          locations: [
-            { locationId: '20001901', palletId: 1, storageCode: 'BS', size: 'XS', currentPallets: 0, currentCartons: 12, currentSSPs: 0, vcp: 1, ssp: 1 },
-            { locationId: selfLocation, palletId: 2, storageCode: 'BS', size: 'XS', currentPallets: 0, currentCartons: 4, currentSSPs: 0, vcp: 1, ssp: 1 },
-          ],
-        }),
+        body: JSON.stringify({ locations: [{ locationId: '20001901', storageCode: 'BS', currentCartons: 12, palletId: 1 }] }),
       });
     });
-    let apiCallsAfterRedirect = 0;
+    let writeCalls = 0;
     await page.route('**/api/puts/**', async (route) => {
-      if (route.request().method() !== 'GET') apiCallsAfterRedirect++;
-      await route.continue();
+      if (route.request().method() !== 'GET') writeCalls++;
+      await route.fallback(); // let the candidates mock above answer its request
     });
 
-    const { directedLocation } = await directPalletHand(page, LIVE_AISLE_XS);
-    resolveDirectedLocation(directedLocation);
-    apiCallsAfterRedirect = 0; // Reset after the directedPut itself.
+    await directPalletHand(page, LIVE_AISLE_XS);
+    writeCalls = 0; // Reset after the directedPut itself.
 
     await modal(page).getByRole('button', { name: '⇄ Exists Elsewhere' }).click();
     await page.getByText('12 cartons').click();
@@ -427,14 +373,10 @@ test.describe('SDP — System Directed Put flow', () => {
 
     await modal(page).getByRole('button', { name: /^Return to/ }).click();
 
-    // Back to the original — Return to Original itself disappears again, and Exists
-    // Elsewhere still offers the same candidate (it's excluded only while it's the
-    // *current* target).
     await expect(modal(page).getByRole('button', { name: /^Return to/ })).not.toBeVisible();
     await expect(modal(page).getByRole('button', { name: '⇄ Exists Elsewhere' })).toBeVisible();
-    // The one call so far was the original redirect's own unassign — Return to Original
-    // itself made no call at all.
-    expect(apiCallsAfterRedirect).toBe(1);
+    await expect(modal(page).getByRole('button', { name: 'Hold Location' })).toBeVisible();
+    expect(writeCalls).toBe(0);
   });
 
   test.describe('role gating (IM+ overrides)', () => {
@@ -485,24 +427,15 @@ test.describe('SDP — Worker role gating', () => {
     await expect(page.getByRole('button', { name: 'Consolidating' })).not.toBeVisible();
   });
 
-  // A Worker can reach Hand Put (Size is worker-visible, see above), but "Exists Elsewhere"
-  // must stay hidden even when a real candidate exists — `manual/confirm`'s own
-  // `resolution: 'consolidate'` is hard-gated `requireRole(auth, 'IM')` server-side
-  // (`api/functions/puts.ts`), so showing the button to a Worker would let them unassign
-  // the original reservation successfully and then hit a 403 on the redirect, orphaning the
-  // pallet as `PUT_PENDING` with no reservation. The candidate is mocked to guarantee this
-  // is actually exercising the role gate, not just "no real match happened to exist."
-  test('Worker does not see Exists Elsewhere even when a candidate exists', async ({ page }) => {
-    await page.route('**/api/items/dpci/*/locations', (route) => route.fulfill({
+  // Exists Elsewhere is open to every role since #204 (v1.8.13 — the consolidate path has
+  // no role gate). The old orphaning risk this test once guarded is gone: since #215 a
+  // redirect never releases the reservation. Candidate mocked so the role, not data
+  // availability, is what's exercised.
+  test('Worker sees Exists Elsewhere when a candidate exists', async ({ page }) => {
+    await page.route('**/api/puts/*/consolidation-candidates', (route) => route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({
-        dpci: '085-02-0006',
-        descShort: 'Test Item',
-        locations: [
-          { locationId: '20001901', palletId: 1, storageCode: 'BS', size: 'XS', currentPallets: 0, currentCartons: 12, currentSSPs: 0, vcp: 1, ssp: 1 },
-        ],
-      }),
+      body: JSON.stringify({ locations: [{ locationId: '20001901', storageCode: 'BS', currentCartons: 12, palletId: 1 }] }),
     }));
 
     await page.goto('/put/directed');
@@ -518,6 +451,6 @@ test.describe('SDP — Worker role gating', () => {
     await page.getByRole('button', { name: 'Find', exact: true }).click();
 
     await expect(modal(page)).toBeVisible();
-    await expect(modal(page).getByRole('button', { name: '⇄ Exists Elsewhere' })).not.toBeVisible();
+    await expect(modal(page).getByRole('button', { name: '⇄ Exists Elsewhere' })).toBeVisible();
   });
 });

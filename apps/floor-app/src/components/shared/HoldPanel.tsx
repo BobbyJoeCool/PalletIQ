@@ -8,24 +8,24 @@ import { fmtLocation } from '../../lib/fmt';
 import { splitReasonCode } from '../../lib/reasonCode';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ReasonCodeField } from './ReasonCodeField';
+import { HOLD_REMOVE_MIN_ROLE, placeableHoldTypes } from '@shared/locationPolicy';
 
-export type HoldCategory = 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM';
+import type { HoldCategory } from '@shared/locationPolicy';
+// Re-exported for existing importers; defined once in shared/locationPolicy.ts (#212).
+export type { HoldCategory };
 
 // Exported for WLH's Range mode (issue #14), which needs the same hold-type names/roles
 // for its own hold-type button list — a range action has no single "current hold" to
 // react to the way HoldPanel's own placeableTypes computation does, so it can't just
 // reuse this component wholesale, but shouldn't duplicate these labels either.
-export const HOLD_LABELS: Record<HoldCategory, { name: string; blocks: string; placeRole: Role }> = {
-  HOLD_IN:   { name: 'Hold Inbound',   blocks: 'Blocks new puts to this location',                    placeRole: 'IM' },
-  HOLD_OUT:  { name: 'Hold Outbound',  blocks: 'Blocks new label generation for this location',       placeRole: 'IM' },
-  HOLD_BOTH: { name: 'Hold Both',      blocks: 'Blocks puts and new label generation',                placeRole: 'WORKER' },
-  HOLD_PERM: { name: 'Hold Permanent', blocks: 'Blocks everything — location out of service',         placeRole: 'LEAD' },
+export const HOLD_LABELS: Record<HoldCategory, { name: string; blocks: string }> = {
+  HOLD_IN:   { name: 'Hold Inbound',   blocks: 'Blocks new puts to this location' },
+  HOLD_OUT:  { name: 'Hold Outbound',  blocks: 'Blocks new label generation for this location' },
+  HOLD_BOTH: { name: 'Hold Both',      blocks: 'Blocks puts and new label generation' },
+  HOLD_PERM: { name: 'Hold Permanent', blocks: 'Blocks everything — location out of service' },
 };
 
-// Hold Both may be removed only by IM+, even though any role can place it.
-const REMOVE_ROLE: Record<HoldCategory, Role> = {
-  HOLD_IN: 'IM', HOLD_OUT: 'IM', HOLD_BOTH: 'IM', HOLD_PERM: 'LEAD',
-};
+// Place/remove role tables live in shared/locationPolicy.ts (#212).
 
 // Color coding for the Current Hold display (issue #27): Hold Both reads as a caution
 // (yellow), Hold Permanent as the most severe (red), and the two directional holds
@@ -210,7 +210,7 @@ export function HoldPanel({ locationId, onDone, showClose = false, onAction, def
   // until a location was resolved. Current Hold shows "—" with no location, "Loading…"
   // while `info` is being fetched, and the real value once it lands; every action control
   // below is disabled until `info` (a genuinely resolved location) actually exists.
-  const canRemove = info?.holdCategory ? hasMinRole(role, REMOVE_ROLE[info.holdCategory]) : false;
+  const canRemove = info?.holdCategory ? hasMinRole(role, HOLD_REMOVE_MIN_ROLE[info.holdCategory]) : false;
   // Changing a location to a *different* hold type is equivalent to removing whatever's
   // currently on it (a role that can't remove the current hold shouldn't be able to route
   // around that gate by placing a lesser one instead — e.g. a sub-Lead role could
@@ -218,9 +218,8 @@ export function HoldPanel({ locationId, onDone, showClose = false, onAction, def
   // permission to remove the Perm hold itself, since Hold Both's own placeRole is WORKER).
   // No types are placeable at all while a hold exists that this role can't remove; with no
   // current hold, the normal per-type placeRole gate applies as before.
-  const placeableTypes = info?.holdCategory && !canRemove
-    ? []
-    : (Object.keys(HOLD_LABELS) as HoldCategory[]).filter((t) => hasMinRole(role, HOLD_LABELS[t].placeRole));
+  // Rule lives in the shared location acceptance policy (#212), same one placeHold enforces.
+  const placeableTypes = placeableHoldTypes(info?.holdCategory ?? null, role);
   const currentHoldLabel = !hasLocation ? '—' : loading ? 'Loading…' : info?.holdCategory ? HOLD_LABELS[info.holdCategory].name : 'None';
   const currentHoldColor = info?.holdCategory ? HOLD_TEXT_COLOR[info.holdCategory] : hasLocation && !loading ? 'text-white' : 'text-[#666]';
 
