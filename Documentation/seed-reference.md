@@ -504,3 +504,20 @@ Eight sample containers across the first 8 stored pallets, all destined for stor
 | PURGED | 1 | purgeDate set to yesterday |
 
 All containers use today's Julian date as `batchDate` (YYYYDDD format, e.g. `2026176`). Purge window is 7 days forward, except the PURGED row which is set to yesterday.
+
+## Aisle structure (Location Setup, #143)
+
+The seed builds one `Aisle` row, four `AisleZone` rows and one `AisleZoneSetting` per zone × side × level for every aisle, derived from the generated locations (the same derivation the `20261116130000_location_setup` migration runs on an existing database). Every seeded aisle is double-sided, starts at bin 1 and is `BACK_TO_FRONT`. Storage code `XO` (Not For Storage) exists but no seeded location uses it.
+
+## Roman roster and shifts (Job/Function Assignment, #145)
+
+Four shifts (A1, A2, B1, B2) with their breaks. Every user above works **B1**. The seed (and the `20261116140000_job_assignment` migration) adds a Roman-themed warehouse (WHS) roster, PIN `1234` for all:
+
+| Shift | OM (MANAGER) | LWWs (LEAD) | Team members (WORKER) |
+|---|---|---|---|
+| A1 | `z910m01` Augustus Octavian | `z910l01` Tiberius Caesar, `z910l02` Claudius Germanicus | `z810t01`–`z810t25` (Cicero, Seneca, Ovid, Livia…) |
+| A2 | `z920m01` Trajan Ulpius | `z920l01` Vespasian Flavius, `z920l02` Titus Flavius | `z820t01`–`z820t25` (Scipio, Marius, Sulla, Fulvia…) |
+| B1 | `z930m01` Hadrian Aelius | `z930l01` Nerva Cocceius, `z930l02` Antoninus Pius | `z830t01`–`z830t25` (Flamininus, Spartacus, Sulpicia…) |
+| B2 | `z940m01` Marcus Aurelius | `z940l01` Lucius Verus, `z940l02` Septimius Severus | `z840t01`–`z840t25` (Galen, Boethius, Plotina…) |
+
+OMs and LWWs have the desktop password `Desktop1234`. Eight team members have open-ended ramping overrides (`z810t21` CA 60%, `z810t22` CF 75%, `z820t21` FP 50%, `z820t22` CA 80%, `z830t21` CA 65%, `z830t22` RP 70%, `z830t23` CF 85%, `z840t21` HP 55%). Schedules and default plan targets are generated, not stored.

@@ -110,9 +110,38 @@ erDiagram
         string holdCategory "nullable, VarChar(10), HoldCategory values — independent of status, added Phase 10"
         string storageCode FK "VarChar(2) → StorageCode"
         string size "VarChar(2), LocationSize values"
-        boolean contraction "default: false, set by Lead+ via Aisle Setup (out of scope) — read-only in this app"
+        boolean contraction "default: false — set in desktop Location Setup, Contraction tab (#143)"
         datetime statusExpiry "nullable — Logic Gate-managed (#149/#150) mirror of SDP's Reservation.createdAt-based expiry; not the active enforcer, see revertStatus"
         string revertStatus "nullable, VarChar(15) — paired with statusExpiry; set by RESERVE_PUT, cleared by CLEAR_LOCATION/PUT_COMPLETE"
+        boolean deleted "default: false — soft delete by desktop Location Setup aisle delete (#143)"
+        string notForStorageReason "nullable, VarChar(10) — CAGE_CART/EOA_VIS/AMNESTY/OTHER when storageCode = XO (Not For Storage)"
+        string notForStorageNote "nullable, VarChar(255) — required for OTHER"
+    }
+
+    Aisle {
+        int aisle PK "3 digits — desktop Location Setup (#143)"
+        string sides "VarChar(4) — BOTH | ODD | EVEN"
+        int firstBin
+        int lastBin
+        string zoneDirection "VarChar(15) — BACK_TO_FRONT (Zone 1 = highest bins, default) | FRONT_TO_BACK"
+        boolean deleted "default: false"
+        datetime createdAt "when (re)created"
+    }
+
+    AisleZone {
+        int aisle PK, FK "→ Aisle"
+        int zone PK "1-4"
+        int startBin
+        int endBin
+    }
+
+    AisleZoneSetting {
+        int aisle PK, FK "→ Aisle"
+        int zone PK "1-4"
+        string side PK "VarChar(4) — ODD | EVEN"
+        int level PK
+        string storageCode FK "VarChar(2) → StorageCode — every location on this level of this zone-side shares it"
+        string size FK "VarChar(2) → Size"
     }
 
     HoldType {
@@ -182,6 +211,42 @@ erDiagram
         string passwordHash "VarChar(255), nullable — desktop-app login only"
         string role "VarChar(10), Role values"
         string departmentId FK "VarChar(3) → Department"
+        string homeShiftCode FK "nullable, VarChar(2) → Shift — Job/Function Assignment (#145)"
+    }
+
+    Shift {
+        string code PK "VarChar(2) — A1, A2, B1, B2"
+        string daysLabel "VarChar(20) — SAT-MON | TUE-FRI"
+        string startTime "VarChar(5) HH:MM local"
+        string endTime "VarChar(5) HH:MM local — night shifts end next day"
+    }
+
+    ShiftBreak {
+        int id PK "autoincrement"
+        string shiftCode FK "VarChar(2) → Shift"
+        string startTime "VarChar(5) HH:MM"
+        string endTime "VarChar(5) HH:MM"
+    }
+
+    DailyPlanTarget {
+        int id PK "autoincrement"
+        string departmentId FK "VarChar(3) → Department"
+        string functionCode "VarChar(3)"
+        date date
+        string shiftCode FK "VarChar(2) → Shift"
+        int targetVolume
+        string unit "VarChar(20) — e.g. cartons; unique per dept/function/date/shift"
+    }
+
+    RampingOverride {
+        int id PK "autoincrement"
+        string workerZ FK "VarChar(7) → User"
+        string functionCode "VarChar(3)"
+        int percent "share of goal, e.g. 60"
+        date startDate
+        date endDate "nullable — open-ended"
+        string setByZ FK "VarChar(7) → User"
+        datetime createdAt
     }
 
     Department {
@@ -225,20 +290,26 @@ erDiagram
     FunctionAssignment {
         int id PK "autoincrement"
         string workerZ FK "VarChar(7) → User"
-        string functionCode "VarChar(3) — CA/CF/FP/BKP/BK/RP/HP/GPM/CON"
+        string functionCode "VarChar(3) — CA/CF/FP/BKP/BK/RP/HP/GPM/CON, or DTM (Downtime) / OFF (time off)"
         date date "the assignment's calendar date"
         datetime startTime "block start"
         datetime endTime "block end"
         string assignedByZ FK "VarChar(7) → User"
+        string shiftCode "nullable, VarChar(2) — set by Job/Function Assignment (#145)"
+        string reasonCode "nullable, VarChar(3) — downtime reason (DTM) or attendance code (OFF)"
+        string reasonText "nullable, VarChar(255) — required when reasonCode = OTH"
     }
 
     ProdGoal {
-        string functionCode PK "VarChar(3)"
+        int id PK "autoincrement — dated history (#146); unique per functionCode + effectiveDate"
+        string functionCode "VarChar(3)"
         decimal rate "Decimal(10,2)"
         string unit "VarChar(20), e.g. cartons/hr"
         decimal rate2 "nullable, Decimal(10,2) — second blended component (Bulk/Breakpack only)"
         string unit2 "nullable, VarChar(20) — second blended component's unit"
-        date effectiveDate "when this rate took effect"
+        date effectiveDate "rate applies from this date until the function's next row"
+        string setByZ FK "nullable, VarChar(7) → User — null for seeded rows"
+        datetime createdAt
     }
 
     Printer {
@@ -256,6 +327,9 @@ erDiagram
 
     Location }o--o| HoldType : "holdTypeCode (nullable)"
     Location }o--|| StorageCode : "storageCode"
+    AisleZone }o--|| Aisle : "aisle"
+    AisleZoneSetting }o--|| Aisle : "aisle"
+    AisleZoneSetting }o--|| StorageCode : "storageCode"
 
     WorkstationAisle }o--|| Workstation : "workstationId"
 
@@ -283,6 +357,13 @@ erDiagram
 
     FunctionAssignment }o--|| User : "workerZ"
     FunctionAssignment }o--|| User : "assignedByZ"
+    User }o--o| Shift : "homeShiftCode (nullable)"
+    ShiftBreak }o--|| Shift : "shiftCode"
+    DailyPlanTarget }o--|| Shift : "shiftCode"
+    DailyPlanTarget }o--|| Department : "departmentId"
+    RampingOverride }o--|| User : "workerZ"
+    RampingOverride }o--|| User : "setByZ"
+    ProdGoal }o--o| User : "setByZ (nullable)"
 
     %% ============================================================
     %% CII (Container ID Inquiry) MODELS — v1.8.9

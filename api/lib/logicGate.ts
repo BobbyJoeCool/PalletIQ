@@ -138,7 +138,7 @@ export async function reservePut(params: LocationCoords & {
 }): Promise<{ reservationId: number }> {
   const { aisle, bin, level } = params;
   return prisma.$transaction(async (tx) => {
-    const loc = await tx.location.findUniqueOrThrow({ where: locationKey(params), select: { holdCategory: true, contraction: true } });
+    const loc = await tx.location.findUniqueOrThrow({ where: locationKey(params), select: { holdCategory: true, contraction: true, storageCode: true } });
     if (!acceptsInbound(loc)) throw Object.assign(new Error('LOCATION_UNAVAILABLE'), { status: 409 });
 
     await tx.location.update({

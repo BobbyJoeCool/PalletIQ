@@ -609,6 +609,10 @@ export function PARPage() {
       } else if (code === 'LOCATION_NOT_FOUND') {
         setLocationInvalid(true);
         setMessage({ type: 'error', text: 'Location not found' });
+      } else if (code === 'NOT_FOR_STORAGE') {
+        // Carved out in desktop Location Setup (#143) — nothing can be reinstated there.
+        setLocationInvalid(true);
+        setMessage({ type: 'error', text: 'Location is Not For Storage — choose another location' });
       } else if (code === 'INVALID_VCP_SSP_RATIO') {
         vcpSspRef.current?.markInvalid();
         setMessage({ type: 'error', text: 'SSP must divide evenly into VCP' });

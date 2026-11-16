@@ -6,7 +6,7 @@
 import type { Role } from './roles.js';
 export {
   type Role, ROLE_RANK, hasMinRole, isRole,
-  ICQA_DEPARTMENT_ID, DESKTOP_MIN_ROLE, isDesktopEligible,
+  ICQA_DEPARTMENT_ID, DESKTOP_MIN_ROLE, isDesktopEligible, hasOmOrIcqaAuthority,
 } from './roles.js';
 export { sspPerCarton, isValidVcpSspRatio, exceedsSspCap } from './vcpSsp.js';
 export * from './location.js';
@@ -215,3 +215,7 @@ export interface ActivityLog {
   details: string | null;
 }
 export * from './audit.js';
+export * from './aisleSetup.js';
+export * from './workforce.js';
+export * from './prodPlan.js';
+export * from './teamProd.js';

@@ -19,6 +19,10 @@ import './functions/reasonCodes.js';
 import './functions/containerInquiry.js';
 import './functions/pullRequest.js';
 import './functions/audit.js';
+import './functions/aisles.js';
+import './functions/roster.js';
+import './functions/prodPlan.js';
+import './functions/teamProd.js';
 
 import { app } from './lib/functionsRuntime.js';
 

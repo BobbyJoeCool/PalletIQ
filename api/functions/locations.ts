@@ -6,7 +6,7 @@ import { requireAuth, requireRole, hasMinRole } from '../lib/permissions.js';
 import { writeLog, serializeActivityRow } from '../lib/activityLog.js';
 import { parseLocationBarcode, parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { sideOf } from '../lib/zoneLogic.js';
-import { whereAcceptsPut, countsAsOpenCapacity, HOLD_PLACE_MIN_ROLE, HOLD_REMOVE_MIN_ROLE, holdTransition, isHoldCategory, resolveRangePlace, resolveRangeRelease, type HoldCategory, type RangePlaceOutcome } from '../lib/locationPolicy.js';
+import { whereAcceptsPut, countsAsOpenCapacity, isNotForStorage, NOT_FOR_STORAGE_CODE, HOLD_PLACE_MIN_ROLE, HOLD_REMOVE_MIN_ROLE, holdTransition, isHoldCategory, resolveRangePlace, resolveRangeRelease, type HoldCategory, type RangePlaceOutcome } from '../lib/locationPolicy.js';
 import { formatDpci } from '../lib/dpci.js';
 import type { Role } from '../lib/jwt.js';
 import { applyRangeHoldBucket, applyRangeReleaseBucket, placeHold as placeHoldAt, removeHold as removeHoldAt } from '../lib/logicGate.js';
@@ -57,12 +57,13 @@ async function getLocation(req: HttpRequest, _ctx: InvocationContext): Promise<u
         const parsed = parseLocationBarcode(raw);
         if (!parsed) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
         return prisma.location.findFirst({
-          where: { aisle: parsed.aisle, bin: parsed.bin },
+          where: { aisle: parsed.aisle, bin: parsed.bin, deleted: false },
           include: { pallets: { select: PALLET_SUMMARY_SELECT, orderBy: { pid: 'asc' } } },
         });
       })();
 
-  if (!location) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
+  // A location removed by an aisle delete (Location Setup, #143) no longer exists to the floor.
+  if (!location || location.deleted) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
   return {
     aisle:       location.aisle,
@@ -98,7 +99,11 @@ async function getLocation(req: HttpRequest, _ctx: InvocationContext): Promise<u
 async function getStorageCodes(req: HttpRequest): Promise<unknown> {
   await requireAuth(req);
 
+  // Not For Storage (XO) is a per-location carve-out set only from desktop Location Setup
+  // (#143), never something to search for, override to, or stock an item under — so it is
+  // left out of every picker this list feeds.
   const codes = await prisma.storageCode.findMany({
+    where: { NOT: { id: NOT_FOR_STORAGE_CODE } },
     select: { id: true, desc: true },
     orderBy: { id: 'asc' },
   });
@@ -261,7 +266,7 @@ async function getLocationsEmptyByAisle(req: HttpRequest): Promise<unknown> {
   const [totals, empties, stageds] = await Promise.all([
     prisma.location.groupBy({
       by: ['aisle', 'size'],
-      where: { storageCode, contraction: false, ...aisleWhere },
+      where: { storageCode, contraction: false, deleted: false, ...aisleWhere },
       _count: { _all: true },
     }),
     prisma.location.groupBy({
@@ -370,10 +375,13 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
   const storageCode = storageCodeParam ? storageCodeParam.toUpperCase() : null;
   const size = sizeParam ? sizeParam.toUpperCase() : null;
 
-  const locations = await prisma.location.findMany({ where: { aisle } });
+  const locations = await prisma.location.findMany({ where: { aisle, deleted: false } });
   if (locations.length === 0) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 
-  // Grid: one representative cell per (level, zone, side) group.
+  // Grid: one representative cell per (level, zone, side) group. Every location in a group
+  // shares its zone setting except Not For Storage carve-outs (Location Setup, #143), so a
+  // carve-out is only used as the representative when the whole group is carved out —
+  // otherwise one carved-out bin would repaint its whole zone cell as XO.
   interface CellGroup { zone: number; side: 'odd' | 'even'; storageCode: string; size: string; contraction: boolean }
   const levelMap = new Map<number, Map<string, CellGroup>>();
   for (const loc of locations) {
@@ -381,7 +389,8 @@ async function getLocationsEmptyByZone(req: HttpRequest): Promise<unknown> {
     const posKey = `${loc.zone}-${side}`;
     if (!levelMap.has(loc.level)) levelMap.set(loc.level, new Map());
     const cells = levelMap.get(loc.level)!;
-    if (!cells.has(posKey)) {
+    const current = cells.get(posKey);
+    if (!current || (isNotForStorage(current.storageCode) && !isNotForStorage(loc.storageCode))) {
       cells.set(posKey, { zone: loc.zone, side, storageCode: loc.storageCode, size: loc.size, contraction: loc.contraction });
     }
   }
@@ -847,7 +856,7 @@ async function checkAisleExists(req: HttpRequest): Promise<unknown> {
   const aisleParam = new URL(req.url).searchParams.get('aisle');
   if (!aisleParam || !/^\d+$/.test(aisleParam)) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
-  const locations = await prisma.location.findMany({ where: { aisle: Number(aisleParam) } });
+  const locations = await prisma.location.findMany({ where: { aisle: Number(aisleParam), deleted: false } });
 
   interface Breakdown { storageCode: string; size: string; empty: number; staged: number }
   const breakdownMap = new Map<string, Breakdown>();
