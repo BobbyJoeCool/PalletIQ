@@ -24,7 +24,7 @@ export function DesktopShell() {
         <SideNav />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center justify-end gap-4 border-b border-[var(--border-default)] bg-[var(--surface-2)] px-5">
+          <header className="flex h-14 shrink-0 items-center justify-end gap-4 border-b border-[var(--border-default)] bg-[var(--surface-2)] px-5 print:hidden">
             <FloorAppToggle />
             {user && <UserBadge user={user} />}
             <button
@@ -36,7 +36,7 @@ export function DesktopShell() {
             </button>
           </header>
 
-          <main className="min-h-0 flex-1 overflow-y-auto p-8">
+          <main className="min-h-0 flex-1 overflow-y-auto p-8 print:overflow-visible print:p-0">
             <Outlet />
           </main>
         </div>

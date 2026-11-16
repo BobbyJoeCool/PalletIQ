@@ -81,6 +81,8 @@ On opening the app, the user is always prompted to log in first — there is no 
 
 **Floor app embedded in the desktop app:** the desktop app can open this floor app in a window of its own (Embedded Floor App, `Documentation/ScreenSpecs/Desktop-Embedded-Floor-App.md`). In that mode the floor app skips Login/PIN and signs in with the desktop app's session token, has no 15-minute idle logout, does not render the on-screen numpad/keyboard (a physical keyboard drives the same fields, restricted to the characters each field's on-screen panel could produce), and its Logout button returns to the Home screen. None of this applies on the tablet.
 
+**Desktop Audit Tool:** `GET /api/audit` returns any one auditable record (location, pallet, DPCI, container, user, or an aisle range) as a current-state summary plus a merged history drawn from `ActivityLog`, the container event tables and `ScanLog`. It is read-only and limited to desktop-eligible users. See `Documentation/ScreenSpecs/Desktop-Audit-Tool.md`.
+
 ---
 
 ## Home Screen

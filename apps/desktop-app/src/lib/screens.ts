@@ -12,6 +12,8 @@ export interface DesktopScreen {
   issue: number;
   /** One-line description shown on the home grid and the Coming Soon page. */
   summary: string;
+  /** True once the screen has a real page (routed in App.tsx); otherwise it is Coming Soon. */
+  built: boolean;
 }
 
 export const DESKTOP_SCREENS: readonly DesktopScreen[] = [
@@ -20,42 +22,49 @@ export const DESKTOP_SCREENS: readonly DesktopScreen[] = [
     title: 'DPCI Setup Edit',
     issue: 142,
     summary: 'Item setup and edit: handling codes, item hold, and HQ change tickets.',
+    built: false,
   },
   {
     id: 'location-setup',
     title: 'Location Setup Edit',
     issue: 143,
     summary: 'Aisle structure plus a grid editor for storage code, size and contraction.',
+    built: false,
   },
   {
     id: 'hung-resolution',
     title: 'Hung Pallet/Location Resolution',
     issue: 144,
     summary: 'Soft and Hard Reset recovery for pallets and locations stuck in a bad state.',
+    built: false,
   },
   {
     id: 'job-assignment',
     title: 'Job/Function Assignment',
     issue: 145,
     summary: 'Drag-and-drop shift roster and function assignment.',
+    built: false,
   },
   {
     id: 'prod-goals',
     title: 'Prod Goal / Ramping / Daily Plan',
     issue: 146,
     summary: 'Prod-goal rates, per-worker ramping overrides, and Daily Plan targets.',
+    built: false,
   },
   {
     id: 'team-prod-summary',
     title: 'Team Prod Summary',
     issue: 147,
     summary: 'Live production-versus-plan dashboard by job function.',
+    built: false,
   },
   {
     id: 'audit-tool',
     title: 'Audit Tool',
     issue: 148,
     summary: 'Cross-referenced audit trail lookup across every major entity.',
+    built: true,
   },
 ];
 

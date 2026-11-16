@@ -1,6 +1,7 @@
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { DesktopShell } from './components/shell/DesktopShell';
 import { useAuth } from './context/authContext';
+import { AuditToolPage } from './pages/AuditToolPage';
 import { ComingSoonPage } from './pages/ComingSoonPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
@@ -23,6 +24,8 @@ export default function App() {
       <Route element={<RequireAuth />}>
         <Route element={<DesktopShell />}>
           <Route index element={<HomePage />} />
+          {/* Built screens are routed by name; every other slug falls to Coming Soon. */}
+          <Route path="screens/audit-tool" element={<AuditToolPage />} />
           <Route path="screens/:screenId" element={<ComingSoonPage />} />
         </Route>
       </Route>
