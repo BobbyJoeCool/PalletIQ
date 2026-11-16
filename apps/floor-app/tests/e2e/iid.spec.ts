@@ -14,7 +14,7 @@ test.describe('IID — Item ID Lookup', () => {
   test('scanning a valid DPCI loads the read-only item detail', async ({ page }) => {
     await page.getByRole('button', { name: '✓ Valid DPCI' }).click();
     await expect(page.getByText('Name', { exact: true })).toBeVisible();
-    await expect(page.getByText('Short Description', { exact: true })).toBeVisible();
+    await expect(page.getByText('Description', { exact: true })).toBeVisible();
   });
 
   test('an unknown DPCI shows a not-found error and leaves the bad DPCI visible', async ({ page }) => {

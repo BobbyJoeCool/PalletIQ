@@ -187,7 +187,7 @@ test.describe('SDP — System Directed Put flow', () => {
     expect(directedLocationSize).not.toBe('XS');
 
     await expect(modal(page).getByText('Pallet ID', { exact: true })).toBeVisible();
-    await expect(modal(page).getByText('Item', { exact: true })).toBeVisible();
+    await expect(modal(page).getByText('Description', { exact: true })).toBeVisible();
     await expect(modal(page).getByText('DPCI', { exact: true })).toBeVisible();
     await expect(modal(page).getByText('Confirm Location', { exact: true })).toBeVisible();
     await expect(modal(page).getByText('Carton Quantity', { exact: true })).not.toBeVisible();

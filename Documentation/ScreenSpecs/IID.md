@@ -160,3 +160,5 @@ both directions):
 2. Class
 3. Item
 4. UPC
+
+**(v1.11.0, #172)** The item's short description renders through the shared presentational `ItemDescription` and is always labeled **Description**, the app-wide standard (it was "Short Description" / "Item" / unlabeled, depending on the screen). The item's long `desc` row is now labeled **Long Description** so the two stay distinct.

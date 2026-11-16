@@ -69,7 +69,7 @@ export function SDPVerifyPutModal({
     <ModalOverlay width="w-[820px]" position="left" testId="sdp-verify-put-modal">
       <div className="flex flex-col gap-3">
         <DataRow label="Pallet ID"><LiveId type="pallet" id={String(view.pallet.id)} /></DataRow>
-        <ItemDescription value={view.pallet.descShort} label="Item" />
+        <ItemDescription value={view.pallet.descShort} />
         <DataRow label="DPCI">
           <span className="flex items-center gap-2">
             <LiveId type="dpci" id={view.pallet.dpci} className="!text-[22px]" />

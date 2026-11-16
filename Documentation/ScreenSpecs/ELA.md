@@ -289,3 +289,5 @@ both directions):
 3. Start Aisle
 4. End Aisle
 5. Workstation
+
+**(v1.11.0, #172)** The "Displaying {code}: {description}" banner renders the Storage Code description through the shared `StorageCodeDescription` (cached Storage Code reference list), instead of computing it inline.

@@ -941,7 +941,7 @@ export function PIPPage() {
               )
               : <span className="text-[#9A9A9A]">—</span>}
           </DataRow>
-          <ItemDescription value={containerData?.container.descShort} label="Item" dense labelWidth={160} />
+          <ItemDescription value={containerData?.container.descShort} dense labelWidth={160} />
           <DataRow label="DPCI" dense labelWidth={160}>
             {containerData ? <LiveId type="dpci" id={containerData.container.dpci} /> : <span className="text-[#9A9A9A]">—</span>}
           </DataRow>

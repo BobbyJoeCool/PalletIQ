@@ -179,3 +179,5 @@ both directions):
 3. Level
 
 All three fields are inside the shared `LocationEntryFields` component.
+
+**(v1.11.0, #172)** The item's short description renders through the shared presentational `ItemDescription` and is always labeled **Description**, the app-wide standard (it was "Short Description" / "Item" / unlabeled, depending on the screen). LII's status/Contracted/hold badges now come from the shared `LocationStatusBadges` / `HoldBadge` (hold names from the shared `HOLD_LABELS`; LII's private `HOLD_NAMES` copy is gone).

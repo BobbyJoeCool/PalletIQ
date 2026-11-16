@@ -10,13 +10,7 @@ import { useLII, type LIILocationData } from '../context/LIIContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
 import { RecordActivityPanel } from '../components/shared/RecordActivityPanel';
-
-const HOLD_NAMES: Record<string, string> = {
-  HOLD_IN: 'Hold Inbound',
-  HOLD_OUT: 'Hold Outbound',
-  HOLD_BOTH: 'Hold Both',
-  HOLD_PERM: 'Hold Permanent',
-};
+import { HoldBadge, LocationStatusBadges } from '../components/shared/LocationStatusBadges';
 
 /**
  * LII — Location ID Info. Read-only location lookup for all roles via a three-field
@@ -129,13 +123,10 @@ export function LIIPage() {
               <DataRow label="Size">{location.size}</DataRow>
               <DataRow label="Storage Code">{location.storageCode}</DataRow>
               <DataRow label="Status">
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={location.status} />
-                  {location.contraction && <StatusBadge status="CONTRACTED" variant="danger" />}
-                </div>
+                <LocationStatusBadges status={location.status} contraction={location.contraction} holdCategory={location.holdCategory} showHold={false} />
               </DataRow>
               <DataRow label="Hold">
-                {location.holdCategory ? <StatusBadge status={HOLD_NAMES[location.holdCategory] ?? location.holdCategory} variant="danger" /> : 'None'}
+                {location.holdCategory ? <HoldBadge holdCategory={location.holdCategory} /> : 'None'}
               </DataRow>
             </div>
 

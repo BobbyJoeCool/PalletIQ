@@ -25,10 +25,12 @@ import { useExpirationDateFields } from '../lib/useExpirationDateFields';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useUpcField } from '../lib/useUpcField';
 import { reinstateReasons } from '@shared/locationPolicy';
-import { fieldBoxAttrs } from '../lib/fieldSequence';
 import { fetchAisleExists } from '../lib/aisleApi';
 import { UpcField } from '../components/shared/UpcField';
 import { DpciEntry } from '../components/shared/DpciEntry';
+import { PrinterField } from '../components/shared/PrinterField';
+import { DEFAULT_PRINTER } from '../lib/printerPrefixes';
+import { ItemDescription } from '../components/shared/ItemDescription';
 
 type Mode = 'single' | 'multiple';
 
@@ -42,17 +44,7 @@ interface LocationStatusInfo { status: string; holdCategory: HoldCategory | null
  *  create (no Location entered/resolved), same as `ReinstateRowResult`'s own field. */
 interface ReinstateHistoryEntry { key: number; palletId: number; dpci: string; cartons: number; locationId: string | null; timestamp: Date }
 
-// INVALID_WASH (v1.6.11 invalid-field treatment) now lives in src/lib/invalidWash.ts,
-// shared with LocationEntryFields.tsx — see that file's own doc comment for the full spec.
-const NORMAL_BG = 'bg-[#0D0D0D] border-[#3A3A3A] hover:border-[#555]';
-
-/** Labeled numpad-driven entry box. `invalid` applies the new red-wash treatment (v1.6.11);
- *  `active` (currently focused) still gets the plain red border alone, matching every
- *  other numpad field in the app — the wash is reserved for an actual validation failure. */
-// Row height driver, shared by every entry box on this screen (FieldBox, PrinterField) so
-// they all line up — shrunk 10% from the first pass (60px) per direct instruction, once
-// seen on screen.
-const ENTRY_BOX_HEIGHT = 'h-[54px]';
+// Entry boxes use NumpadFieldBox's `entry` size preset (h-[54px]) — see #216.
 
 /** Always-visible read-only display — label never disappears, value blanks to "—". Plain
  *  text, deliberately not boxed like an entry field (direct instruction — Description,
@@ -68,36 +60,6 @@ function PlainText({
       <span className={`flex items-center font-data font-medium text-[#CFCFCF] ${compact ? 'h-[22px] text-[14px]' : 'h-[60px] text-[20px]'}`}>
         {value || <span className="text-[#444]">—</span>}
       </span>
-    </div>
-  );
-}
-
-/** Preview of a future Printer selector — the box itself is real (typeable, via the
- *  on-screen Keyboard, not the Numpad, since a printer id is free text) and defaults to
- *  "PR01," but the dropdown chevron beside it stays inert (direct instruction — no real
- *  printer-picker popup exists yet, no code-list to pick from, so there's nothing for it
- *  to open). No format/existence validation on the typed value (direct instruction — "no
- *  typechecking"); this app has no printer concept anywhere else (no field on
- *  `Pallet`/`Container`, no endpoint) for a typed value to be checked against yet. Visually
- *  matches the entry-box + dropdown-helper shape used elsewhere in the app (e.g.
- *  `CodePickerField`) without wiring up any actual popup/selection logic on the dropdown
- *  half. */
-function PrinterField({ value, onFocus, active }: { value: string; onFocus: () => void; active: boolean }) {
-  return (
-    <div className="flex flex-col gap-1 w-[144px]">
-      <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Printer</span>
-      <button
-        type="button"
-        onClick={onFocus}
-        {...fieldBoxAttrs(active)}
-        className={`flex items-center ${ENTRY_BOX_HEIGHT} rounded-[10px] border-2 overflow-hidden transition-colors ${active ? 'border-[#CC0000] bg-[#0D0D0D]' : NORMAL_BG}`}
-      >
-        <span className="flex-1 px-4 font-data text-[18px] font-medium text-white text-left">
-          {value || <span className="text-[#444]">—</span>}
-        </span>
-        {active && <span className="inline-block w-[2px] h-[20px] bg-[#CC0000] animate-pulse rounded-sm" />}
-        <span aria-hidden className="h-full px-3 flex items-center justify-center border-l-2 border-[#3A3A3A] text-[#666]">▾</span>
-      </button>
     </div>
   );
 }
@@ -208,22 +170,10 @@ export function PARPage() {
   // always correct by construction — whatever's displayed is exactly what gets looked up,
   // regardless of how it got there.
 
-  // Printer preview — typeable (direct instruction: "selectable and typeable but the
-  // dropdown be disabled... calls the Keyboard"), unlike every other field on this screen
-  // which is Numpad-driven: a printer id is free text, not a quantity/code. Defaults to
-  // "PR01" (the old hardcoded display value) so the box isn't empty on load, but the
-  // worker can retype it; no format/existence validation on whatever's typed (direct
-  // instruction — "no typechecking"), since this app has no real printer concept yet for
-  // a typed value to be checked against.
-  const printerField = useNumpadField('keyboard');
-  useEffect(() => {
-    printerField.set('PR01');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const focusPrinterField = useCallback(
-    () => printerField.focus((v) => { printerField.set(v.trim()); resetToNumpad(); }),
-    [printerField, resetToNumpad],
-  );
+  // Printer (#168) — the shared PrinterField, validated against the active printers in the
+  // Printer table; defaults to OCL0 (Feature-14 brief). Create is blocked while invalid.
+  const [printer, setPrinter] = useState(DEFAULT_PRINTER);
+  const [printerInvalid, setPrinterInvalid] = useState(false);
 
   // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
   // PARContext.tsx's own doc comment; mirrors LII/PII/ISI's identical pattern, scoped to
@@ -514,6 +464,7 @@ export function PARPage() {
   const expirationBoxesComplete = monthField.value.length === 2 && dayField.value.length === 2 && yearField.value.length === 4;
   const canSubmit =
     item != null &&
+    printer !== '' && !printerInvalid &&
     vcpSspState.vcpValue.trim() !== '' && vcpSspState.sspValue.trim() !== '' && !vcpSspState.invalid &&
     (!item.requiresExpirationDate || expirationDate !== '') &&
     !expirationInvalid && !monthInvalid && !dayInvalid &&
@@ -819,7 +770,7 @@ export function PARPage() {
             </span>
           </div>
         )}
-        <PlainText label="Description" value={item?.descShort ?? ''} width="w-[600px]" />
+        <ItemDescription value={item?.descShort} layout="stacked" />
       </div>
 
       {/* Row 2 — VCP / SSP entry (shared VcpSspFields component — issue #165). */}
@@ -851,7 +802,7 @@ export function PARPage() {
           top-level sibling, permanently reserving its 220px width even below where its own
           content ends). */}
       <div className="w-[220px] flex flex-col gap-4 pl-5 border-l border-[#1C1C1C] shrink-0">
-        <PrinterField value={printerField.value} onFocus={focusPrinterField} active={printerField.isActive} />
+        <PrinterField value={printer} onChange={(v) => { setPrinter(v); resetToNumpad(); }} onValidityChange={setPrinterInvalid} width="w-[200px]" />
         <button
           type="button"
           onClick={handleCreateClick}

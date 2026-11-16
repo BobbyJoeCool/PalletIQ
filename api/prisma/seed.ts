@@ -187,6 +187,27 @@ const PACKING_ZONES = [
 // Functions table. BK/BKP have no real pull flow yet (permanently greyed in IRP this
 // version) but are seeded anyway so future editing is additive, not a re-architecture.
 const PROD_GOAL_EFFECTIVE_DATE = new Date('2026-01-01')
+// Label printers (#168) — seed-only, like ProdGoal. Same list as the add_printer migration.
+// RC02 is seeded inactive so the "inactive printer" path is exercisable.
+const PRINTERS = [
+  { code: 'OCL0', name: 'Label Hut 0', active: true },
+  { code: 'OCL1', name: 'Label Hut 1', active: true },
+  { code: 'OCL2', name: 'Label Hut 2', active: true },
+  { code: 'OBP1', name: 'Backpack Label Hut 1', active: true },
+  { code: 'IM01', name: 'Inventory Manager Cage 1', active: true },
+  { code: 'IM02', name: 'Inventory Manager Cage 2', active: true },
+  { code: 'QA01', name: 'ICQA 1', active: true },
+  { code: 'RC01', name: 'Mobile Printer 1', active: true },
+  { code: 'RC02', name: 'Mobile Printer 2', active: false },
+  { code: 'A303', name: 'Aisle 303', active: true },
+  { code: 'A304', name: 'Aisle 304', active: true },
+  { code: 'R101', name: 'Door 101', active: true },
+  { code: 'ART1', name: 'ART Line 1', active: true },
+  { code: 'PS01', name: 'Inbound Problem Solver 1', active: true },
+  { code: 'DP01', name: 'Depal / Mezzanine 1', active: true },
+  { code: 'MBP1', name: 'Breakpack 1', active: true },
+]
+
 const PROD_GOALS = [
   { functionCode: 'CA',  rate: 180, unit: 'cartons/hr',   rate2: null, unit2: null,       effectiveDate: PROD_GOAL_EFFECTIVE_DATE },
   { functionCode: 'CF',  rate: 180, unit: 'cartons/hr',   rate2: null, unit2: null,       effectiveDate: PROD_GOAL_EFFECTIVE_DATE },
@@ -1175,6 +1196,7 @@ async function main() {
   await prisma.packingZone.deleteMany()
   await prisma.storageCode.deleteMany()
   await prisma.prodGoal.deleteMany()
+  await prisma.printer.deleteMany()
   await prisma.workstationAisle.deleteMany()
   await prisma.workstation.deleteMany()
 
@@ -1191,6 +1213,7 @@ async function main() {
   await prisma.reasonCodeDomain.createMany({ data: REASON_CODE_DOMAINS })
   await prisma.store.createMany({ data: STORES })
   await prisma.prodGoal.createMany({ data: PROD_GOALS })
+  await prisma.printer.createMany({ data: PRINTERS })
   await prisma.workstation.createMany({ data: WORKSTATIONS.map(({ id, name }) => ({ id, name })) })
   await prisma.workstationAisle.createMany({ data: WORKSTATION_AISLES })
 

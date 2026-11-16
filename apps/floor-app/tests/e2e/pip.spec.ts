@@ -90,7 +90,7 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     // Issue #187 — every field below is already visible even before a label is scanned,
     // and issue #188 gates Pallet ID/UPC/Location disabled until then.
     await expect(page.getByText('Location', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('Item', { exact: true })).toBeVisible();
+    await expect(page.getByText('Description', { exact: true })).toBeVisible();
     await expect(page.getByText('DPCI', { exact: true })).toBeVisible();
     await expect(page.getByText('Current', { exact: true })).toBeVisible();
     await expect(page.getByText('Pull', { exact: true })).toBeVisible();

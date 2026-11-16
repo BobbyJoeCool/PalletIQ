@@ -240,6 +240,12 @@ erDiagram
         date effectiveDate "when this rate took effect"
     }
 
+    Printer {
+        string code PK "VarChar(4) — prefix convention A###/R###/OCL#/IM##/... (client hint only, #168)"
+        string name "VarChar(60)"
+        boolean active "default true — inactive printers are rejected by the Printer field"
+    }
+
     %% ============================================================
     %% RELATIONS
     %% ============================================================

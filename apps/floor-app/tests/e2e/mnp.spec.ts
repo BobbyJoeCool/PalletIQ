@@ -18,7 +18,7 @@ async function scanPallet(page: Page, mode: 'put' | 'move') {
     await statusDropdown.getByRole('button', { name: 'Stored', exact: true }).click();
   }
   await page.getByRole('button', { name: 'Find', exact: true }).click();
-  await expect(page.getByText('Item', { exact: true })).toBeVisible();
+  await expect(page.getByText('Description', { exact: true })).toBeVisible();
 }
 
 /**
@@ -70,7 +70,7 @@ test.describe('MNP — Manual Put flow', () => {
     await page.getByRole('button', { name: '✗ Invalid Pallet ID' }).click();
 
     await expect(page.getByText('Pallet not found')).toBeVisible();
-    await expect(page.getByText('Item', { exact: true })).not.toBeVisible();
+    await expect(page.getByText('Description', { exact: true })).not.toBeVisible();
   });
 
   // Node ELIG_CHECK {alreadyStored?} -> Yes
@@ -79,7 +79,7 @@ test.describe('MNP — Manual Put flow', () => {
 
     await expect(page.getByText(/currently stored in .* — proceeding as move/)).toBeVisible();
     // Non-blocking: the flow still advances to pallet_scanned.
-    await expect(page.getByText('Item', { exact: true })).toBeVisible();
+    await expect(page.getByText('Description', { exact: true })).toBeVisible();
   });
 
   // Node LOC_OK {Found?} -> Not found
