@@ -14,13 +14,13 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
 
 /**
  * The shell's left navigation: Home plus one entry per Manager screen in the registry.
- * Every screen is tagged "Soon" until its own issue builds it out.
+ * A screen is tagged "Soon" until its own issue builds it out.
  */
 export function SideNav() {
   return (
     <nav
       aria-label="Screens"
-      className="flex w-64 shrink-0 flex-col border-r border-[var(--border-default)] bg-[var(--surface-2)]"
+      className="flex w-64 shrink-0 flex-col border-r border-[var(--border-default)] bg-[var(--surface-2)] print:hidden"
     >
       <div className="flex h-14 shrink-0 items-center border-b border-[var(--border-default)] px-4">
         <Wordmark />
@@ -37,9 +37,11 @@ export function SideNav() {
         {DESKTOP_SCREENS.map((screen) => (
           <NavLink key={screen.id} to={`/screens/${screen.id}`} className={navLinkClass}>
             <span>{screen.title}</span>
-            <span className="shrink-0 rounded border border-[var(--border-strong)] px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-              Soon
-            </span>
+            {!screen.built && (
+              <span className="shrink-0 rounded border border-[var(--border-strong)] px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                Soon
+              </span>
+            )}
           </NavLink>
         ))}
       </div>

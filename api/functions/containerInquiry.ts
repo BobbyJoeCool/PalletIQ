@@ -189,7 +189,19 @@ async function getContainerEvents(req: HttpRequest, _ctx: InvocationContext): Pr
   if (!rawCid) throw Object.assign(new Error('INVALID_INPUT'), { status: 400 });
 
   const { canonical, type } = parseCidOrThrow(rawCid);
+  return loadContainerEvents(canonical, type);
+}
 
+/**
+ * Gathers every recorded event for one CID, across the event tables its container type
+ * uses, newest first. Split out of the handler above so the desktop Audit Tool's CID
+ * lookup (functions/audit.ts, #148) reads the same history CII shows.
+ *
+ * @param canonical - canonical CID
+ * @param type - its container type
+ * @returns `{ type, cid, events }`
+ */
+export async function loadContainerEvents(canonical: string, type: CidTypeCode) {
   const events: { source: string; eventType: string; timestamp: Date; userZ: string | null; details?: Record<string, unknown> }[] = [];
 
   if (type === CID_TYPE.FULL_CASE || type === CID_TYPE.SSP_PULL_MASTER) {

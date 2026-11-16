@@ -3,8 +3,8 @@ import { useAuth } from '../context/authContext';
 import { DESKTOP_SCREENS } from '../lib/screens';
 
 /**
- * Landing page after sign-in: a greeting and a card per planned Manager screen, each
- * linking to that screen's (currently Coming Soon) page.
+ * Landing page after sign-in: a greeting and a card per Manager screen, each linking to
+ * that screen — or to its Coming Soon page if it has not been built yet.
  */
 export function HomePage() {
   const { user } = useAuth();
@@ -16,7 +16,7 @@ export function HomePage() {
           {user ? `Welcome, ${user.firstName}` : 'Welcome'}
         </h1>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
-          The Manager screens below are planned and not built yet.
+          Screens marked Coming soon are planned and not built yet.
         </p>
       </div>
 
@@ -32,7 +32,7 @@ export function HomePage() {
               </span>
               <span className="text-sm text-[var(--text-muted)]">{screen.summary}</span>
               <span className="mt-auto pt-1 text-xs text-[var(--text-disabled)]">
-                Coming soon · #{screen.issue}
+                {screen.built ? 'Open' : `Coming soon · #${screen.issue}`}
               </span>
             </Link>
           </li>
