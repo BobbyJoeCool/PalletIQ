@@ -1201,6 +1201,10 @@ async function main() {
   await prisma.workstation.deleteMany()
 
   const PIN_HASH = await bcrypt.hash('1234', 10)
+  // Demo desktop-app password, set only on the three desktop-eligible core users below
+  // (see shared/roles.ts isDesktopEligible). Matches the hash the
+  // 20261116120000_add_user_password_hash migration backfills.
+  const DESKTOP_PASSWORD_HASH = await bcrypt.hash('Desktop1234', 10)
 
   // 1. Lookup tables
   console.log('Seeding lookup tables...')
@@ -1222,9 +1226,9 @@ async function main() {
   console.log('Seeding users...')
   await prisma.user.createMany({
     data: [
-      { zNumber: 'z002p25', firstName: 'Robert',  lastName: 'Breutzmann', pinHash: PIN_HASH, role: 'ADMIN',   departmentId: 'WHS' },
-      { zNumber: 'z002p24', firstName: 'Diana',   lastName: 'Kowalski',   pinHash: PIN_HASH, role: 'MANAGER', departmentId: 'IQA' },
-      { zNumber: 'z002p23', firstName: 'Marcus',  lastName: 'Webb',       pinHash: PIN_HASH, role: 'LEAD',    departmentId: 'WHS' },
+      { zNumber: 'z002p25', firstName: 'Robert',  lastName: 'Breutzmann', pinHash: PIN_HASH, passwordHash: DESKTOP_PASSWORD_HASH, role: 'ADMIN',   departmentId: 'WHS' },
+      { zNumber: 'z002p24', firstName: 'Diana',   lastName: 'Kowalski',   pinHash: PIN_HASH, passwordHash: DESKTOP_PASSWORD_HASH, role: 'MANAGER', departmentId: 'IQA' },
+      { zNumber: 'z002p23', firstName: 'Marcus',  lastName: 'Webb',       pinHash: PIN_HASH, passwordHash: DESKTOP_PASSWORD_HASH, role: 'LEAD',    departmentId: 'WHS' },
       { zNumber: 'z002p22', firstName: 'Sarah',   lastName: 'Okafor',     pinHash: PIN_HASH, role: 'IM',      departmentId: 'WHS' },
       { zNumber: 'z002p21', firstName: 'Tyler',   lastName: 'Hennessey',  pinHash: PIN_HASH, role: 'WORKER',  departmentId: 'INB' },
       ...irpData.users,

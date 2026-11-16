@@ -12,6 +12,9 @@ build/
 out/
 .vite/
 api/dist/
+# Desktop app: compiled Electron main/preload, and electron-builder's packaged output
+apps/desktop-app/dist-electron/
+apps/desktop-app/release/
 api/scripts/palletiq-export-*.xlsx
 
 # ---------- Environment / secrets ----------

@@ -4,7 +4,10 @@
 //     MySQL migration, GitHub #139, rather than switching to native Prisma enums) ─────
 
 import type { Role } from './roles.js';
-export { type Role, ROLE_RANK, hasMinRole, isRole } from './roles.js';
+export {
+  type Role, ROLE_RANK, hasMinRole, isRole,
+  ICQA_DEPARTMENT_ID, DESKTOP_MIN_ROLE, isDesktopEligible,
+} from './roles.js';
 export { sspPerCarton, isValidVcpSspRatio, exceedsSspCap } from './vcpSsp.js';
 export * from './location.js';
 export { classifyExpirationDate, EXPIRATION_MIN_MONTHS, EXPIRATION_CONFIRM_MONTHS, type ExpirationClass } from './expiration.js';

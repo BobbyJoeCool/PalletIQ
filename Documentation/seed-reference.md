@@ -124,6 +124,10 @@ All stores are located in cities around Cedar Falls, Iowa.
 
 All users have PIN `1234` (stored as bcrypt hash, 10 rounds).
 
+The three desktop-eligible users (`z002p25`, `z002p24`, `z002p23`) also have the
+desktop-app password `Desktop1234` (`passwordHash`, bcrypt, 10 rounds); it is null for
+everyone else.
+
 | zNumber  | First    | Last       | Role    | Dept |
 |----------|----------|------------|---------|------|
 | z002p25  | Robert   | Breutzmann | ADMIN   | WHS  |

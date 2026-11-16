@@ -21,8 +21,8 @@ suite's existing ~21-failure baseline is unchanged/pre-existing — see
 ## Where things stand
 
 - floor-app is at **v1.8.6** (`apps/floor-app/package.json`). api is at **v1.2.0**
-  (`api/package.json`). desktop-app is at **v1.0.0**, scaffold only — no Electron, no
-  frontend, no schema changes yet (`apps/desktop-app/README.md`,
+  (`api/package.json`). desktop-app is at **v1.0.0**, bootstrap only — Electron shell and
+  zNumber + password login built (2026-11-16), no Manager screens yet (`apps/desktop-app/README.md`,
   `apps/desktop-app/CHANGELOG.md`).
 - `apps/floor-app/CHANGELOG.md`'s own "Roadmap — Planned Versions" section still frames
   v1.9.0 as "IRP, PRQ, CII + open-issue cleanup," but IRP already shipped (`built: true` in
