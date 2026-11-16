@@ -13,6 +13,18 @@ import { hasMinRole, type Role } from './roles.js';
 
 export type HoldCategory = 'HOLD_IN' | 'HOLD_OUT' | 'HOLD_BOTH' | 'HOLD_PERM';
 
+/**
+ * Storage code for a location carved out of use — "Not For Storage" (Location Setup,
+ * #143). Set per location, never as a zone's setting, for a spot that is physically
+ * blocked (cage carts, end-of-aisle visibility). It accepts no freight of any kind.
+ */
+export const NOT_FOR_STORAGE_CODE = 'XO';
+
+/** True when a location is carved out to Not For Storage. */
+export function isNotForStorage(storageCode: string): boolean {
+  return storageCode === NOT_FOR_STORAGE_CODE;
+}
+
 /** Every hold category, low → high priority (HOLD_IN = HOLD_OUT < HOLD_BOTH < HOLD_PERM). */
 export const HOLD_CATEGORIES: readonly HoldCategory[] = ['HOLD_IN', 'HOLD_OUT', 'HOLD_BOTH', 'HOLD_PERM'];
 
@@ -49,6 +61,7 @@ export interface PolicyLocation {
   status: string;
   holdCategory: string | null;
   contraction: boolean;
+  storageCode: string;
 }
 
 /** True when the hold blocks inbound work. */
@@ -56,10 +69,11 @@ export function blocksInbound(holdCategory: string | null): boolean {
   return holdCategory != null && (INBOUND_BLOCKING_HOLDS as readonly string[]).includes(holdCategory);
 }
 
-/** True when a location may be reserved or receive a put at all (not contracted, not
- *  inbound-held). Status is the caller's concern — different intents accept different ones. */
-export function acceptsInbound(loc: Pick<PolicyLocation, 'holdCategory' | 'contraction'>): boolean {
-  return !loc.contraction && !blocksInbound(loc.holdCategory);
+/** True when a location may be reserved or receive a put at all (not Not For Storage, not
+ *  contracted, not inbound-held). Status is the caller's concern — different intents
+ *  accept different ones. */
+export function acceptsInbound(loc: Pick<PolicyLocation, 'holdCategory' | 'contraction' | 'storageCode'>): boolean {
+  return !isNotForStorage(loc.storageCode) && !loc.contraction && !blocksInbound(loc.holdCategory);
 }
 
 /** True when a location can be staged: EMPTY and accepting inbound work. */
@@ -95,13 +109,16 @@ export interface PutAcks {
 
 /**
  * Manual put (MNP `manual/confirm`) onto a chosen destination.
+ * - Not For Storage: denied for every role (no override path).
  * - Contracted: Worker denied; IM+ must acknowledge.
  * - HOLD_PERM: denied for every role (no override path).
  * - HOLD_IN / HOLD_BOTH: Worker denied; IM+ must acknowledge.
  * - HOLD_OUT / none: allowed.
- * Contraction is checked first, matching the original gate order.
+ * Not For Storage is checked first (nothing may override it), then contraction, matching
+ * the original gate order.
  */
 export function putDecision(loc: PolicyLocation, role: Role, acks: PutAcks): Decision {
+  if (isNotForStorage(loc.storageCode)) return { kind: 'deny', code: 'NOT_FOR_STORAGE', httpStatus: 403 };
   const imPlus = hasMinRole(role, 'IM');
   if (loc.contraction) {
     if (!imPlus) return { kind: 'deny', code: 'CONTRACTED', httpStatus: 403 };
@@ -138,12 +155,14 @@ export function reinstateReasons(
   return reasons;
 }
 
-/** PAR reinstate verdict: confirm with the reasons until acknowledged, else allow. */
+/** PAR reinstate verdict: a hard stop onto a Not For Storage location (nothing can be
+ *  there); otherwise confirm with the reasons until acknowledged, else allow. */
 export function reinstateDecision(
   loc: PolicyLocation & { storageCode: string },
   itemStorageCode: string | null,
   acknowledged: boolean,
 ): Decision {
+  if (isNotForStorage(loc.storageCode)) return { kind: 'deny', code: 'NOT_FOR_STORAGE', httpStatus: 403 };
   const reasons = reinstateReasons(loc, itemStorageCode);
   if (reasons.length > 0 && !acknowledged) {
     return { kind: 'confirm', code: 'LOCATION_NEEDS_CONFIRM', httpStatus: 409, reasons };

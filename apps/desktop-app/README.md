@@ -1,8 +1,8 @@
 # PalletIQ Desktop
 
-**Status:** Electron shell, zNumber + password login, the Embedded Floor App (#141) and
-the Audit Tool (#148) are built. The six remaining Manager screens are stubbed as
-"Coming Soon".
+**Status:** Electron shell, zNumber + password login, the Embedded Floor App (#141), the
+Audit Tool (#148) and Location Setup (#143) are built. The five remaining Manager screens
+are stubbed as "Coming Soon".
 
 The Manager-facing desktop application: a web app bundled with Electron, covering the
 DESKTOP-bucket screens designed in the 2026-07-25 design session (DPCI Setup Edit,
@@ -73,10 +73,18 @@ pane, or click it and pick a pane, to open that record alongside. Each pane, and
 panes together, can be printed or exported to Excel. Read-only; served by
 `GET /api/audit`. Spec: `../../Documentation/ScreenSpecs/Desktop-Audit-Tool.md`.
 
+## Location Setup
+
+Pick an aisle to see it as a grid of zone cells (one per level of each zone-side).
+**Zone Setup** sets storage code and size by zone cell and marks single locations Not For
+Storage; **Contraction** contracts or opens zone cells (floor / top presets) or single
+locations. OM, ICQA and Admin can also create and delete aisles and restore Not For
+Storage locations. Spec: `../../Documentation/ScreenSpecs/Desktop-Location-Setup.md`.
+
 ## Not yet done
 
-- Six Manager screens (#142–147) do not exist yet; each nav entry opens a "Coming
-  Soon" page.
+- Five Manager screens (#142, #144–147) do not exist yet; each nav entry opens a
+  "Coming Soon" page.
 - None of the ~15 new Prisma models these screens need have been added to
   `../../api/prisma/schema.prisma` yet.
 - No automated e2e coverage for the desktop app.

@@ -160,6 +160,8 @@ const STORAGE_CODES = [
   { id: 'RF', desc: 'Restricted Food' },
   { id: 'RS', desc: 'Restricted Reserve' },
   { id: 'BS', desc: 'Security' },
+  // Location Setup (#143) — per-location carve-out, never a zone setting.
+  { id: 'XO', desc: 'Not For Storage' },
 ]
 
 const PACKING_ZONES = [
@@ -787,6 +789,46 @@ const PENDING_PALLETS_PER_COMBO = 12
  * @returns fresh `PendingPalletRow` entries — callers insert these separately from the
  *   main `pallets` array (different shape: no location, no putBy/putAt)
  */
+/**
+ * Derives each aisle's Location Setup structure (#143) from its generated locations: the
+ * aisle's sides and bin span, each zone's bin range, and one zone setting per zone ×
+ * side × level. Every generator above builds a zone-side-level uniformly, so taking the
+ * first location seen for each is exact.
+ */
+function buildAisleStructure(locations: LocationRow[]) {
+  const aisles = new Map<number, { odd: boolean; even: boolean; firstBin: number; lastBin: number }>()
+  const zones = new Map<string, { aisle: number; zone: number; startBin: number; endBin: number }>()
+  const settings = new Map<string, { aisle: number; zone: number; side: string; level: number; storageCode: string; size: string }>()
+
+  for (const loc of locations) {
+    const side = loc.bin % 2 === 1 ? 'ODD' : 'EVEN'
+    const a = aisles.get(loc.aisle) ?? { odd: false, even: false, firstBin: loc.bin, lastBin: loc.bin }
+    if (side === 'ODD') a.odd = true; else a.even = true
+    a.firstBin = Math.min(a.firstBin, loc.bin)
+    a.lastBin = Math.max(a.lastBin, loc.bin)
+    aisles.set(loc.aisle, a)
+
+    const zoneKey = `${loc.aisle}|${loc.zone}`
+    const z = zones.get(zoneKey) ?? { aisle: loc.aisle, zone: loc.zone, startBin: loc.bin, endBin: loc.bin }
+    z.startBin = Math.min(z.startBin, loc.bin)
+    z.endBin = Math.max(z.endBin, loc.bin)
+    zones.set(zoneKey, z)
+
+    const settingKey = `${loc.aisle}|${loc.zone}|${side}|${loc.level}`
+    if (!settings.has(settingKey)) {
+      settings.set(settingKey, { aisle: loc.aisle, zone: loc.zone, side, level: loc.level, storageCode: loc.storageCode, size: loc.size })
+    }
+  }
+
+  return {
+    aisles: [...aisles].map(([aisle, a]) => ({
+      aisle, sides: a.odd && a.even ? 'BOTH' : a.odd ? 'ODD' : 'EVEN', firstBin: a.firstBin, lastBin: a.lastBin,
+    })),
+    zones: [...zones.values()],
+    settings: [...settings.values()],
+  }
+}
+
 function buildPendingPallets(locations: LocationRow[]): PendingPalletRow[] {
   const combos = new Set(locations.map((l) => `${l.storageCode}|${l.size}`))
   const now = new Date()
@@ -1184,6 +1226,9 @@ async function main() {
   await prisma.reservation.deleteMany()
   await prisma.pallet.deleteMany()
   await prisma.location.deleteMany()
+  await prisma.aisleZoneSetting.deleteMany()
+  await prisma.aisleZone.deleteMany()
+  await prisma.aisle.deleteMany()
   await prisma.userDepartment.deleteMany()
   await prisma.user.deleteMany()
   await prisma.item.deleteMany()
@@ -1254,6 +1299,15 @@ async function main() {
 
   await insertInChunks('locations', locations, 500,
     (chunk) => prisma.location.createMany({ data: chunk })
+  )
+
+  // 4a. Aisle structure (Location Setup, #143) — derived from the locations just built,
+  // the same way the 20261116130000_location_setup migration backfills a live DB.
+  const structure = buildAisleStructure(locations)
+  await prisma.aisle.createMany({ data: structure.aisles })
+  await prisma.aisleZone.createMany({ data: structure.zones })
+  await insertInChunks('aisle zone settings', structure.settings, 500,
+    (chunk) => prisma.aisleZoneSetting.createMany({ data: chunk })
   )
 
   // 4b. Staging activity log (issue #52) — gives SAR realistic "staged since" ages

@@ -83,6 +83,8 @@ On opening the app, the user is always prompted to log in first — there is no 
 
 **Desktop Audit Tool:** `GET /api/audit` returns any one auditable record (location, pallet, DPCI, container, user, or an aisle range) as a current-state summary plus a merged history drawn from `ActivityLog`, the container event tables and `ScanLog`. It is read-only and limited to desktop-eligible users. See `Documentation/ScreenSpecs/Desktop-Audit-Tool.md`.
 
+**Desktop Location Setup:** aisles have their own structure tables (`Aisle`, `AisleZone`, `AisleZoneSetting`). Every aisle has four zones; Zone 1 holds the highest bins by default (the back, where staging and putaway start), or the lowest when the aisle is set front-to-back. Locations are set up only by zone: every location on one level of one zone-side shares a storage code and size. The one per-location exception is a **Not For Storage** carve-out — storage code `XO`, with a required reason — which accepts no freight of any kind and cannot be overridden by any role; removing it restores the zone's storage code. Contraction is set from the same screen, by zone cell or by single location. Deleting an aisle requires every location to be empty and is a soft delete. See `Documentation/ScreenSpecs/Desktop-Location-Setup.md`.
+
 ---
 
 ## Home Screen

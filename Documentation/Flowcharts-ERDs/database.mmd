@@ -110,9 +110,38 @@ erDiagram
         string holdCategory "nullable, VarChar(10), HoldCategory values — independent of status, added Phase 10"
         string storageCode FK "VarChar(2) → StorageCode"
         string size "VarChar(2), LocationSize values"
-        boolean contraction "default: false, set by Lead+ via Aisle Setup (out of scope) — read-only in this app"
+        boolean contraction "default: false — set in desktop Location Setup, Contraction tab (#143)"
         datetime statusExpiry "nullable — Logic Gate-managed (#149/#150) mirror of SDP's Reservation.createdAt-based expiry; not the active enforcer, see revertStatus"
         string revertStatus "nullable, VarChar(15) — paired with statusExpiry; set by RESERVE_PUT, cleared by CLEAR_LOCATION/PUT_COMPLETE"
+        boolean deleted "default: false — soft delete by desktop Location Setup aisle delete (#143)"
+        string notForStorageReason "nullable, VarChar(10) — CAGE_CART/EOA_VIS/AMNESTY/OTHER when storageCode = XO (Not For Storage)"
+        string notForStorageNote "nullable, VarChar(255) — required for OTHER"
+    }
+
+    Aisle {
+        int aisle PK "3 digits — desktop Location Setup (#143)"
+        string sides "VarChar(4) — BOTH | ODD | EVEN"
+        int firstBin
+        int lastBin
+        string zoneDirection "VarChar(15) — BACK_TO_FRONT (Zone 1 = highest bins, default) | FRONT_TO_BACK"
+        boolean deleted "default: false"
+        datetime createdAt "when (re)created"
+    }
+
+    AisleZone {
+        int aisle PK, FK "→ Aisle"
+        int zone PK "1-4"
+        int startBin
+        int endBin
+    }
+
+    AisleZoneSetting {
+        int aisle PK, FK "→ Aisle"
+        int zone PK "1-4"
+        string side PK "VarChar(4) — ODD | EVEN"
+        int level PK
+        string storageCode FK "VarChar(2) → StorageCode — every location on this level of this zone-side shares it"
+        string size FK "VarChar(2) → Size"
     }
 
     HoldType {
@@ -256,6 +285,9 @@ erDiagram
 
     Location }o--o| HoldType : "holdTypeCode (nullable)"
     Location }o--|| StorageCode : "storageCode"
+    AisleZone }o--|| Aisle : "aisle"
+    AisleZoneSetting }o--|| Aisle : "aisle"
+    AisleZoneSetting }o--|| StorageCode : "storageCode"
 
     WorkstationAisle }o--|| Workstation : "workstationId"
 

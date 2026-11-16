@@ -13,9 +13,10 @@ model StorageCode {
   id   String @id @db.VarChar(2)
   desc String @db.VarChar(60)
 
-  items     Item[]
-  locations Location[]
-  pallets   Pallet[]
+  items        Item[]
+  locations    Location[]
+  pallets      Pallet[]
+  zoneSettings AisleZoneSetting[]
 }
 
 // Feature 9 (Demo Scanner) Phase 1, Step 0 — real-data-backed replacement for the
@@ -27,8 +28,9 @@ model Size {
   id   String @id @db.VarChar(2)
   desc String @db.VarChar(60)
 
-  locations Location[]
-  pallets   Pallet[]
+  locations    Location[]
+  pallets      Pallet[]
+  zoneSettings AisleZoneSetting[]
 }
 
 model Department {
@@ -192,23 +194,23 @@ model Item {
 }
 
 model Location {
-  aisle        Int
-  bin          Int
-  level        Int
-  zone         Int
-  status       String    @db.VarChar(15)
-  storageCode  String    @db.VarChar(2)
-  size         String    @db.VarChar(2)
+  aisle               Int
+  bin                 Int
+  level               Int
+  zone                Int
+  status              String    @db.VarChar(15)
+  storageCode         String    @db.VarChar(2)
+  size                String    @db.VarChar(2)
   // Contraction is set at zone-side+level granularity by Lead+ via Aisle Setup (out of
   // scope for this demo — see ELZ.md); stored per-location and expected to be uniform
   // across every location sharing a zone-side/level group. Read-only in this app.
-  contraction  Boolean   @default(false)
+  contraction         Boolean   @default(false)
   // The hold *category* (HOLD_IN/HOLD_OUT/HOLD_BOTH/HOLD_PERM), independent of `status`
   // per outline.md's original Location description ("HoldType, nullable, independent of
   // Status"). Added Phase 10 — `status` briefly (Phase 6's blockPut) doubled as the hold
   // indicator, which destroys the location's real operational state (EMPTY vs STORED)
   // the moment a hold is placed; fixed to use this field instead. See phase-10 log.
-  holdCategory String?   @db.VarChar(10)
+  holdCategory        String?   @db.VarChar(10)
   // Logic Gate-managed (issue #149/#150) — mirrors the expiry/revert-target data the
   // separate `Reservation` table (createdAt + wasStaged) already tracks for SDP's own
   // 5-minute reservation timeout, enforced today by reservationTimer.ts's cron sweep,
@@ -217,8 +219,19 @@ model Location {
   // wired to any new enforcement logic yet. Only ever set/cleared by api/lib/logicGate.ts,
   // never written directly by a screen handler. Both null outside an expiry-bearing
   // intent's lifetime (RESERVE_PUT today; RESERVE_REINSTATE once a future caller uses it).
-  statusExpiry DateTime?
-  revertStatus String?   @db.VarChar(15)
+  statusExpiry        DateTime?
+  revertStatus        String?   @db.VarChar(15)
+  // Location Setup (#143). `deleted` is a soft delete: Location's key is its coordinates
+  // and history references it, so an aisle delete hides the rows instead of removing
+  // them; re-creating the aisle reuses them. Deleted locations accept nothing and are
+  // hidden from lookups.
+  deleted             Boolean   @default(false)
+  // Why the location is carved out to Not For Storage (storageCode "XO"): CAGE_CART,
+  // EOA_VIS, AMNESTY or OTHER (see shared/aisleSetup.ts). Both null unless carved out;
+  // the note is required for OTHER. Removing the carve-out restores the zone setting's
+  // storage code from AisleZoneSetting.
+  notForStorageReason String?   @db.VarChar(10)
+  notForStorageNote   String?   @db.VarChar(255)
 
   storageRef StorageCode @relation(fields: [storageCode], references: [id])
   sizeRef    Size        @relation(fields: [size], references: [id])
@@ -231,16 +244,16 @@ model Location {
 }
 
 model User {
-  zNumber      String @id @db.VarChar(7)
-  firstName    String @db.VarChar(50)
-  lastName     String @db.VarChar(50)
-  pinHash      String @db.VarChar(60)
+  zNumber      String  @id @db.VarChar(7)
+  firstName    String  @db.VarChar(50)
+  lastName     String  @db.VarChar(50)
+  pinHash      String  @db.VarChar(60)
   // Desktop-app password (bcrypt). Null for anyone without desktop access — only set,
   // by an admin, for desktop-eligible users (see shared/roles.ts isDesktopEligible).
   // Same identity as the tablet's zNumber+PIN login, just a second credential.
   passwordHash String? @db.VarChar(255)
-  role         String @db.VarChar(10)
-  departmentId String @db.VarChar(3)
+  role         String  @db.VarChar(10)
+  departmentId String  @db.VarChar(3)
 
   department Department @relation(fields: [departmentId], references: [id])
 
@@ -492,10 +505,10 @@ model ContainerEvent {
   reasonNumber String?  @db.VarChar(2)
   reasonNote   String?  @db.VarChar(255)
 
-  container       Container        @relation(fields: [containerId], references: [cid], onDelete: NoAction, onUpdate: NoAction)
-  user            User?            @relation(fields: [userZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+  container       Container         @relation(fields: [containerId], references: [cid], onDelete: NoAction, onUpdate: NoAction)
+  user            User?             @relation(fields: [userZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
   reasonPrefixRef ReasonCodePrefix? @relation(fields: [reasonPrefix], references: [letter], onDelete: NoAction, onUpdate: NoAction)
-  reasonNumberRef ReasonCode?      @relation(fields: [reasonNumber], references: [number], onDelete: NoAction, onUpdate: NoAction)
+  reasonNumberRef ReasonCode?       @relation(fields: [reasonNumber], references: [number], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([containerId, timestamp])
 }
@@ -602,8 +615,8 @@ model StrayEach {
   packedAt         DateTime?
   canceledAt       DateTime?
 
-  itemRef       Item                          @relation(fields: [dept, class, item], references: [dept, class, item])
-  store         Store                         @relation(fields: [destinationStore], references: [id])
+  itemRef       Item                         @relation(fields: [dept, class, item], references: [dept, class, item])
+  store         Store                        @relation(fields: [destinationStore], references: [id])
   reassignments StrayEachReassignmentEvent[]
 }
 
@@ -660,4 +673,58 @@ model ContainerCancelEvent {
 
   @@index([cid])
   @@index([triggerType, triggerId])
+}
+
+// ─── Location Setup (Desktop, #143) ──────────────────────────────────────────
+
+/// An aisle's structure. Every aisle has four zones (AisleZone) and one AisleZoneSetting
+/// per zone × side × level; its Location rows are generated from those. Rows for
+/// aisles that existed before Location Setup were backfilled from their locations.
+model Aisle {
+  aisle         Int      @id
+  /// BOTH, or ODD / EVEN for a single-sided aisle.
+  sides         String   @db.VarChar(4)
+  firstBin      Int
+  lastBin       Int
+  /// BACK_TO_FRONT: Zone 1 at the highest bins (the back, where filling starts — every
+  /// existing aisle). FRONT_TO_BACK: Zone 1 at the lowest bins. Not yet read by STG/SDP/MNP.
+  zoneDirection String   @default("BACK_TO_FRONT") @db.VarChar(15)
+  deleted       Boolean  @default(false)
+  /// When this aisle was (re)created — history before it belongs to an earlier, deleted
+  /// version of the aisle.
+  createdAt     DateTime @default(now())
+
+  zones        AisleZone[]
+  zoneSettings AisleZoneSetting[]
+}
+
+/// One zone's bins, inclusive, covering both sides.
+model AisleZone {
+  aisle    Int
+  zone     Int
+  startBin Int
+  endBin   Int
+
+  aisleRef Aisle @relation(fields: [aisle], references: [aisle])
+
+  @@id([aisle, zone])
+}
+
+/// The storage code and size every location on one level of one zone-side shares
+/// (locations are set up only by zone — direct instruction 2026-11-16). A location
+/// carved out to Not For Storage keeps its zone setting here, which is what restores it.
+model AisleZoneSetting {
+  aisle       Int
+  zone        Int
+  /// ODD or EVEN.
+  side        String @db.VarChar(4)
+  level       Int
+  storageCode String @db.VarChar(2)
+  size        String @db.VarChar(2)
+
+  aisleRef   Aisle       @relation(fields: [aisle], references: [aisle])
+  storageRef StorageCode @relation(fields: [storageCode], references: [id])
+  sizeRef    Size        @relation(fields: [size], references: [id])
+
+  @@id([aisle, zone, side, level])
 }

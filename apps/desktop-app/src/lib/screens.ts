@@ -29,7 +29,7 @@ export const DESKTOP_SCREENS: readonly DesktopScreen[] = [
     title: 'Location Setup Edit',
     issue: 143,
     summary: 'Aisle structure plus a grid editor for storage code, size and contraction.',
-    built: false,
+    built: true,
   },
   {
     id: 'hung-resolution',
