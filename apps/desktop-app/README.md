@@ -104,10 +104,15 @@ Live production vs plan for a date and shift: a card per function with staffing,
 Prod %, % to Plan and (pull functions) estimated finish; expand a card for each worker's
 figures. Every desktop user. Spec: `../../Documentation/ScreenSpecs/Desktop-Team-Prod-Summary.md`.
 
+## Tests
+
+`npm run test:e2e` builds the app and runs the Playwright suite against the real local API
+(35 tests, one spec per screen plus sign-in and the shell). The API must be running; the
+Embedded Floor App spec also needs the floor app's dev server. See `tests/e2e/README.md`.
+
 ## Not yet done
 
 - DPCI Setup Edit (#142) and Hung Pallet/Location Resolution (#144) do not exist yet; their
   nav entries open a "Coming Soon" page.
 - None of the ~15 new Prisma models these screens need have been added to
   `../../api/prisma/schema.prisma` yet.
-- No automated e2e coverage for the desktop app.

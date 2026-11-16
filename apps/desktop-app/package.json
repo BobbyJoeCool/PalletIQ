@@ -13,10 +13,13 @@
     "start": "npm run build && electron .",
     "package": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:only": "playwright test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.1",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
