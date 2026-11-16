@@ -1,4 +1,9 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+/** One Edit-mode row (label span + its numpad box(es) + "Current" value), by label. */
+function editRow(page: Page, label: string) {
+  return page.locator('div.flex.items-center.gap-3.py-2', { has: page.getByText(label, { exact: true }) });
+}
 import { tapKeys } from './helpers';
 
 /**
@@ -69,16 +74,24 @@ test.describe('PII — Pallet ID Info', () => {
 
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
 
-    const vcpField = page.getByLabel('VCP', { exact: true });
-    const original = await vcpField.inputValue();
-    await vcpField.fill(String(Number(original) + 1));
+    // Edit fields are numpad boxes (no native inputs). Total Cartons is a single plain
+    // box, so changing it can't trip a cross-field rule like the VCP/SSP ratio.
+    const cartonsBox = editRow(page, 'Total Cartons').getByRole('button').first();
+    const original = (await cartonsBox.innerText()).trim();
+    const enter = async (v: string) => {
+      await cartonsBox.click();
+      await tapKeys(page, v);
+      await page.getByRole('button', { name: 'Enter', exact: true }).click();
+    };
+
+    await enter(String(Number(original) + 1));
     await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled();
 
-    // Same value, different formatting (e.g. a leading zero) — parsed comparison means
-    // this still counts as unchanged, not a raw string difference.
-    await vcpField.fill(original);
+    // Same value, different formatting (a leading zero) — parsed comparison means this
+    // still counts as unchanged, not a raw string difference.
+    await enter(original);
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
-    await vcpField.fill(`0${original}`);
+    await enter(`0${original}`);
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
@@ -107,7 +120,7 @@ test.describe('PII — Pallet ID Info', () => {
     await expect(page.getByText('Total Cartons', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Edit' }).click();
-    await expect(page.getByLabel('Total Cartons')).toBeVisible();
+    await expect(editRow(page, 'Total Cartons').getByRole('button').first()).toBeVisible();
   });
 
   // Issue #21: DPCI is edited as three separate Dept/Class/Item fields.

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { hardwareScan, tapKeys } from './helpers';
+import { dismissPanel, hardwareScan, tapKeys } from './helpers';
 
 // See ela.spec.ts — same aisle/storage-code/size combination, chosen because it's
 // overwhelmingly likely to have at least one empty CR-sized location under the current seed.
@@ -28,14 +28,16 @@ test.describe('ELZ — Empty Locations by Zone', () => {
     await page.goto('/empty/zone');
   });
 
-  test('shows an idle prompt until both Aisle and Storage Code are filled', async ({ page }) => {
-    await expect(page.getByText('Enter an Aisle and Storage Code to view the zone map')).toBeVisible();
+  // Storage Code is an optional narrowing filter now — Aisle alone renders the zone map.
+  test('shows an idle prompt until an Aisle is entered, then the map', async ({ page }) => {
+    await expect(page.getByText('Enter an Aisle to view the zone map')).toBeVisible();
 
     await page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button').click();
     await hardwareScan(page, LIVE_AISLE);
 
-    // Aisle alone is not enough — Storage Code is still required.
-    await expect(page.getByText('Enter an Aisle and Storage Code to view the zone map')).toBeVisible();
+    await expect(page.getByText('Enter an Aisle to view the zone map')).not.toBeVisible();
+    // The zone map fetch can take a few seconds under a full-suite run's DB load.
+    await expect(page.getByText('Zone 1', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   });
 
   test('an aisle with no location records shows the not-found message', async ({ page }) => {
@@ -54,26 +56,30 @@ test.describe('ELZ — Empty Locations by Zone', () => {
     await hardwareScan(page, LIVE_STORAGE);
 
     // Grid: 4 zone headers (each spanning an Odd+Even pair) plus the Odd/Even sub-headers.
-    await expect(page.getByText('Zone 1', { exact: true })).toBeVisible();
-    await expect(page.getByText('Zone 4', { exact: true })).toBeVisible();
+    // "Zone N" appears in both the grid header and the Zone Summary panel.
+    await expect(page.getByText('Zone 1', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Zone 4', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Odd', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Even', { exact: true }).first()).toBeVisible();
 
     // Zone summary panel: at least Zone 1 should render with a StorageCode-Size breakdown line.
     await expect(page.getByText('Zone Summary')).toBeVisible();
-    await expect(page.getByText('Zone 1')).toBeVisible();
+    await expect(page.getByText('Zone 1', { exact: true })).toHaveCount(2);
   });
 
-  test('"Stage Aisle" navigates to the (not yet built) STG screen with the aisle carried over', async ({ page }) => {
+  test('"Stage Aisle" navigates to the STG screen with the aisle carried over', async ({ page }) => {
     await page.locator('div.flex.flex-col.gap-1', { hasText: 'Aisle' }).getByRole('button').click();
     await hardwareScan(page, LIVE_AISLE);
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Storage Code' }).getByRole('button').first().click();
-    await hardwareScan(page, LIVE_STORAGE);
+    // Aisle alone enables Stage Aisle (Storage Code is optional, and entering it leaves the
+    // on-screen keyboard covering the button). The Aisle field keeps the numpad open.
+    await dismissPanel(page);
 
     await page.getByRole('button', { name: 'Stage Aisle' }).click();
 
     await expect(page).toHaveURL('/stage');
-    await expect(page.getByText('STG', { exact: true })).toBeVisible();
+    // STG is built now; its header reads "Stage Aisle" and Master Control carries the aisle.
+    await expect(page.getByRole('heading', { name: 'Stage Aisle' }).or(page.getByText('Stage Aisle', { exact: true }).first())).toBeVisible();
+    await expect(page.getByText(LIVE_AISLE, { exact: true }).first()).toBeVisible();
   });
 
   test('the Stage Aisle button is disabled until an aisle has been entered', async ({ page }) => {

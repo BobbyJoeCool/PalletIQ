@@ -30,6 +30,14 @@ async function pickDestination(page: Page, statusLabel: 'Empty' | 'Stored') {
   const statusDropdown = page.locator('div.relative.inline-flex', { hasText: 'Status' });
   await statusDropdown.getByRole('button').first().click();
   await statusDropdown.getByRole('button', { name: statusLabel, exact: true }).click();
+  // Exclude held and contracted locations: the reseed now seeds both, and either one
+  // raises MNP's hold/contraction gate before the put this test is about (#197).
+  const holdDropdown = page.locator('div.relative.inline-flex', { hasText: 'Hold' }).first();
+  await holdDropdown.getByRole('button').first().click();
+  await holdDropdown.getByRole('button', { name: 'Not Held', exact: true }).click();
+  const contractionDropdown = page.locator('div.relative.inline-flex', { hasText: 'Contraction' });
+  await contractionDropdown.getByRole('button').first().click();
+  await contractionDropdown.getByRole('button', { name: 'Not Contracted', exact: true }).click();
   await page.getByRole('button', { name: 'Find', exact: true }).click();
 }
 
@@ -131,6 +139,9 @@ test.describe('MNP — Manual Put flow', () => {
     await pickDestination(page, 'Stored');
     await confirmLevel(page);
 
+    // v1.6.3: an occupied destination first raises the dual-occupancy gate; Proceed
+    // Anyway completes the put, which then reports the occupancy as a warning.
+    await page.getByRole('button', { name: 'Proceed Anyway' }).click();
     await expect(page.getByText(/\(was occupied\)$/)).toBeVisible();
     expect(await messageBarTone(page)).toBe('warning');
     // Non-blocking: put still completed and the screen reset, unlike the blocking level modal.
