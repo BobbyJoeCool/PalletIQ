@@ -504,3 +504,7 @@ Eight sample containers across the first 8 stored pallets, all destined for stor
 | PURGED | 1 | purgeDate set to yesterday |
 
 All containers use today's Julian date as `batchDate` (YYYYDDD format, e.g. `2026176`). Purge window is 7 days forward, except the PURGED row which is set to yesterday.
+
+## Aisle structure (Location Setup, #143)
+
+The seed builds one `Aisle` row, four `AisleZone` rows and one `AisleZoneSetting` per zone × side × level for every aisle, derived from the generated locations (the same derivation the `20261116130000_location_setup` migration runs on an existing database). Every seeded aisle is double-sided, starts at bin 1 and is `BACK_TO_FRONT`. Storage code `XO` (Not For Storage) exists but no seeded location uses it.

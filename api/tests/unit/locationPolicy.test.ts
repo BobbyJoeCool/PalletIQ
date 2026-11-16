@@ -25,8 +25,13 @@ test('stageable / open capacity status rules', () => {
   assert.equal(countsAsOpenCapacity(loc({ status: 'EMPTY', holdCategory: 'HOLD_IN' })), false);
 });
 
-test('whereAcceptsPut matches the old contraction:false + NOT_HELD_FILTER shape', () => {
-  assert.deepEqual(whereAcceptsPut(), { contraction: false, OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }] });
+test('whereAcceptsPut: not contracted, not inbound-held, not deleted, not Not For Storage (#143)', () => {
+  assert.deepEqual(whereAcceptsPut(), {
+    contraction: false,
+    deleted: false,
+    NOT: { storageCode: 'XO' },
+    OR: [{ holdCategory: null }, { holdCategory: 'HOLD_OUT' }],
+  });
 });
 
 test('putDecision (MNP manual confirm) gate order and codes', () => {

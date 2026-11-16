@@ -520,6 +520,12 @@ export function MNPPage() {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
 
+      if (code === 'NOT_FOR_STORAGE') {
+        // Carved out in desktop Location Setup (#143) — no freight of any kind, no override.
+        showError('This location is Not For Storage — put not allowed');
+        cancelToDestinationEntry();
+        return;
+      }
       if (code === 'CONTRACTED') {
         showError('This location is on contraction — put not allowed');
         cancelToDestinationEntry();

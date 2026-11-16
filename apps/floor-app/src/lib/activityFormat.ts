@@ -51,6 +51,14 @@ const ACTIVITY_TAGS: Record<string, string> = {
   REINSTATE: 'PAR',
   CONSOLID: 'PUT',
   MNP_CANCEL: 'PUT',
+  // Desktop Location Setup (#143) — logged against an aisle or one location.
+  AISLE_ADD: 'LSE',
+  AISLE_DEL: 'LSE',
+  ZONE_SET: 'LSE',
+  CONTRACT: 'LSE',
+  UNCONTRACT: 'LSE',
+  XO_SET: 'LSE',
+  XO_CLEAR: 'LSE',
 };
 
 /** Falls back to the raw actionType (truncated to fit the same visual slot) if not in ACTIVITY_TAGS. */

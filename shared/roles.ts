@@ -48,3 +48,17 @@ export const DESKTOP_MIN_ROLE: Role = 'LEAD';
 export function isDesktopEligible(role: Role, departmentId: string): boolean {
   return hasMinRole(role, DESKTOP_MIN_ROLE) || departmentId === ICQA_DEPARTMENT_ID;
 }
+
+/**
+ * Decides whether a user holds OM-level authority on the desktop app: MANAGER (OM) or
+ * ADMIN, or anyone whose home department is ICQA. Used where the desktop design gives a
+ * power to "OM, ICQA" but not LWW — creating/deleting aisles and removing a Not For
+ * Storage carve-out (Location Setup, #143).
+ *
+ * @param role - the user's `User.role` value
+ * @param departmentId - the user's home `User.departmentId`
+ * @returns true if the user has OM-level authority
+ */
+export function hasOmOrIcqaAuthority(role: Role, departmentId: string): boolean {
+  return hasMinRole(role, 'MANAGER') || departmentId === ICQA_DEPARTMENT_ID;
+}

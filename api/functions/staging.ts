@@ -6,12 +6,20 @@ import { requireAuth, requireRole } from '../lib/permissions.js';
 import { writeLog } from '../lib/activityLog.js';
 import { parseFullLocationBarcode, formatLocationId } from '../lib/locationParser.js';
 import { findNextStagingLocation } from '../lib/stagingLogic.js';
+import { NOT_FOR_STORAGE_CODE } from '../lib/locationPolicy.js';
 import { stageLocation, unstageAisleType } from '../lib/logicGate.js';
 import { staged as stagedEvent, restaged as restagedEvent } from '../lib/activityEvents.js';
 
-/** Throws 404 NOT_FOUND unless at least one Location row exists for the given aisle. */
+/**
+ * Narrows an aisle's EMPTY/STAGED summary to locations that can actually hold freight:
+ * not deleted and not carved out to Not For Storage (Location Setup, #143) — a carve-out
+ * is never stageable, so counting it as open would overstate the aisle.
+ */
+const STAGEABLE_SUMMARY_WHERE = { deleted: false, NOT: { storageCode: NOT_FOR_STORAGE_CODE } };
+
+/** Throws 404 NOT_FOUND unless at least one (non-deleted) Location row exists for the given aisle. */
 async function requireAisleExists(aisle: number): Promise<void> {
-  const exists = await prisma.location.findFirst({ where: { aisle } });
+  const exists = await prisma.location.findFirst({ where: { aisle, deleted: false } });
   if (!exists) throw Object.assign(new Error('NOT_FOUND'), { status: 404 });
 }
 
@@ -138,17 +146,17 @@ async function getStagedTypes(req: HttpRequest): Promise<unknown> {
   const [stagedRows, emptyRows, storedRows] = await Promise.all([
     prisma.location.groupBy({
       by: ['storageCode', 'size'],
-      where: { aisle, status: 'STAGED' },
+      where: { aisle, status: 'STAGED', ...STAGEABLE_SUMMARY_WHERE },
       _count: { _all: true },
     }),
     prisma.location.groupBy({
       by: ['storageCode', 'size'],
-      where: { aisle, status: 'EMPTY' },
+      where: { aisle, status: 'EMPTY', ...STAGEABLE_SUMMARY_WHERE },
       _count: { _all: true },
     }),
     prisma.location.groupBy({
       by: ['storageCode', 'size'],
-      where: { aisle, status: 'STORED' },
+      where: { aisle, status: 'STORED', deleted: false },
       _count: { _all: true },
     }),
   ]);
