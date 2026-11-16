@@ -4,6 +4,7 @@
 
 import prisma from './prisma.js';
 import { writeScanLog } from './activityLog.js';
+import { goalsInForce } from './prodGoals.js';
 import {
   WAREHOUSE_FUNCTIONS, assignableCodes, breakWindows, isShiftCode, localMidnight, requiredHeadcount, runsOn,
   shiftHours, shiftProductiveHours, shiftWindow, shiftsForDate, simulatedSchedule, simulatedTarget, validateTimeline, volumeUnit,
@@ -72,7 +73,7 @@ export async function loadRoster(
   const functions = functionsFor(viewer.departmentId);
 
   const [goals, targets, homeWorkers, assigned] = await Promise.all([
-    prisma.prodGoal.findMany(),
+    goalsInForce(isoDate),
     prisma.dailyPlanTarget.findMany({ where: { departmentId: viewer.departmentId, date, shiftCode: shift } }),
     prisma.user.findMany({
       where: { departmentId: viewer.departmentId, homeShiftCode: shift, role: { in: ROSTER_ROLES } },
@@ -89,11 +90,10 @@ export async function loadRoster(
     }),
   ]);
 
-  const goalBy = new Map(goals.map((g) => [g.functionCode, g]));
   const targetBy = new Map(targets.map((t) => [t.functionCode, t]));
   const plan: RosterPlanLine[] = functions.map((f) => {
-    const goal = goalBy.get(f.code);
-    const rate = goal ? Number(goal.rate) : null;
+    const goal = goals.get(f.code);
+    const rate = goal ? goal.rate : null;
     const entered = targetBy.get(f.code);
     const target = entered ? entered.targetVolume : simulatedTarget(f.code, shift, isoDate, rate);
     return {

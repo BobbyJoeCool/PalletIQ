@@ -1,8 +1,9 @@
 # PalletIQ Desktop
 
 **Status:** Electron shell, zNumber + password login, the Embedded Floor App (#141), the
-Audit Tool (#148), Location Setup (#143) and Job/Function Assignment (#145) are built. The
-four remaining Manager screens are stubbed as "Coming Soon".
+Audit Tool (#148), Location Setup (#143), Job/Function Assignment (#145) and Prod Goal /
+Ramping / Daily Plan (#146) are built. The three remaining Manager screens are stubbed as
+"Coming Soon".
 
 The Manager-facing desktop application: a web app bundled with Electron, covering the
 DESKTOP-bucket screens designed in the 2026-07-25 design session (DPCI Setup Edit,
@@ -90,9 +91,16 @@ click a section to edit it, double-click to split it. Downtime and Time Off take
 LWW, OM and Admin only. Sign in as a Roman lead (e.g. `z930l01` / `Desktop1234`, B1) to
 see a full roster. Spec: `../../Documentation/ScreenSpecs/Desktop-Job-Assignment.md`.
 
+## Prod Goal / Ramping / Daily Plan
+
+Daily Plan targets per function for a date and shift (with the Daily Drop, staffing and
+other departments as reference), ramping overrides, and prod goal rates with dated
+history. LWW, OM and Admin; goal rates are OM / Admin only. Spec:
+`../../Documentation/ScreenSpecs/Desktop-Prod-Goal-Daily-Plan.md`.
+
 ## Not yet done
 
-- Four Manager screens (#142, #144, #146, #147) do not exist yet; each nav entry opens a
+- Three Manager screens (#142, #144, #147) do not exist yet; each nav entry opens a
   "Coming Soon" page.
 - None of the ~15 new Prisma models these screens need have been added to
   `../../api/prisma/schema.prisma` yet.

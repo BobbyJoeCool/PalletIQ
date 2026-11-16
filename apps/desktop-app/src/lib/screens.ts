@@ -50,7 +50,7 @@ export const DESKTOP_SCREENS: readonly DesktopScreen[] = [
     title: 'Prod Goal / Ramping / Daily Plan',
     issue: 146,
     summary: 'Prod-goal rates, per-worker ramping overrides, and Daily Plan targets.',
-    built: false,
+    built: true,
   },
   {
     id: 'team-prod-summary',

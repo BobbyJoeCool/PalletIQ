@@ -275,6 +275,7 @@ model User {
   // Cross-training (issue #84) — extra departments beyond the required home one above.
   userDepartments UserDepartment[]
 
+  prodGoalsSet        ProdGoal[]        @relation("ProdGoalSetBy")
   rampingOverrides    RampingOverride[] @relation("RampingWorker")
   rampingOverridesSet RampingOverride[] @relation("RampingSetBy")
 
@@ -499,14 +500,24 @@ model Printer {
   active Boolean @default(true)
 }
 
+/// A function's prod goal rate from its effective date until the next row for that
+/// function (dated history — Prod Goal / Ramping / Daily Plan, #146). The rate in force on
+/// a date is the row with the latest effectiveDate on or before it (shared/prodPlan.ts).
 model ProdGoal {
-  functionCode  String   @id @db.VarChar(3)
+  id            Int      @id @default(autoincrement())
+  functionCode  String   @db.VarChar(3)
   rate          Decimal  @db.Decimal(10, 2)
-  // e.g. "cartons/hr", "pallets/hr", "puts/hr", "locations/hr"
   unit          String   @db.VarChar(20)
   rate2         Decimal? @db.Decimal(10, 2)
   unit2         String?  @db.VarChar(20)
   effectiveDate DateTime @db.Date
+  /// Who set it; null for seeded rows.
+  setByZ        String?  @db.VarChar(7)
+  createdAt     DateTime @default(now())
+
+  setBy User? @relation("ProdGoalSetBy", fields: [setByZ], references: [zNumber], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([functionCode, effectiveDate])
 }
 
 // ─── CII / Breakpack models (#136/#196, #194) ───────────────────────────────

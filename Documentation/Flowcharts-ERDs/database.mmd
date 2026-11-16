@@ -301,12 +301,15 @@ erDiagram
     }
 
     ProdGoal {
-        string functionCode PK "VarChar(3)"
+        int id PK "autoincrement — dated history (#146); unique per functionCode + effectiveDate"
+        string functionCode "VarChar(3)"
         decimal rate "Decimal(10,2)"
         string unit "VarChar(20), e.g. cartons/hr"
         decimal rate2 "nullable, Decimal(10,2) — second blended component (Bulk/Breakpack only)"
         string unit2 "nullable, VarChar(20) — second blended component's unit"
-        date effectiveDate "when this rate took effect"
+        date effectiveDate "rate applies from this date until the function's next row"
+        string setByZ FK "nullable, VarChar(7) → User — null for seeded rows"
+        datetime createdAt
     }
 
     Printer {
@@ -360,6 +363,7 @@ erDiagram
     DailyPlanTarget }o--|| Department : "departmentId"
     RampingOverride }o--|| User : "workerZ"
     RampingOverride }o--|| User : "setByZ"
+    ProdGoal }o--o| User : "setByZ (nullable)"
 
     %% ============================================================
     %% CII (Container ID Inquiry) MODELS — v1.8.9
