@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useFooterDemo } from '../../context/FooterDemoContext';
 import { useNumpad } from '../../context/NumpadContext';
+import { isEmbeddedInDesktop } from '../../lib/embedHost';
 import { getBatchDate, getDisplayDate, getDisplayTime } from '../../lib/julianDate';
 
 /**
@@ -18,6 +19,9 @@ export function Footer() {
   const { activePanel, showNumpad, showKeyboard, hidePanel } = useNumpad();
   const { demoSlot } = useFooterDemo();
   const [now, setNow] = useState(new Date());
+  // Embedded in the desktop app (#141) a physical keyboard replaces the on-screen panels,
+  // so their toggles are not offered.
+  const embedded = isEmbeddedInDesktop();
 
   // Update the clock every 15 seconds.
   useEffect(() => {
@@ -44,14 +48,18 @@ export function Footer() {
   return (
     <footer className="shrink-0 flex items-center px-6 h-[54px] bg-black border-t border-[#1C1C1C]">
       <div className="flex items-center gap-2 shrink-0">
-        <button type="button" onClick={toggleNumpad} className={numpadActive ? activeBtn : inactiveBtn}>
-          <span className="font-data text-[13px] font-semibold tracking-wider">123</span>
-          <span>Keypad</span>
-        </button>
-        <button type="button" onClick={toggleKeyboard} className={keyboardActive ? activeBtn : inactiveBtn}>
-          <span className="font-data text-[13px] font-semibold tracking-wider">ABC</span>
-          <span>Keyboard</span>
-        </button>
+        {!embedded && (
+          <>
+            <button type="button" onClick={toggleNumpad} className={numpadActive ? activeBtn : inactiveBtn}>
+              <span className="font-data text-[13px] font-semibold tracking-wider">123</span>
+              <span>Keypad</span>
+            </button>
+            <button type="button" onClick={toggleKeyboard} className={keyboardActive ? activeBtn : inactiveBtn}>
+              <span className="font-data text-[13px] font-semibold tracking-wider">ABC</span>
+              <span>Keyboard</span>
+            </button>
+          </>
+        )}
       </div>
 
       <div className="flex-1 flex items-center justify-center gap-2">

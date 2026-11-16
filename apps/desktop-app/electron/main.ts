@@ -33,6 +33,21 @@ const APP_ORIGIN = `${APP_SCHEME}://palletiq`;
  */
 const API_BASE_URL = (process.env.PALLETIQ_API_URL ?? 'http://localhost:7071').replace(/\/+$/, '');
 
+/**
+ * Where the floor app (apps/floor-app) is served from, for the Embedded Floor App window
+ * (#141). Defaults to the floor app's own Vite dev server; a packaged build points this
+ * at wherever the floor app is deployed. That server proxies the floor app's `/api/*`
+ * calls itself, so nothing here forwards them.
+ */
+const FLOOR_APP_URL = (process.env.PALLETIQ_FLOOR_APP_URL ?? 'http://localhost:5173').replace(
+  /\/+$/,
+  ''
+);
+const FLOOR_APP_ORIGIN = new URL(FLOOR_APP_URL).origin;
+
+/** Argument the main window's preload reads the floor-app URL from (see preload.cts). */
+const FLOOR_APP_URL_ARG = '--palletiq-floor-app-url=';
+
 /** Built renderer output (`vite build`), a sibling of this file's own `dist-electron/`. */
 const RENDERER_DIST = join(import.meta.dirname, '..', 'dist');
 
@@ -40,7 +55,8 @@ const RENDERER_DIST = join(import.meta.dirname, '..', 'dist');
  * Content-Security-Policy applied to the production renderer's HTML. Scripts are
  * same-origin only. Styles allow inline (React `style` props) and Google Fonts, which
  * src/index.css imports for IBM Plex. `connect-src 'self'` holds because API calls go
- * to this same `app://` origin and are forwarded from the main process.
+ * to this same `app://` origin and are forwarded from the main process. `frame-src`
+ * admits the one embedded origin: the floor app, inside its webview.
  */
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -49,6 +65,7 @@ const CONTENT_SECURITY_POLICY = [
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data:",
   "connect-src 'self'",
+  `frame-src ${FLOOR_APP_ORIGIN}`,
 ].join('; ');
 
 const isDev = process.argv.includes('--dev');
@@ -142,7 +159,23 @@ function createMainWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // The Embedded Floor App is a <webview>; what may attach is restricted below.
+      webviewTag: true,
+      additionalArguments: [`${FLOOR_APP_URL_ARG}${FLOOR_APP_URL}`],
     },
+  });
+
+  // Only the floor app may be embedded, and always with this app's own guest preload
+  // and locked-down settings — whatever attributes the <webview> tag itself carried.
+  window.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (!isFloorAppUrl(params.src)) {
+      event.preventDefault();
+      return;
+    }
+    webPreferences.preload = join(import.meta.dirname, 'floorAppPreload.cjs');
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
   });
 
   // The app never opens child windows of its own; an http(s) link goes to the system
@@ -159,6 +192,28 @@ function createMainWindow(): void {
 
   void window.loadURL(`${rendererOrigin}/`);
 }
+
+/**
+ * @param url - a URL a webview wants to load or navigate to
+ * @returns true if it is on the floor app's origin
+ */
+function isFloorAppUrl(url: string): boolean {
+  try {
+    return new URL(url).origin === FLOOR_APP_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+// Keep the embedded floor app on its own origin and without child windows, the same
+// rules the main window follows.
+app.on('web-contents-created', (_event, contents) => {
+  if (contents.getType() !== 'webview') return;
+  contents.on('will-navigate', (event, url) => {
+    if (!isFloorAppUrl(url)) event.preventDefault();
+  });
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+});
 
 void app.whenReady().then(() => {
   if (!isDev) registerAppProtocol();

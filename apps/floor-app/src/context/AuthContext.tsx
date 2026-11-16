@@ -8,6 +8,7 @@ import {
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { AuthUser } from '../lib/api';
+import { isEmbeddedInDesktop } from '../lib/embedHost';
 
 const STORAGE_KEY = 'palletiq_token';
 const STORAGE_USER_KEY = 'palletiq_user';
@@ -33,14 +34,24 @@ const AuthContext = createContext<AuthContextValue | null>(null);
  *     Every page load starts at the login screen, matching physical warehouse kiosk behavior.
  *   - Development: restores a valid non-expired token from localStorage to avoid
  *     re-logging in on every hot reload.
+ *
+ * Embedded in the desktop app (Embedded Floor App, #141) three things differ, because the
+ * session there belongs to the desktop app and is handed over by EmbeddedSessionGate:
+ *   - nothing is restored from localStorage, in any build — a leftover floor session
+ *     could belong to a different user than the one signed into the desktop app;
+ *   - there is no idle timeout — the embedded window is meant to keep its place while
+ *     hidden, and the desktop app's own session expiry ends it;
+ *   - logout returns to the main menu (EmbeddedSessionGate signs straight back in)
+ *     instead of the login screen.
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const lastActivityRef = useRef(Date.now());
+  const embedded = isEmbeddedInDesktop();
 
   const [token, setToken] = useState<string | null>(() => {
-    if (!import.meta.env.DEV) {
-      // Production: always start at login — clear any leftover dev session.
+    if (!import.meta.env.DEV || embedded) {
+      // Production (and embedded, any build): never restore — clear any leftover session.
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(STORAGE_USER_KEY);
       return null;
@@ -63,7 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return stored;
   });
   const [user, setUser] = useState<AuthUser | null>(() => {
-    if (!import.meta.env.DEV) return null;
+    if (!import.meta.env.DEV || embedded) return null;
     const stored = localStorage.getItem(STORAGE_USER_KEY);
     return stored ? (JSON.parse(stored) as AuthUser) : null;
   });
@@ -77,8 +88,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem(STORAGE_USER_KEY);
     setToken(null);
     setUser(null);
-    navigate('/login');
-  }, [navigate]);
+    navigate(embedded ? '/' : '/login');
+  }, [navigate, embedded]);
 
   /**
    * Stores token and user in state (and localStorage in dev), and resets the idle
@@ -95,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Idle-timeout effect: attaches event listeners that bump lastActivityRef on any user input,
   // then polls every 30 s to check whether the session has been idle for > 15 minutes.
   useEffect(() => {
-    if (!token) return;
+    if (!token || embedded) return;
 
     /** Records the current time as the last user-activity timestamp. */
     const bump = () => { lastActivityRef.current = Date.now(); };
@@ -113,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('touchstart', bump);
       clearInterval(timer);
     };
-  }, [token, logout]);
+  }, [token, logout, embedded]);
 
   return (
     <AuthContext.Provider value={{ token, user, login, logout }}>

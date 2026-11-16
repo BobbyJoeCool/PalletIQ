@@ -7,6 +7,8 @@ declare const __APP_VERSION__: string;
 interface PalletiqDesktopBridge {
   platform: string;
   electronVersion: string;
+  /** Base URL the Embedded Floor App (#141) loads the floor app from. */
+  floorAppUrl: string;
 }
 
 interface Window {

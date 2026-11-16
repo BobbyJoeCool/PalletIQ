@@ -57,3 +57,36 @@ html, body, #root {
   color: var(--text-primary);
   font-family: 'IBM Plex Sans', sans-serif;
 }
+
+/* Printing (Audit Tool, #148): paper is light, and a page is as tall as its content.
+   Redefining the tokens flips every component at once; the shell's fixed-height,
+   scroll-inside-regions layout is released so nothing is clipped to one screenful.
+   Components hide their own non-printing parts with Tailwind's `print:` variants. */
+@media print {
+  :root {
+    --surface-0: #FFFFFF;
+    --surface-1: #FFFFFF;
+    --surface-2: #FFFFFF;
+    --surface-3: #FFFFFF;
+    --surface-4: #FFFFFF;
+    --surface-5: #FFFFFF;
+    --surface-6: #FFFFFF;
+    --border-subtle: #CCCCCC;
+    --border-default: #BBBBBB;
+    --border-strong: #999999;
+    --text-primary: #000000;
+    --text-secondary: #111111;
+    --text-tertiary: #222222;
+    --text-muted: #444444;
+    --info: #000000;
+    --warning: #000000;
+    --warning-bg: transparent;
+    --warning-border: #999999;
+    color-scheme: light;
+  }
+
+  html, body, #root {
+    height: auto;
+    overflow: visible;
+  }
+}
