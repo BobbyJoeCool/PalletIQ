@@ -144,6 +144,20 @@ async function getWorkstations(req: HttpRequest): Promise<unknown> {
 }
 
 /**
+ * Active label printers (#168), for the shared Printer field's options and validation.
+ * Inactive printers are omitted, so the field rejects them. Seed-only reference data.
+ * @returns `{ code, name }[]` ordered by code
+ */
+async function getPrinters(req: HttpRequest): Promise<unknown> {
+  await requireAuth(req);
+  return prisma.printer.findMany({
+    where: { active: true },
+    select: { code: true, name: true },
+    orderBy: { code: 'asc' },
+  });
+}
+
+/**
  * Empty Locations by Aisle (ELA). Returns, per aisle, the count of EMPTY and STAGED
  * locations for every size present in that aisle at the given Storage Code — the GPMer's
  * primary space-finding tool before bringing pallet stacks into the building. See
@@ -881,6 +895,13 @@ app.http('getSizes', {
   authLevel: 'anonymous',
   route: 'sizes',
   handler: withHandler(getSizes),
+});
+
+app.http('getPrinters', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'printers',
+  handler: withHandler(getPrinters),
 });
 
 app.http('getWorkstations', {

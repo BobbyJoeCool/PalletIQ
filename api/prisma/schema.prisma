@@ -457,6 +457,15 @@ model FunctionAssignment {
 // Bulk and Breakpack are blended (two independently-rated components summed as
 // "hours of work" — see IRP.md's Blended Goal Calculation); rate2/unit2 hold the
 // second component and are null for every single-rate function.
+// A label printer (#168). Seed-only management, like ProdGoal. The 4-character code encodes
+// type/area by prefix (A### aisle, R### door, OCL# label hut, IM## IM cage, ...); that
+// convention is a client-side autocomplete hint only, not validated here.
+model Printer {
+  code   String  @id @db.VarChar(4)
+  name   String  @db.VarChar(60)
+  active Boolean @default(true)
+}
+
 model ProdGoal {
   functionCode  String   @id @db.VarChar(3)
   rate          Decimal  @db.Decimal(10, 2)
