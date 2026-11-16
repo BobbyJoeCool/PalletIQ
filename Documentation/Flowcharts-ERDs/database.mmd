@@ -179,6 +179,7 @@ erDiagram
         string firstName "VarChar(50)"
         string lastName "VarChar(50)"
         string pinHash "VarChar(60)"
+        string passwordHash "VarChar(255), nullable — desktop-app login only"
         string role "VarChar(10), Role values"
         string departmentId FK "VarChar(3) → Department"
     }

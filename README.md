@@ -24,7 +24,7 @@ This repository is a **monorepo of independently-versioned pieces**, each with i
 |---|---|---|
 | [`api/`](api/) | Shared backend — Express + Prisma/MySQL, used by both apps below | [`api/CHANGELOG.md`](api/CHANGELOG.md) |
 | [`apps/floor-app/`](apps/floor-app/) | The original PalletIQ app — runs on the SYMBOL tablet | [`apps/floor-app/README.md`](apps/floor-app/README.md), [`apps/floor-app/CHANGELOG.md`](apps/floor-app/CHANGELOG.md) |
-| [`apps/desktop-app/`](apps/desktop-app/) | Manager-facing desktop app (Electron), covering DPCI/Location Setup, Job/Function Assignment, Team Prod Summary, and more — **scaffold only so far** | [`apps/desktop-app/README.md`](apps/desktop-app/README.md), [`apps/desktop-app/CHANGELOG.md`](apps/desktop-app/CHANGELOG.md) |
+| [`apps/desktop-app/`](apps/desktop-app/) | Manager-facing desktop app (Electron), covering DPCI/Location Setup, Job/Function Assignment, Team Prod Summary, and more — **bootstrap only so far: Electron shell + password login, no Manager screens yet** | [`apps/desktop-app/README.md`](apps/desktop-app/README.md), [`apps/desktop-app/CHANGELOG.md`](apps/desktop-app/CHANGELOG.md) |
 
 `shared/` (repo root) holds TypeScript types and constants imported by all three — a `Pallet` or a `Location` is defined once, so a data-shape change is a compile error everywhere it's used, not a runtime surprise.
 
@@ -45,7 +45,7 @@ Each piece installs and runs independently from its own folder:
 ```
 cd apps/floor-app && npm install && npm run dev     # floor app (Vite dev server)
 cd api && npm install && npm start                   # backend (Express, auto-restarts on save)
-cd apps/desktop-app                                  # desktop app — scaffold only, nothing to run yet
+cd apps/desktop-app && npm install && npm run dev  # desktop app (Electron + Vite on :5174; needs the backend running)
 ```
 
 See each folder's own `README.md`/`package.json` for the full set of scripts.

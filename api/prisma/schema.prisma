@@ -235,6 +235,10 @@ model User {
   firstName    String @db.VarChar(50)
   lastName     String @db.VarChar(50)
   pinHash      String @db.VarChar(60)
+  // Desktop-app password (bcrypt). Null for anyone without desktop access — only set,
+  // by an admin, for desktop-eligible users (see shared/roles.ts isDesktopEligible).
+  // Same identity as the tablet's zNumber+PIN login, just a second credential.
+  passwordHash String? @db.VarChar(255)
   role         String @db.VarChar(10)
   departmentId String @db.VarChar(3)
 

@@ -31,7 +31,7 @@ flowchart TD
     O -->|Not yet| N
     O -->|Yes — auto-submit| P[loginWithPin\nsrc/lib/api.ts — loginWithPin]
 
-    P --> Q[POST /api/auth/login\napi/functions/auth.ts — login\nverify zNumber + PIN hash\nissue 15-min JWT]
+    P --> Q[POST /api/auth/login\napi/functions/auth.ts — login\nverify zNumber + PIN hash\nissue 12-hour JWT]
 
     Q --> R{Valid?}
     R -->|INVALID_PIN| S[Error: Incorrect PIN\nMessageBar shows error\nPIN cleared]
@@ -43,7 +43,25 @@ flowchart TD
 
     U --> V[Navigate to /\nHomePage]
 
+    %% Desktop app (apps/desktop-app) — separate single-step password login
+    DA([Manager at desktop app]) --> DB[LoginPage\napps/desktop-app/src/pages/LoginPage.tsx\nzNumber + password form]
+    DB --> DC[POST /api/auth/desktop-login\napi/functions/auth.ts — desktopLogin]
+    DC --> DD{User found?}
+    DD -->|No — NOT_FOUND| DX[Error shown on form]
+    DD -->|Yes| DE{Desktop-eligible?\nLEAD+ or home dept IQA\nshared/roles.ts — isDesktopEligible}
+    DE -->|No — NO_DESKTOP_ACCESS| DX
+    DE -->|Yes| DF{Password set?}
+    DF -->|No — PASSWORD_NOT_SET| DX
+    DF -->|Yes| DG{Password matches hash?}
+    DG -->|No — INVALID_PASSWORD| DX
+    DG -->|Yes| DH[Returns 12-hour JWT + user\nAuthProvider stores session\nin localStorage]
+    DX --> DB
+    DH --> DI([Desktop shell\nHomePage])
+
     style A fill:#1a1a1a,stroke:#555,color:#fff
     style V fill:#003300,stroke:#006600,color:#fff
     style J fill:#330000,stroke:#660000,color:#ff8080
     style S fill:#330000,stroke:#660000,color:#ff8080
+    style DA fill:#1a1a1a,stroke:#555,color:#fff
+    style DI fill:#003300,stroke:#006600,color:#fff
+    style DX fill:#330000,stroke:#660000,color:#ff8080

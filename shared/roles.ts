@@ -25,3 +25,26 @@ export function hasMinRole(userRole: Role, minRole: Role): boolean {
 export function isRole(value: unknown): value is Role {
   return typeof value === 'string' && value in ROLE_RANK;
 }
+
+/** Home-department id that grants ICQA's elevated access regardless of the user's role. */
+export const ICQA_DEPARTMENT_ID = 'IQA';
+
+/** Lowest role that can sign into the Manager desktop app on rank alone. */
+export const DESKTOP_MIN_ROLE: Role = 'LEAD';
+
+/**
+ * Decides whether a user may sign into the Manager desktop app (apps/desktop-app).
+ * Eligible: LEAD (shown as LWW), MANAGER (shown as OM), ADMIN — or anyone whose home
+ * department is ICQA, since ICQA is a department rather than a role and carries
+ * elevated access whatever the individual's role is. WORKER/IM outside ICQA are
+ * tablet-only. Owned here so the API's desktop-login check and any desktop UI gating
+ * read one definition.
+ *
+ * @param role - the user's `User.role` value
+ * @param departmentId - the user's home `User.departmentId` (cross-training rows in
+ *   `UserDepartment` deliberately do not count)
+ * @returns true if the user may use the desktop app
+ */
+export function isDesktopEligible(role: Role, departmentId: string): boolean {
+  return hasMinRole(role, DESKTOP_MIN_ROLE) || departmentId === ICQA_DEPARTMENT_ID;
+}

@@ -2,9 +2,66 @@
   "name": "palletiq-desktop-app",
   "private": true,
   "version": "1.0.0",
-  "description": "PalletIQ Manager Desktop — Electron-bundled web app for DESKTOP-bucket screens (DPCI Setup Edit, Embedded Floor App, Hung Pallet/Location Resolution, Job/Function Assignment, Location Setup Edit, Prod Goal/Ramping/Daily Plan, Team Prod Summary, Universal Audit Tool). Shares ../../api and ../../shared with the floor-app; versioned and changelogged independently. See DevNotes/DesignPrompts/Desktop/ for the design docs this was scaffolded from, and DevNotes/Logs/Desktop/V1.0/version-1_0_0.md for what's been done so far.",
+  "description": "PalletIQ Manager Desktop \u2014 Electron-bundled web app for DESKTOP-bucket screens (DPCI Setup Edit, Embedded Floor App, Hung Pallet/Location Resolution, Job/Function Assignment, Location Setup Edit, Prod Goal/Ramping/Daily Plan, Team Prod Summary, Universal Audit Tool). Shares ../../api and ../../shared with the floor-app; versioned and changelogged independently. See DevNotes/DesignPrompts/Desktop/ for the design docs this was scaffolded from, and DevNotes/Logs/Desktop/V1.0/version-1_0_0.md for what's been done so far.",
   "type": "module",
-  "scripts": {},
+  "scripts": {
+    "dev": "concurrently -k -n vite,electron \"vite\" \"wait-on tcp:5174 && npm run electron:dev\"",
+    "dev:web": "vite",
+    "electron:compile": "tsc -p tsconfig.electron.json",
+    "electron:dev": "npm run electron:compile && electron . --dev",
+    "build": "tsc -b && vite build && npm run electron:compile",
+    "start": "npm run build && electron .",
+    "package": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "lint": "eslint ."
+  },
   "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.3.1",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^10.0.7",
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0",
+    "eslint": "^10.5.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.0",
+    "tailwindcss": "^4.3.1",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.61.0",
+    "vite": "^8.1.0",
+    "wait-on": "^9.5.1"
+  },
+  "main": "dist-electron/main.js",
+  "build": {
+    "appId": "com.palletiq.desktop",
+    "productName": "PalletIQ Desktop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.business"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
 }

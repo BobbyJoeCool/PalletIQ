@@ -1,7 +1,7 @@
 // Unit tests for the pure domain rules in shared/ (#217). No DB, no HTTP.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hasMinRole, isRole } from '../../../shared/roles.js';
+import { hasMinRole, isRole, isDesktopEligible } from '../../../shared/roles.js';
 import { sspPerCarton, isValidVcpSspRatio, exceedsSspCap } from '../../../shared/vcpSsp.js';
 import { classifyExpirationDate } from '../../../shared/expiration.js';
 import {
@@ -17,6 +17,17 @@ test('roles: rank inheritance and guard', () => {
   assert.equal(hasMinRole('MANAGER', 'LEAD'), true);
   assert.equal(isRole('LEAD'), true);
   assert.equal(isRole('OWNER'), false);
+});
+
+test('roles: desktop eligibility — LEAD and up, or ICQA home department', () => {
+  assert.equal(isDesktopEligible('ADMIN', 'WHS'), true);
+  assert.equal(isDesktopEligible('MANAGER', 'WHS'), true);
+  assert.equal(isDesktopEligible('LEAD', 'WHS'), true);
+  assert.equal(isDesktopEligible('IM', 'WHS'), false);
+  assert.equal(isDesktopEligible('WORKER', 'INB'), false);
+  // ICQA is a department, not a role — it grants access below LEAD too.
+  assert.equal(isDesktopEligible('WORKER', 'IQA'), true);
+  assert.equal(isDesktopEligible('IM', 'IQA'), true);
 });
 
 test('vcp/ssp: ratio and per-carton', () => {
