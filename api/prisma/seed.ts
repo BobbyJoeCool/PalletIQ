@@ -190,7 +190,7 @@ const PACKING_ZONES = [
 // IRP Prod Functions goal rates, straight from DevNotes/DesignPrompts/IRP.md's Prod
 // Functions table. BK/BKP have no real pull flow yet (permanently greyed in IRP this
 // version) but are seeded anyway so future editing is additive, not a re-architecture.
-const PROD_GOAL_EFFECTIVE_DATE = new Date('2026-01-01')
+const PROD_GOAL_EFFECTIVE_DATE = new Date('2026-01-01T00:00:00Z')
 // Label printers (#168) — seed-only, like ProdGoal. Same list as the add_printer migration.
 // RC02 is seeded inactive so the "inactive printer" path is exercisable.
 const PRINTERS = [

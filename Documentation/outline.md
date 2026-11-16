@@ -87,6 +87,8 @@ On opening the app, the user is always prompted to log in first — there is no 
 
 **Desktop Job/Function Assignment:** four fixed shifts (A1/A2 Sat–Mon, B1/B2 Tue–Fri, with break windows) are stored in `Shift`/`ShiftBreak`, and every user has a home shift. The roster for a date and shift lists the viewer's department's team members scheduled by a simulated myTime schedule (deterministic from worker and date). Each worker's shift is a timeline of sections in `FunctionAssignment`: a job function, Downtime (`DTM`, with a downtime reason) or time off (`OFF`, with an attendance code: VLE, VNS, COF, VAC, SCK, LOA, OTH). Plan targets come from `DailyPlanTarget` when an OM has entered one, otherwise from a simulated figure; ramping workers come from `RampingOverride`. LWW, OM and Admin only. See `Documentation/ScreenSpecs/Desktop-Job-Assignment.md`.
 
+**Desktop Prod Goal / Ramping / Daily Plan:** prod goal rates keep dated history — a change applies from a chosen date (today or later), and every reader (IRP, the roster's staffing math, simulated targets) uses the rate in force on the date in question. Only OM and Admin change goals. LWW, OM and Admin maintain ramping overrides (one per worker and function at a time, percent 1–99) and their department's Daily Plan targets per function, date and shift; the reference panels show a simulated company-wide Daily Drop, the department's staffing net of whole-shift roster Time Off, and other departments' net headcount and targets. See `Documentation/ScreenSpecs/Desktop-Prod-Goal-Daily-Plan.md`.
+
 ---
 
 ## Home Screen

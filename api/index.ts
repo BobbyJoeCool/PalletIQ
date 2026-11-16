@@ -21,6 +21,7 @@ import './functions/pullRequest.js';
 import './functions/audit.js';
 import './functions/aisles.js';
 import './functions/roster.js';
+import './functions/prodPlan.js';
 
 import { app } from './lib/functionsRuntime.js';
 

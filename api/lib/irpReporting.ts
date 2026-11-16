@@ -1,4 +1,6 @@
 import prisma from './prisma.js';
+import { goalsInForce } from './prodGoals.js';
+import { isoDateOf } from '../../shared/workforce.js';
 import { IRP_FUNCTION_CODES } from './activityEvents.js';
 
 /**
@@ -214,7 +216,7 @@ export async function getIndividualSummary(workerZ: string, now: Date = new Date
       where: { workerZ, date: dayStart },
       select: { functionCode: true, startTime: true, endTime: true },
     }),
-    prisma.prodGoal.findMany({ select: { functionCode: true, rate: true } }),
+    goalsInForce(isoDateOf(dayStart)), // rate in force today (#146: goals keep dated history)
     prisma.activityLog.findMany({
       where: {
         userId: workerZ,
@@ -226,7 +228,7 @@ export async function getIndividualSummary(workerZ: string, now: Date = new Date
     }),
   ]);
 
-  const goalByFunction = new Map(goals.map((g) => [g.functionCode, { rate: Number(g.rate) }]));
+  const goalByFunction = new Map([...goals].map(([code, g]) => [code, { rate: g.rate }]));
   const assignmentsByFunction = new Map<string, { startTime: Date; endTime: Date }[]>();
   for (const a of assignments) {
     const list = assignmentsByFunction.get(a.functionCode) ?? [];
@@ -296,7 +298,7 @@ export async function getIndividualHourly(workerZ: string, functionCode: string,
       where: { workerZ, functionCode, date: dayStart },
       select: { startTime: true, endTime: true },
     }),
-    prisma.prodGoal.findUnique({ where: { functionCode }, select: { rate: true } }),
+    goalsInForce(isoDateOf(dayStart)).then((goals) => goals.get(functionCode) ?? null),
     prisma.activityLog.findMany({
       where: { userId: workerZ, functionCode, timestamp: { gte: dayStart } },
       select: { timestamp: true, palletId: true, locationAisle: true, locationBin: true, locationLevel: true, details: true },
@@ -305,7 +307,7 @@ export async function getIndividualHourly(workerZ: string, functionCode: string,
   ]);
   if (assignments.length === 0) return [];
 
-  const goalRate = goal ? { rate: Number(goal.rate) } : null;
+  const goalRate = goal ? { rate: goal.rate } : null;
 
   const hourStarts = new Set<number>();
   for (const a of assignments) {

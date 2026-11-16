@@ -205,6 +205,9 @@ export interface Segment extends TimeSpan {
   reasonText: string | null;
 }
 
+/** Gaps shorter than this (ms) are rounding noise, not unassigned time. */
+export const ZERO_TIME_TOLERANCE = 1;
+
 /** Divider drags and typed times snap to this many minutes (decided 2026-11-16). */
 export const SNAP_MINUTES = 15;
 
