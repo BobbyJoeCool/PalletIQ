@@ -6,6 +6,7 @@ All notable changes to PalletIQ are documented here. Loosely follows [Keep a Cha
 
 - [Roadmap — Planned Versions](#roadmap--planned-versions)
 - [Unreleased — Reported Issues](#unreleased--reported-issues)
+- [1.11.1 — 2026-11-15](#1111--2026-11-15)
 - [1.11.0 — 2026-11-15](#1110--2026-11-15)
 - [1.10.0 — 2026-11-15](#1100--2026-11-15)
 - [1.9.1 — 2026-11-15](#191--2026-11-15)
@@ -162,6 +163,24 @@ No issues currently open in this category.
 ### Distant Future
 
 No issues currently open in this category.
+
+---
+
+## [1.11.1] — 2026-11-15
+
+E2E suite rewrite ([#197](https://github.com/BobbyJoeCool/PalletIQ/issues/197)). Test-only;
+no app or API changes.
+
+### 1.11.1 — Tests
+
+- **Status-matrix spec** (`tests/e2e/status-matrix.spec.ts`) — SDP pallet status × Storage
+  Code × Size, WLH hold filters, and PAR location status × hold × contraction, driven
+  through the real Demo Scanner filters with an expected outcome per combination.
+- **Stale suites rewritten** against the current UI (ELZ, activity-log, PII, WLH, SDP, MNP,
+  STG, PIP) and made robust to late-day reseed data (STG/SDP free stock via STG's restage
+  endpoint before running).
+- Full suite: **162 passed, 7 skipped** (combinations the seed can't supply), up from 129
+  passed / 19 failed.
 
 ---
 
