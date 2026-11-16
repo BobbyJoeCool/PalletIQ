@@ -206,7 +206,7 @@ export function DailyPlanSection() {
                 const effective = entered ?? l.simulatedTarget;
                 const need =
                   effective != null && l.rate != null && Number.isFinite(effective)
-                    ? requiredHeadcount(effective, l.rate, view.productiveHours)
+                    ? requiredHeadcount(effective, l.rate, view.shiftHours)
                     : null;
                 return (
                   <tr key={l.functionCode} className="border-t border-[var(--border-subtle)]">
