@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   applySplit, clearSpan, defaultShiftFor, fillGaps, gapsIn, overlaySegment, projectedVolume, requiredHeadcount,
   shiftProductiveHours, shiftWindow, shiftsForDate, simulatedSchedule, simulatedTarget, snapTime, staffedAt,
-  validateTimeline, assignableCodes, WAREHOUSE_FUNCTIONS, breakWindows, type Segment,
+  validateTimeline, assignableCodes, WAREHOUSE_FUNCTIONS, breakWindows, shiftHours, effectiveStaffedAt, type Segment,
 } from '../../../shared/workforce.js';
 
 const H = 3_600_000;
@@ -91,7 +91,11 @@ test('staffing: headcount at a time, required headcount, ramp-weighted projectio
   assert.equal(requiredHeadcount(1800, 180, 10), 1);
   assert.equal(requiredHeadcount(100, 0, 10), null);
   // No breaks: worker A 10h × 180 × 100% + worker B 5h × 180 × 50% = 1800 + 450.
-  assert.equal(projectedVolume([{ segments: timelines[0], rampPercent: 100 }, { segments: timelines[1], rampPercent: 50 }], 'CA', 180, []), 2250);
+  assert.equal(projectedVolume([{ segments: timelines[0], rampPercent: 100 }, { segments: timelines[1], rampPercent: 50 }], 'CA', 180), 2250);
+  // The user's example: 18,000 cartons at 180/hr on a 10-hour shift needs 10 people.
+  assert.equal(requiredHeadcount(18000, 180, shiftHours('B1', TUE)), 10);
+  // Ramping counts at its percent: two on CA, one ramping at 60% → 1.6 effective.
+  assert.equal(effectiveStaffedAt([{ segments: timelines[0], rampPercent: 100 }, { segments: timelines[1], rampPercent: 60 }], 'CA', b1.start + H), 1.6);
 });
 
 test('simulation: deterministic schedules and targets', () => {
@@ -108,7 +112,7 @@ test('simulation: deterministic schedules and targets', () => {
   assert.ok(short > 5 && short < 45, `short days: ${short}`);
   const target = simulatedTarget('CA', 'B1', TUE, 180);
   assert.equal(target, simulatedTarget('CA', 'B1', TUE, 180));
-  assert.ok(target! > 5 * 180 * 9.33 * 0.84 && target! < 5 * 180 * 9.34 * 1.16);
+  assert.ok(target! >= 5 * 180 * 10 * 0.85 && target! <= 5 * 180 * 10 * 1.15);
   assert.equal(simulatedTarget('GPM', 'B1', TUE, 30), null);
   assert.equal(simulatedTarget('CA', 'B1', TUE, null), null);
   assert.equal(snapTime(b1.start + 7 * 60_000), b1.start);

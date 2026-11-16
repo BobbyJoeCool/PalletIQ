@@ -6,7 +6,7 @@ import prisma from './prisma.js';
 import { writeScanLog } from './activityLog.js';
 import {
   WAREHOUSE_FUNCTIONS, assignableCodes, breakWindows, isShiftCode, localMidnight, requiredHeadcount, runsOn,
-  shiftProductiveHours, shiftWindow, shiftsForDate, simulatedSchedule, simulatedTarget, validateTimeline, volumeUnit,
+  shiftHours, shiftProductiveHours, shiftWindow, shiftsForDate, simulatedSchedule, simulatedTarget, validateTimeline, volumeUnit,
   type RosterPlanLine, type RosterView, type RosterWorker, type Segment, type ShiftCode, type TimeSpan,
 } from '../../shared/workforce.js';
 
@@ -67,6 +67,7 @@ export async function loadRoster(
   const window = shiftWindow(shift, isoDate);
   const breaks = breakWindows(shift, isoDate);
   const productiveHours = shiftProductiveHours(shift, isoDate);
+  const hours = shiftHours(shift, isoDate);
   const date = localMidnight(isoDate);
   const functions = functionsFor(viewer.departmentId);
 
@@ -102,7 +103,7 @@ export async function loadRoster(
       unit: entered?.unit ?? (goal ? volumeUnit(goal.unit) : null),
       target,
       simulated: !entered && target != null,
-      requiredHeadcount: target != null && rate != null ? requiredHeadcount(target, rate, productiveHours) : null,
+      requiredHeadcount: target != null && rate != null ? requiredHeadcount(target, rate, hours) : null,
     };
   });
 
@@ -128,7 +129,7 @@ export async function loadRoster(
     .sort((a, b) => a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
 
   return {
-    date: isoDate, shiftCode: shift, shiftsOnDate, window, breaks, productiveHours,
+    date: isoDate, shiftCode: shift, shiftsOnDate, window, breaks, productiveHours, shiftHours: hours,
     departmentId: viewer.departmentId, plan, workers,
   };
 }

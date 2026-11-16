@@ -1,5 +1,11 @@
 import type { RosterView, ShiftCode } from '@shared/workforce';
-import { DOWNTIME_CODE, TIME_OFF_CODE, projectedVolume, staffedAt } from '@shared/workforce';
+import {
+  DOWNTIME_CODE,
+  TIME_OFF_CODE,
+  effectiveStaffedAt,
+  projectedVolume,
+  staffedAt,
+} from '@shared/workforce';
 import { clockText, colorFor, functionLabel } from '../../lib/rosterFormat';
 import { ROSTER_ROW_COLUMNS } from './WorkerRow';
 
@@ -56,8 +62,7 @@ export function RosterHeader(props: RosterHeaderProps) {
         <div>
           <h1 className="text-2xl font-semibold">Job/Function Assignment</h1>
           <p className="text-xs text-[var(--text-muted)]">
-            {view.departmentId} · {view.workers.length} on the roster ·{' '}
-            {view.productiveHours.toFixed(2)} productive hours
+            {view.departmentId} · {view.workers.length} on the roster · {view.shiftHours} hour shift
           </p>
         </div>
         <div className="flex items-end gap-3">
@@ -109,21 +114,17 @@ export function RosterHeader(props: RosterHeaderProps) {
         {view.plan.map((line) => {
           const now = staffed.get(line.functionCode) ?? 0;
           const need = line.requiredHeadcount != null ? Math.ceil(line.requiredHeadcount) : null;
-          const projected =
-            line.rate != null
-              ? projectedVolume(
-                  view.workers.map((w) => ({
-                    segments: w.segments,
-                    rampPercent: rampFor(w.zNumber, line.functionCode),
-                  })),
-                  line.functionCode,
-                  line.rate,
-                  view.breaks
-                )
-              : null;
+          const team = view.workers.map((w) => ({
+            segments: w.segments,
+            rampPercent: rampFor(w.zNumber, line.functionCode),
+          }));
+          // Ramping workers count at their percent (decided 2026-11-16).
+          const effective = effectiveStaffedAt(team, line.functionCode, at);
+          const forecast =
+            line.rate != null ? projectedVolume(team, line.functionCode, line.rate) : null;
           const planPct =
-            projected != null && line.target ? Math.round((projected / line.target) * 100) : null;
-          const short = need != null && now < need;
+            forecast != null && line.target ? Math.round((forecast / line.target) * 100) : null;
+          const short = need != null && effective < need;
           return (
             <button
               key={line.functionCode}
@@ -145,17 +146,24 @@ export function RosterHeader(props: RosterHeaderProps) {
                 />
                 {line.functionCode}
               </span>
+              {need != null && (
+                <span className="font-data text-xs text-[var(--text-muted)]">needs {need}</span>
+              )}
               <span
                 className={[
                   'font-data text-xs',
                   short ? 'text-[var(--warning)]' : 'text-[var(--text-secondary)]',
                 ].join(' ')}
               >
-                {now}
-                {need != null ? ` / ${need}` : ''} staffed
+                staffed {now}
+                {effective !== now ? ` · ${effective.toFixed(1)} eff.` : ''}
               </span>
-              {planPct != null && (
-                <span className="text-[11px] text-[var(--text-muted)]">{planPct}% of plan</span>
+              {forecast != null && line.target != null && (
+                <span className="font-data text-[11px] text-[var(--text-muted)]">
+                  {Math.round(forecast).toLocaleString()} / {line.target.toLocaleString()}{' '}
+                  {line.unit ?? ''}
+                  {planPct != null ? ` (${planPct}%)` : ''}
+                </span>
               )}
             </button>
           );
