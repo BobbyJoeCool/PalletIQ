@@ -29,7 +29,10 @@
 
 1. Opens on today and the viewer's home shift (or that date's day shift if the home shift doesn't run that day). The date picker and the Day / Night toggle switch.
 2. **Sticky header** (stays visible while scrolling):
-   - one button per job function, showing headcount on it at the staffing time against required headcount (target ÷ (goal rate × productive hours), rounded up), and the plan projection as a % of target;
+   - one button per job function, showing:
+     - **needs** — target ÷ (goal rate × full shift hours), rounded up; 18,000 cartons at 180/hr on a 10-hour shift needs 10;
+     - **staffed** — headcount on it at the staffing time, with the **effective** headcount when anyone is ramping (a worker ramping at 60% counts as 0.6);
+     - **forecast** — volume the staffing will produce (each worker's hours × rate × ramping %) against the target, with the percent;
    - Downtime and Time Off;
    - the time axis.
 
@@ -82,4 +85,5 @@ The server re-checks every timeline: sections inside the shift, in order, not ov
 
 ## Change Log
 
+- **2026-11-16:** staffing forecast uses full shift hours (breaks built into the rate); ramping workers count at their percent in effective headcount and the forecast (direct instruction).
 - **2026-11-16:** first build (#145). Timeline layout, bulk assign with a conflict dialog, split dialog, attendance codes and Roman demo roster decided with the user.
