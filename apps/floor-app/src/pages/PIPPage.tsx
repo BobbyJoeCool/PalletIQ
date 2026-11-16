@@ -121,58 +121,6 @@ function QtyTable({ current, pull, remaining, remainingZero }: { current: Qty | 
   );
 }
 
-/**
- * Input display field driven by NumpadContext. Tapping calls onFocus, which registers
- * the field's submit handler. The blinking red cursor appears when active and not disabled.
- *
- * @param label - Field label shown above the display box
- * @param value - Current field value (from useNumpadField)
- * @param onFocus - Called when the field is tapped; should call field.focus(handler)
- * @param active - True when this field currently holds the numpad handler registration
- * @param disabled - True when the field should not accept focus (e.g., during loading)
- * @param compact - Slightly smaller box/text, for fields that sit side by side (issue #82's
- *   UPC/Location pair) rather than taking the full row width Label/Pallet ID use.
- * @param invalid - Applies the app-wide red-wash treatment (see `src/lib/invalidWash.ts`)
- *   instead of the plain active-only border — invalid wins over active, same precedence as
- *   every other field in the app.
- * @param valid - Applies the app-wide blue "confirmed valid" wash (issue #188's CID
- *   3-state status) — the Label field's own use case, currently.
- */
-function FieldDisplay({
-  label,
-  value,
-  onFocus,
-  active = false,
-  disabled = false,
-  compact = false,
-  invalid = false,
-  valid = false,
-}: {
-  label: string;
-  value: string;
-  onFocus: () => void;
-  active?: boolean;
-  disabled?: boolean;
-  compact?: boolean;
-  invalid?: boolean;
-  valid?: boolean;
-}) {
-  return (
-    <NumpadFieldBox
-      label={label}
-      value={value}
-      onFocus={onFocus}
-      active={active}
-      disabled={disabled}
-      invalid={invalid}
-      valid={valid}
-      boxClass={compact ? 'h-[60px] px-4 rounded-[12px]' : 'h-[72px] px-5 rounded-[12px]'}
-      valueClass={compact ? 'text-[26px] font-medium tracking-[0.04em]' : 'text-[32px] font-medium tracking-[0.04em]'}
-      caretClass={compact ? 'w-[3px] h-[30px]' : 'w-[3px] h-[38px]'}
-    />
-  );
-}
-
 // ── PIP Screen ───────────────────────────────────────────────────────────────
 
 type ScreenState = 'ready' | 'verifying';
@@ -312,7 +260,7 @@ function HoldLocationPicker({
 
 export function PIPPage() {
   const { token } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { setMessage, clearMessage, showError } = useMessageBar();
   const { deliverScan, isScanningRef } = useNumpad();
 
   const [screenState, setScreenState] = useState<ScreenState>('ready');
@@ -674,8 +622,7 @@ export function PIPPage() {
    * its own internally; this just surfaces the message it hands back.
    */
   function handleLocationLockedMismatch(message: string) {
-    playAlert('error');
-    setMessage({ type: 'error', text: message });
+    showError(message);
   }
 
   /**
@@ -965,7 +912,8 @@ export function PIPPage() {
         </div>
 
         {/* Label input */}
-        <FieldDisplay
+        <NumpadFieldBox
+          size="large"
           label="Scan Label"
           value={containerField.value}
           onFocus={focusContainerField}
@@ -1023,7 +971,8 @@ export function PIPPage() {
               either alone immediately attempts a verify with just that value. */}
           <div className="flex items-end gap-4">
             <div className="flex-1">
-              <FieldDisplay
+              <NumpadFieldBox
+                size="large"
                 label="UPC"
                 value={upcField.value}
                 onFocus={focusUpcField}

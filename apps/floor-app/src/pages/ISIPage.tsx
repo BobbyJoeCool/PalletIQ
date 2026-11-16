@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ItemDemoScannerBar } from '../components/shared/ItemDemoScannerBar';
-import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { useAuth } from '../context/AuthContext';
 import { useDemoSlot } from '../context/FooterDemoContext';
 import type { ISILocationEntry, ISISearchState } from '../context/ISIContext';
 import { useISI } from '../context/ISIContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { apiFetch } from '../lib/api';
-import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
-import { INVALID_WASH } from '../lib/invalidWash';
 import { useDpciFields } from '../lib/useDpciFields';
 import { useUpcField } from '../lib/useUpcField';
+import { UpcField } from '../components/shared/UpcField';
+import { DpciEntry } from '../components/shared/DpciEntry';
 
 interface LocationsResponse {
   dpci: string;
@@ -32,7 +31,7 @@ interface LocationsResponse {
  */
 export function ISIPage() {
   const { token } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { clearMessage, showError } = useMessageBar();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { search, setSearch } = useISI();
@@ -61,13 +60,12 @@ export function ISIPage() {
       setLoading(false);
     }, []), // eslint-disable-line react-hooks/exhaustive-deps
     onNotFound: useCallback(() => {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Item not found' });
+      showError('Item not found');
       setSearch(null);
       setLoading(false);
-    }, [setMessage]), // eslint-disable-line react-hooks/exhaustive-deps
+    }, [showError]), // eslint-disable-line react-hooks/exhaustive-deps
   });
-  const { deptField, classField, itemField, dpciInvalid, focusDeptField, focusClassField, focusItemField } = dpciFields;
+  const { focusDeptField } = dpciFields;
 
   /** UPC entry field (issue #160, shared with IID/PAR) — looks up every stored location
    *  for a UPC (fix-list item 02), then backfills the DPCI boxes with the resolved item's
@@ -87,11 +85,10 @@ export function ISIPage() {
       setLoading(false);
     }, []), // eslint-disable-line react-hooks/exhaustive-deps
     onNotFound: useCallback(() => {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Item not found' });
+      showError('Item not found');
       setSearch(null);
       setLoading(false);
-    }, [setMessage]), // eslint-disable-line react-hooks/exhaustive-deps
+    }, [showError]), // eslint-disable-line react-hooks/exhaustive-deps
   });
   useEffect(() => { clearUpcFieldRef.current = upcFields.clear; });
 
@@ -148,51 +145,21 @@ export function ISIPage() {
       <div className="flex items-end gap-4">
         <div>
           <span className="font-ui text-[14px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
-          <div className={`flex items-center gap-2 mt-1 rounded-[12px] ${dpciInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
-            <button
-              type="button"
-              aria-label="Dept"
-              onClick={focusDeptField}
-              className={`flex items-center justify-center h-[64px] w-[100px] px-3 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${deptField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-            >
-              <span className="font-data text-[26px] font-medium text-white">
-                {deptField.value || <span className="text-[#444]">—</span>}
-              </span>
-              {deptField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-            </button>
-            <span className="text-[#555] text-[22px]">-</span>
-            <button
-              type="button"
-              aria-label="Class"
-              onClick={focusClassField}
-              className={`flex items-center justify-center h-[64px] w-[80px] px-3 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${classField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-            >
-              <span className="font-data text-[26px] font-medium text-white">
-                {classField.value || <span className="text-[#444]">—</span>}
-              </span>
-              {classField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-            </button>
-            <span className="text-[#555] text-[22px]">-</span>
-            <button
-              type="button"
-              aria-label="Item"
-              onClick={focusItemField}
-              className={`flex items-center justify-center h-[64px] w-[110px] px-3 rounded-[12px] bg-[#0D0D0D] border-2 transition-colors ${itemField.isActive ? 'border-[#CC0000]' : 'border-[#3A3A3A] hover:border-[#555]'}`}
-            >
-              <span className="font-data text-[26px] font-medium text-white">
-                {itemField.value || <span className="text-[#444]">—</span>}
-              </span>
-              {itemField.isActive && <span className="inline-block w-[2px] h-[28px] bg-[#CC0000] ml-2 animate-pulse rounded-sm" />}
-            </button>
+          <div className="mt-1">
+            <DpciEntry
+              fields={dpciFields}
+              widths={['w-[100px]', 'w-[80px]', 'w-[110px]']}
+              boxClass="h-[64px] px-3 rounded-[12px]"
+              valueClass="text-[26px] font-medium"
+              caretClass="w-[2px] h-[28px]"
+              centered
+              separatorClass="text-[#555] text-[22px]"
+            />
           </div>
         </div>
 
-        <NumpadFieldBox
+        <UpcField fields={upcFields}
           label="UPC"
-          value={upcFields.field.value}
-          onFocus={upcFields.focusField}
-          active={upcFields.field.isActive}
-          invalid={upcFields.upcInvalid}
           width="w-[260px]"
           boxClass="h-[64px] px-5 rounded-[12px]"
           valueClass="text-[26px] font-medium"

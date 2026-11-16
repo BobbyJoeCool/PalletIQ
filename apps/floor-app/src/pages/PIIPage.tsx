@@ -15,7 +15,6 @@ import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { splitReasonCode } from '../lib/reasonCode';
 import { fmtDpci } from '../lib/fmt';
-import { INVALID_WASH } from '../lib/invalidWash';
 import { usePalletIdField } from '../lib/usePalletIdField';
 import { useDpciFields } from '../lib/useDpciFields';
 import { useExpirationDateFields } from '../lib/useExpirationDateFields';
@@ -24,6 +23,7 @@ import { RecordActivityPanel } from '../components/shared/RecordActivityPanel';
 import { LooseSspsField, type LooseSspsFieldHandle } from '../components/shared/LooseSspsField';
 import { VcpSspFields, type VcpSspFieldsHandle } from '../components/shared/VcpSspFields';
 import { advanceField } from '../lib/fieldSequence';
+import { DpciEntry } from '../components/shared/DpciEntry';
 
 /** Formats a location object as its canonical 8-digit id (Aisle+Bin+Level). */
 function location8(loc: { aisle: number; bin: number; level: number }): string {
@@ -115,7 +115,7 @@ type ScreenState = 'ready' | 'loaded' | 'edit';
  */
 export function PIIPage() {
   const { token, user } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { setMessage, clearMessage, showError } = useMessageBar();
   const { hidePanel } = useNumpad();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -160,9 +160,8 @@ export function PIIPage() {
   const dpciFields = useDpciFields<{ dpci: string }>({
     fetch: useCallback((digits) => apiFetch<{ dpci: string }>(`/api/items/dpci/${digits}`, token!), [token]),
     onNotFound: useCallback(() => {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'DPCI not found' });
-    }, [setMessage]),
+      showError('DPCI not found');
+    }, [showError]),
   });
   const cartonsEdit = useEditField(editCartons, setEditCartons);
   const palletsEdit = useEditField(editPallets, setEditPallets);
@@ -208,13 +207,12 @@ export function PIIPage() {
       setScreenState('loaded');
     }, [setPallet]),
     onNotFound: useCallback(() => {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Pallet not found' });
+      showError('Pallet not found');
       // Field intentionally left as-typed (issue PII#01) — the worker should be able to
       // see and correct what they actually entered, not have it silently wiped.
       setPallet(null);
       setScreenState('ready');
-    }, [setMessage, setPallet]),
+    }, [showError, setPallet]),
   });
 
   // Seeds the field's displayed value from a persisted pallet on mount (a fresh page load
@@ -394,13 +392,14 @@ export function PIIPage() {
             <>
               <div className="flex items-center gap-3 py-2 border-b border-[#1A1A1A]">
                 <span className="w-[180px] shrink-0 font-ui text-[15px] font-medium text-[#9A9A9A] uppercase tracking-wider">DPCI</span>
-                <div className={`flex items-center gap-2 rounded-[10px] ${dpciFields.dpciInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
-                  <EditBox value={dpciFields.deptField.value} active={dpciFields.deptField.isActive} onFocus={dpciFields.focusDeptField} width="w-[76px]" />
-                  <span className="text-[#555]">-</span>
-                  <EditBox value={dpciFields.classField.value} active={dpciFields.classField.isActive} onFocus={dpciFields.focusClassField} width="w-[64px]" />
-                  <span className="text-[#555]">-</span>
-                  <EditBox value={dpciFields.itemField.value} active={dpciFields.itemField.isActive} onFocus={dpciFields.focusItemField} width="w-[92px]" />
-                </div>
+                <DpciEntry
+                  fields={dpciFields}
+                  widths={['w-[76px]', 'w-[64px]', 'w-[92px]']}
+                  boxClass="h-[44px] px-3 rounded-[8px]"
+                  valueClass="text-[20px]"
+                  caretClass="w-[2px] h-[20px]"
+                  centered
+                />
                 <CurrentValue>{fmtDpci(pallet.dpci)}</CurrentValue>
               </div>
               <ItemDescription value={pallet.descShort} />

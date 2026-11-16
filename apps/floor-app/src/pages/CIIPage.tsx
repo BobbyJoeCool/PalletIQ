@@ -8,7 +8,6 @@ import { useCII, type CIIContainerData } from '../context/CIIContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNumpad } from '../context/NumpadContext';
 import { apiFetch } from '../lib/api';
-import { playAlert } from '../lib/audio';
 import { CID_TYPE_LABELS, type CidTypeCode } from '@shared/index';
 import { CIIEventLog } from '../components/cii/CIIEventLog';
 import { CIIFullCaseDetail } from '../components/cii/CIIFullCaseDetail';
@@ -20,7 +19,7 @@ import { containerStatusLabel } from '@shared/containerStatus';
 
 export function CIIPage() {
   const { token, user } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { clearMessage, showError } = useMessageBar();
   const { hidePanel } = useNumpad();
   const navigate = useNavigate();
   const { data, setData } = useCII();
@@ -39,14 +38,13 @@ export function CIIPage() {
       const result = await apiFetch<CIIContainerData>(`/api/containers/inquiry/${canonical}`, token!);
       setData(result);
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Container not found' });
+      showError('Container not found');
       setData(null);
       setInvalid(true);
     } finally {
       setLoading(false);
     }
-  }, [token, hidePanel, clearMessage, setMessage, setData]);
+  }, [token, hidePanel, clearMessage, setData, showError]);
 
   function handleCidChange(v: string) {
     setCidValue(v);

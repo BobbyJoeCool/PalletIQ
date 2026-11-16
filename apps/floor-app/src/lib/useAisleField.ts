@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useNumpadField } from './useNumpadField';
+import { useAuth } from '../context/AuthContext';
+import { fetchAisleExists } from './aisleApi';
 
 /** One Storage-Code/Size pair's open/staged count within an aisle — same shape
  *  `GET /api/locations/empty-by-zone` computes per-zone, aggregated aisle-wide instead
@@ -25,8 +27,11 @@ export interface AisleFieldOptions {
    *  the breakdown (excludes contraction and any hold but `HOLD_OUT`, counts only
    *  `EMPTY`/`STAGED`), so switching those two onto `aisle-exists` is a pure lightening, not
    *  a semantic change. A caller that only needs the boolean (ELA, WLH) can ignore
-   *  `breakdown` entirely — it costs them nothing extra to receive. */
-  fetch: (aisle: string) => Promise<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>;
+   *  `breakdown` entirely — it costs them nothing extra to receive.
+   *
+   *  **Optional since #216** — omitted, the field calls `aisle-exists` itself (via
+   *  `fetchAisleExists` with the session token). Pass it only to substitute a test fake. */
+  fetch?: (aisle: string) => Promise<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>;
   /** Fires once the confirmed value is a real aisle. */
   onResolved?: (aisle: string) => void;
   /** Fires once the confirmed value is NOT a real aisle (or the check itself failed). */
@@ -59,7 +64,12 @@ export interface AisleFieldOptions {
  * "resolve immediately" branch since a bare Aisle filter has no Bin/Level to combine with.
  * Previously only SDP defended against this; every consumer gets it uniformly now.
  */
-export function useAisleField({ fetch, onResolved, onNotFound, onConfirm }: AisleFieldOptions) {
+export function useAisleField({ fetch: fetchOverride, onResolved, onNotFound, onConfirm }: AisleFieldOptions) {
+  const { token } = useAuth();
+  const fetch = useCallback(
+    (aisle: string) => (fetchOverride ? fetchOverride(aisle) : fetchAisleExists(token!, aisle)),
+    [fetchOverride, token],
+  );
   const field = useNumpadField('numpad', 3, true);
   const [invalid, setInvalid] = useState(false);
   const [loading, setLoading] = useState(false);

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Triple from '../assets/Triple.png';
 import { AisleGrid, type GridLevel, type ZoneBinRange } from '../components/shared/AisleGrid';
 import { AisleSizeTable, type AisleSizeRow, type AisleSizeSort } from '../components/shared/AisleSizeTable';
 import { type CodeOption } from '../components/shared/CodePickerField';
-import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { ReasonCodeField } from '../components/shared/ReasonCodeField';
 import { SizeField } from '../components/shared/SizeField';
 import { ZoneCodeBadge } from '../components/shared/ZoneCodeBadge';
@@ -21,12 +20,13 @@ import { splitReasonCode } from '../lib/reasonCode';
 import { INVALID_WASH } from '../lib/invalidWash';
 import { SIZE_NAMES } from '../lib/sizes';
 import { effectiveStack } from '../lib/stagingHelpers';
-import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
+import { useAisleField } from '../lib/useAisleField';
 import { useAisleFreightTypes } from '../lib/useAisleFreightTypes';
 import { useCodePickerField } from '../lib/useCodePickerField';
 import { useNumpadField } from '../lib/useNumpadField';
 import { useStorageCodes } from '../lib/useStorageCodes';
 import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
+import { AisleField } from '../components/shared/AisleField';
 
 interface NavState {
   aisle?: number;
@@ -77,29 +77,6 @@ async function fetchStagingLocations(
 }
 
 // ── Small display helpers ──────────────────────────────────────────────────────
-
-/** Labeled input display box used by the Master Control bar's Aisle field — a standalone
- *  field, not one of the shared field types from issue #78 (unlike Storage Code/Size,
- *  which now use StorageCodeField/SizeField below). */
-function FieldDisplay({
-  label, value, onFocus, active = false, width = 'w-[160px]', invalid = false,
-}: { label: string; value: string; onFocus: () => void; active?: boolean; width?: string; invalid?: boolean }) {
-  return (
-    <NumpadFieldBox
-      label={label}
-      value={value}
-      onFocus={onFocus}
-      active={active}
-      invalid={invalid}
-      width={width}
-      centered
-      labelClass="text-[12px]"
-      boxClass="h-[52px] px-3 rounded-[10px]"
-      valueClass="text-[20px] font-medium"
-      caretClass="w-[2px] h-[22px]"
-    />
-  );
-}
 
 /** A single pallet-styled input box, sized to sit inside the front-stack box. Two thin
  *  internal lines suggest pallet slats — kept distinct from the generic shared field
@@ -369,7 +346,7 @@ const DEFAULT_REJECT_REASON = 'W70';
  */
 function RejectHoldDialog({ locationId, onClose, onHeld }: { locationId: string; onClose: () => void; onHeld: () => void }) {
   const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, showError } = useMessageBar();
   const [reasonCode, setReasonCode] = useState(DEFAULT_REJECT_REASON);
   const [submitting, setSubmitting] = useState(false);
 
@@ -387,8 +364,7 @@ function RejectHoldDialog({ locationId, onClose, onHeld }: { locationId: string;
       setMessage({ type: 'success', text: `${fmtLocation(locationId)} held — suggesting a new location` });
       onHeld();
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Hold placement failed — please try again' });
+      showError('Hold placement failed — please try again');
     } finally {
       setSubmitting(false);
     }
@@ -441,8 +417,7 @@ const ZONE_OPTIONS: CodeOption[] = ['1', '2', '3', '4'].map((z) => ({ code: z, d
 function StackBox({ index }: { index: 0 | 1 | 2 }) {
   const { stacks, updateStack, master } = useStaging();
   const { hidePanel } = useNumpad();
-  const { token } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { clearMessage, showError } = useMessageBar();
   const stack = stacks[index];
   // Resolved Aisle/StorageCode/Size — Master Control's current value for any field this
   // stack doesn't override, its own stored value for any field that is overridden (issue
@@ -459,13 +434,11 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
   // not one of the generic shared field components — see its own doc comment) is kept
   // exactly as-is; only the data/validation source changes here.
   const aisleFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { hidePanel(); updateStack(index, { aisle: v }); }, [hidePanel, index, updateStack]),
     onResolved: useCallback(() => { clearMessage(); }, [clearMessage]),
     onNotFound: useCallback(() => {
-      playAlert('error');
-      setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Aisle - Invalid Entry` });
-    }, [index, setMessage]),
+      showError(`${STACK_LABELS[index]} Stack - Aisle - Invalid Entry`);
+    }, [index, showError]),
   });
 
   // Keep the on-screen field displays in sync with context — covers the worker's own
@@ -492,24 +465,8 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
    *  check instead of a commit-only callback (also catches a value that becomes invalid
    *  later because Aisle changed underneath it, not just at the moment of typing). The
    *  wash itself no longer needs tracking here at all — `PalletCodePicker` washes itself. */
-  const handleStorageValidityChange = useCallback((inv: boolean) => {
-    if (inv) {
-      playAlert('error');
-      setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Storage Code - Invalid Entry` });
-    }
-  }, [index, setMessage]);
-  const handleSizeValidityChange = useCallback((inv: boolean) => {
-    if (inv) {
-      playAlert('error');
-      setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Size - Invalid Entry` });
-    }
-  }, [index, setMessage]);
-  const handleZoneValidityChange = useCallback((inv: boolean) => {
-    if (inv) {
-      playAlert('error');
-      setMessage({ type: 'error', text: `${STACK_LABELS[index]} Stack - Zone - Invalid Entry` });
-    }
-  }, [index, setMessage]);
+  // One reporter per entry type (#216 — was three near-identical callbacks per field set).
+  const invalidEntry = useInvalidEntryReporters(`${STACK_LABELS[index]} Stack`);
 
   /** Registers this stack's Quantity field numpad handler; writes the confirmed value into StagingContext. */
   const focusQuantityField = useCallback(() => {
@@ -605,7 +562,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               field="zone"
               aisle={null}
               maxLength={1}
-              onValidityChange={handleZoneValidityChange}
+              onValidityChange={invalidEntry.zone}
               tinted
               autoFocus
             />
@@ -625,7 +582,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               aisle={stackAisle}
               maxLength={2}
               transform={(v) => v.toUpperCase()}
-              onValidityChange={handleStorageValidityChange}
+              onValidityChange={invalidEntry.storage}
               tinted
               autoFocus
             />
@@ -647,7 +604,7 @@ function StackBox({ index }: { index: 0 | 1 | 2 }) {
               maxLength={2}
               transform={(v) => v.toUpperCase()}
               earlyCommit={(v) => ['S', 'M', 'L'].includes(v)}
-              onValidityChange={handleSizeValidityChange}
+              onValidityChange={invalidEntry.size}
               tinted
               autoFocus
             />
@@ -721,7 +678,7 @@ function useElementSize<T extends HTMLElement>() {
  */
 function LocationsPanel({ height }: { height?: number }) {
   const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, showError } = useMessageBar();
   const { stacks, updateStack, resetStackAfterStage, addLogEntry, bumpDataVersion, dataVersion, master } = useStaging();
   const front = stacks[0];
   // Resolved Aisle/StorageCode/Size for the front slot (issue #99) — location lookup and
@@ -807,8 +764,7 @@ function LocationsPanel({ height }: { height?: number }) {
       resetStackAfterStage();
       bumpDataVersion();
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Staging failed — please try again' });
+      showError('Staging failed — please try again');
     } finally {
       setLoading(false);
     }
@@ -1383,7 +1339,7 @@ function typeKey(t: { storageCode: string; size: string }): string {
  */
 function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }) {
   const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, showError } = useMessageBar();
   const { addLogEntry, bumpDataVersion } = useStaging();
   const { hidePanel } = useNumpad();
   const [types, setTypes] = useState<StagedType[] | null>(null);
@@ -1479,8 +1435,7 @@ function UnstageModal({ aisle, onClose }: { aisle: string; onClose: () => void }
       bumpDataVersion();
       onClose();
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Restage failed — please try again' });
+      showError('Restage failed — please try again');
     }
   }
 
@@ -1610,8 +1565,7 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
 }) {
   const { master, setMaster } = useStaging();
   const { hidePanel } = useNumpad();
-  const { token } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { showError } = useMessageBar();
   // Fixed 3-character field, existence-checked (issue #161 — previously this field had no
   // validation at all, an inconsistency with the per-stack override's own `handleAisleConfirm`
   // below, which already checked). Auto-commits like every other screen's Aisle field
@@ -1621,12 +1575,10 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
   // washes the box and drives the message bar; `InfoPanel` already shows its own "no data"
   // state for a bad aisle independently of this field's own wash.
   const aisleFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { setMaster({ aisle: v }); hidePanel(); }, [setMaster, hidePanel]),
     onNotFound: useCallback(() => {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Master Control - Aisle - Invalid Entry' });
-    }, [setMessage]),
+      showError('Master Control - Aisle - Invalid Entry');
+    }, [showError]),
   });
 
   useEffect(() => { aisleFields.field.set(master.aisle); }, [master.aisle]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1642,18 +1594,7 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
 
   /** Reacts to the field's own reactive validity (Feature 10) — the wash itself is now
    *  automatic; this only drives the message-bar/alert side effect, same text as before. */
-  const handleStorageValidityChange = useCallback((inv: boolean) => {
-    if (inv) {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Master Control - Storage Code - Invalid Entry' });
-    }
-  }, [setMessage]);
-  const handleSizeValidityChange = useCallback((inv: boolean) => {
-    if (inv) {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Master Control - Size - Invalid Entry' });
-    }
-  }, [setMessage]);
+  const invalidEntry = useInvalidEntryReporters('Master Control');
   // GitHub #192 — Master Control's own optional Zone control, mirroring the per-stack Zone
   // override that already existed (issue #99 follow-up): sets the target *starting* zone
   // for staging (front stack only, same as every other Master Control field) — staging
@@ -1662,12 +1603,6 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
   // search behavior exactly, since both now flow through the same `effectiveStack().zone`
   // (see stagingHelpers.ts) into the same `fetchStagingLocations` call. Blank means "no zone
   // restriction," same as before Master Control had a Zone at all.
-  const handleZoneValidityChange = useCallback((inv: boolean) => {
-    if (inv) {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Master Control - Zone - Invalid Entry' });
-    }
-  }, [setMessage]);
 
   return (
     <div className="pt-3 pb-4 border-b border-[#1C1C1C] shrink-0 px-4">
@@ -1703,9 +1638,9 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
             strictToAisle
             size="compact"
             strict
-            onValidityChange={handleStorageValidityChange}
+            onValidityChange={invalidEntry.storage}
           />
-          <FieldDisplay label="Aisle" value={aisleFields.field.value} onFocus={aisleFields.focusField} active={aisleFields.field.isActive} invalid={aisleFields.invalid} width="w-[120px]" />
+          <AisleField fields={aisleFields} size="compact" centered labelClass="text-[12px]" label="Aisle" width="w-[120px]" />
           <SizeField
             value={master.size}
             onChange={(v) => setMaster({ size: v })}
@@ -1714,7 +1649,7 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
             size="compact"
             ariaLabel="Master Size"
             strict
-            onValidityChange={handleSizeValidityChange}
+            onValidityChange={invalidEntry.size}
           />
           <ZoneField
             value={master.zone ? parseInt(master.zone, 10) : null}
@@ -1722,7 +1657,7 @@ function MasterControl({ isIM, onUnstage, onRefresh }: {
             size="compact"
             label="Zone"
             strict
-            onValidityChange={handleZoneValidityChange}
+            onValidityChange={invalidEntry.zone}
           />
         </div>
 
@@ -1873,6 +1808,19 @@ function STGScreen() {
 
 /** STG — Stage Aisle. StagingProvider (fork-state store) is mounted once, app-wide,
  *  in App.tsx — not here — so fork state survives navigating away and back. */
+/**
+ * Error reporters for a field set's Storage Code / Size / Zone validity changes — each
+ * shows "{scope} - {field} - Invalid Entry" with the error tone when the field turns
+ * invalid (#216; replaces three near-identical callbacks per field set, six in all).
+ */
+function useInvalidEntryReporters(scope: string) {
+  const { showError } = useMessageBar();
+  return useMemo(() => {
+    const reporter = (field: string) => (inv: boolean) => { if (inv) showError(`${scope} - ${field} - Invalid Entry`); };
+    return { storage: reporter('Storage Code'), size: reporter('Size'), zone: reporter('Zone') };
+  }, [scope, showError]);
+}
+
 export function STGPage() {
   return <STGScreen />;
 }

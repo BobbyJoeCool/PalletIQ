@@ -14,7 +14,7 @@ import { useWLH } from '../context/WLHContext';
 import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { splitReasonCode } from '../lib/reasonCode';
-import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
+import { useAisleField } from '../lib/useAisleField';
 import { useLocationRangeFields } from '../lib/useLocationRangeFields';
 import { useNumpadField } from '../lib/useNumpadField';
 import { HOLD_CATEGORIES, HOLD_PLACE_MIN_ROLE } from '@shared/locationPolicy';
@@ -106,7 +106,7 @@ function holdName(type: HoldCategory | null): string {
  */
 function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
   const { token, user } = useAuth();
-  const { setMessage } = useMessageBar();
+  const { setMessage, showError } = useMessageBar();
   const { hidePanel } = useNumpad();
   const role = (user?.role ?? 'WORKER') as Role;
 
@@ -120,7 +120,6 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
   // `canReview` below, it doesn't block the worker from continuing to type the rest of
   // the range.
   const aisleFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onConfirm: useCallback((v) => { if (v.length === 3) rangeFields.focusStartBin(); }, [rangeFields.focusStartBin]),
   });
   const {
@@ -229,8 +228,7 @@ function RangeHoldPanel({ onLog }: { onLog: (summary: string) => void }) {
       setReasonCode('');
       setReasonCodeKey((k) => k + 1);
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Range action failed — please try again' });
+      showError('Range action failed — please try again');
     } finally {
       setSubmitting(false);
       setPreview(null);
@@ -372,7 +370,7 @@ function HoldLogPanel({ entries }: { entries: HoldLogEntry[] }) {
  */
 export function WLHPage() {
   const { token, user } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { clearMessage, showError } = useMessageBar();
   const { hidePanel: hideModeSwitchPanel } = useNumpad();
   const [searchParams] = useSearchParams();
   const role = (user?.role ?? 'WORKER') as Role;
@@ -420,8 +418,7 @@ export function WLHPage() {
       setLocationInvalid(false);
       clearMessage();
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Location not found' });
+      showError('Location not found');
       // Deliberately does NOT clear/remount the Aisle/Bin/Level entry boxes (direct
       // instruction) — a bad scan/entry should stay visible so the worker can see and
       // correct what they typed, matching PII's v1.6.7 "field clears on failed scan" fix.

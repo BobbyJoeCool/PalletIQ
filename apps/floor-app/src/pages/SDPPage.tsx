@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { NumpadFieldBox } from '../components/shared/NumpadFieldBox';
 import { type CodePickerFieldHandle } from '../components/shared/CodePickerField';
 import { PalletIdField, type PalletIdFieldHandle } from '../components/shared/PalletIdField';
 import { SessionHistoryPanel } from '../components/shared/SessionHistoryPanel';
@@ -14,14 +13,14 @@ import { useDemoSlot } from '../context/FooterDemoContext';
 import { useMessageBar } from '../context/MessageBarContext';
 import { useNavLock } from '../context/NavLockContext';
 import { useNumpad } from '../context/NumpadContext';
-import { apiFetch } from '../lib/api';
 import { playAlert } from '../lib/audio';
 import { fmtLocation } from '../lib/fmt';
-import { type AisleBreakdownEntry, useAisleField } from '../lib/useAisleField';
+import { useAisleField } from '../lib/useAisleField';
 import { groupBreakdownByStorageCode } from '../lib/zoneSummary';
 import { SDPVerifyPutModal } from './SDPVerifyPutModal';
 import { createHttpPutsClient, type ConsolidationCandidate } from '../lib/putsClient';
 import { usePutSession } from '../lib/usePutSession';
+import { AisleField } from '../components/shared/AisleField';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,55 +42,6 @@ interface HistoryEntry {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Input display field driven by NumpadContext. Supports a `locked` state (in addition to
- * `disabled`) which prevents focus while the screen is in the directed/active-reservation state.
- *
- * @param label - Field label shown above the display box
- * @param value - Current field value (from useNumpadField)
- * @param onFocus - Called when the field is tapped; should call field.focus(handler)
- * @param active - True when this field currently holds the numpad handler
- * @param disabled - True when the field should be greyed out (e.g., aisle not yet entered)
- * @param locked - True when the screen is locked to an active reservation; prevents focus
- * @param invalid - Applies the app-wide red-wash treatment (see `src/lib/invalidWash.ts`)
- *   instead of the plain active-only border — invalid wins over active/disabled/locked.
- */
-function FieldDisplay({
-  label,
-  value,
-  onFocus,
-  active = false,
-  disabled = false,
-  locked = false,
-  size = 'default',
-  invalid = false,
-}: {
-  label: string;
-  value: string;
-  onFocus: () => void;
-  active?: boolean;
-  disabled?: boolean;
-  locked?: boolean;
-  /** 'large' bumps height/text size — used for SDP's Aisle field, now that it doesn't
-   *  need to share space evenly with the (now dynamically-sized) override fields. */
-  size?: 'default' | 'large';
-  invalid?: boolean;
-}) {
-  return (
-    <NumpadFieldBox
-      label={label}
-      value={value}
-      onFocus={onFocus}
-      active={active}
-      disabled={disabled || locked}
-      invalid={invalid}
-      boxClass={size === 'large' ? 'h-[88px] px-5 rounded-[12px]' : 'h-[72px] px-5 rounded-[12px]'}
-      valueClass={size === 'large' ? 'text-[40px] font-medium tracking-[0.04em]' : 'text-[32px] font-medium tracking-[0.04em]'}
-      caretClass={size === 'large' ? 'w-[3px] h-[46px]' : 'w-[3px] h-[38px]'}
-    />
-  );
-}
 
 /** Colored footer demo button; `color` selects a background from a small fixed palette. */
 function DemoBtn({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
@@ -142,7 +92,7 @@ type ScreenState = 'entry' | 'directed';
  */
 export function SDPPage() {
   const { token, user } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { setMessage, clearMessage, showError } = useMessageBar();
   const { deliverScan, isScanningRef } = useNumpad();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
   const routerLocation = useLocation();
@@ -207,7 +157,6 @@ export function SDPPage() {
   // behavior — Aisle is never washed here, matching PIP/PID's "clear rather than wash"
   // convention, see the comment further down at handlePalletScan's own error path).
   const aisleFields = useAisleField({
-    fetch: useCallback((aisle) => apiFetch<{ exists: boolean; breakdown: AisleBreakdownEntry[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]),
     onResolved: useCallback(() => {
       clearMessage();
       setTimeout(() => palletFieldRef.current?.focus(), 50);
@@ -506,13 +455,11 @@ export function SDPPage() {
           break;
         case 'mismatch':
           resetLocationField();
-          playAlert('error');
-          setMessage({ type: 'error', text: `Wrong location — directed to ${outcome.directedLocation}` });
+          showError(`Wrong location — directed to ${outcome.directedLocation}`);
           break;
         case 'notCandidate':
           resetLocationField();
-          playAlert('error');
-          setMessage({ type: 'error', text: `${fmtLocation(outcome.directedLocation)} can no longer take this pallet — pick another location` });
+          showError(`${fmtLocation(outcome.directedLocation)} can no longer take this pallet — pick another location`);
           break;
         case 'expired':
           resetLocationField();
@@ -523,8 +470,7 @@ export function SDPPage() {
           break;
         default:
           resetLocationField();
-          playAlert('error');
-          setMessage({ type: 'error', text: 'Confirm failed — please try again' });
+          showError('Confirm failed — please try again');
       }
     } finally {
       setLoading(false);
@@ -571,8 +517,7 @@ export function SDPPage() {
     const d = directedRef.current;
     const outcome = await session.hold(reasonCode);
     if (outcome.kind === 'error') {
-      playAlert('error');
-      setMessage({ type: 'error', text: outcome.code === 'FORBIDDEN' ? 'You do not have permission to place Hold Both holds' : 'Hold placement failed — please try again' });
+      showError(outcome.code === 'FORBIDDEN' ? 'You do not have permission to place Hold Both holds' : 'Hold placement failed — please try again');
       return false;
     }
     playAlert('info');
@@ -679,14 +624,10 @@ export function SDPPage() {
             to dynamically fill whatever's left up to the Put History sidebar. */}
         <div className="flex gap-10">
           <div className="w-[280px] shrink-0 flex flex-col gap-2">
-            <FieldDisplay
+            <AisleField fields={aisleFields}
+              size="xlarge"
               label="Aisle"
-              value={aisleFields.field.value}
-              onFocus={aisleFields.focusField}
-              active={aisleFields.field.isActive}
-              locked={locked}
-              size="large"
-              invalid={aisleFields.invalid}
+              disabled={locked}
             />
             {/* Freight-type badges for the resolved aisle (issue #169) — aisle-wide totals,
                 not broken out by zone (SDP has no zone concept of its own), same column-by-

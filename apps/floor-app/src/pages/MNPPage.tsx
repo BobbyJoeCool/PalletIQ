@@ -255,7 +255,7 @@ type ScreenState = 'ready' | 'pallet_scanned' | 'level_modal';
  */
 export function MNPPage() {
   const { token, user } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { setMessage, clearMessage, showError } = useMessageBar();
 
   const [screenState, setScreenState] = useState<ScreenState>('ready');
   // Session-level persistence (App-Wide screen-persistence item, v1.7.0) — see
@@ -521,8 +521,7 @@ export function MNPPage() {
       const code = err instanceof Error ? err.message : '';
 
       if (code === 'CONTRACTED') {
-        playAlert('error');
-        setMessage({ type: 'error', text: 'This location is on contraction — put not allowed' });
+        showError('This location is on contraction — put not allowed');
         cancelToDestinationEntry();
         return;
       }
@@ -531,14 +530,12 @@ export function MNPPage() {
         return;
       }
       if (code === 'DESTINATION_HOLD_PERM') {
-        playAlert('error');
-        setMessage({ type: 'error', text: 'This location is on Hold Permanent — put not allowed' });
+        showError('This location is on Hold Permanent — put not allowed');
         cancelToDestinationEntry();
         return;
       }
       if (code === 'DESTINATION_ON_HOLD') {
-        playAlert('error');
-        setMessage({ type: 'error', text: 'This location is on hold — put not allowed' });
+        showError('This location is on hold — put not allowed');
         cancelToDestinationEntry();
         return;
       }
@@ -560,8 +557,7 @@ export function MNPPage() {
         return;
       }
 
-      playAlert('error');
-      setMessage({ type: 'error', text: code === 'NOT_FOUND' ? 'Location not found' : 'Confirm failed — please try again' });
+      showError(code === 'NOT_FOUND' ? 'Location not found' : 'Confirm failed — please try again');
       cancelToDestinationEntry();
     } finally {
       setLoading(false);
@@ -627,8 +623,7 @@ export function MNPPage() {
       setMessage({ type: 'warning', text: `Hold Both placed on ${fmtLocation(fullLocationId)} — put canceled` });
       cancelToDestinationEntry();
     } catch {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'Failed to place hold — please try again' });
+      showError('Failed to place hold — please try again');
     } finally {
       setLoading(false);
     }

@@ -22,7 +22,7 @@ interface DropdownProps<T extends string> {
 /**
  * Compact "text box with a dropdown" selector for a small, fixed set of choices — a
  * custom touch-friendly control rather than a native `<select>`, matching this app's
- * general avoidance of plain native form inputs outside DpciField's explicitly-justified
+ * general avoidance of plain native form inputs outside the former DpciField's (removed, #216) explicitly-justified
  * exception (see that component's docstring). Tapping the box reveals the option list
  * directly below it; tapping an option selects it and closes the list; tapping anywhere
  * else also closes it without changing the value.

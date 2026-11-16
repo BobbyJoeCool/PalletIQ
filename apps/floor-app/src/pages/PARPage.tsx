@@ -26,6 +26,9 @@ import { useNumpadField } from '../lib/useNumpadField';
 import { useUpcField } from '../lib/useUpcField';
 import { reinstateReasons } from '@shared/locationPolicy';
 import { fieldBoxAttrs } from '../lib/fieldSequence';
+import { fetchAisleExists } from '../lib/aisleApi';
+import { UpcField } from '../components/shared/UpcField';
+import { DpciEntry } from '../components/shared/DpciEntry';
 
 type Mode = 'single' | 'multiple';
 
@@ -50,28 +53,6 @@ const NORMAL_BG = 'bg-[#0D0D0D] border-[#3A3A3A] hover:border-[#555]';
 // they all line up — shrunk 10% from the first pass (60px) per direct instruction, once
 // seen on screen.
 const ENTRY_BOX_HEIGHT = 'h-[54px]';
-
-/** Labeled numpad-driven entry box. `invalid` applies the new red-wash treatment (v1.6.11);
- *  `active` (currently focused) still gets the plain red border alone, matching every
- *  other numpad field in the app — the wash is reserved for an actual validation failure. */
-function FieldBox({
-  label, value, onFocus, active = false, invalid = false, width = 'w-[144px]', disabled = false,
-}: { label: string; value: string; onFocus: () => void; active?: boolean; invalid?: boolean; width?: string; disabled?: boolean }) {
-  return (
-    <NumpadFieldBox
-      label={label}
-      value={value}
-      onFocus={onFocus}
-      active={active}
-      disabled={disabled}
-      invalid={invalid}
-      width={width}
-      boxClass={`${ENTRY_BOX_HEIGHT} px-4 rounded-[10px]`}
-      valueClass="text-[20px] font-medium"
-      caretClass="w-[2px] h-[20px]"
-    />
-  );
-}
 
 /** Always-visible read-only display — label never disappears, value blanks to "—". Plain
  *  text, deliberately not boxed like an entry field (direct instruction — Description,
@@ -156,7 +137,7 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
  */
 export function PARPage() {
   const { token, user } = useAuth();
-  const { setMessage, clearMessage } = useMessageBar();
+  const { setMessage, clearMessage, showError } = useMessageBar();
   const { hidePanel, showNumpad } = useNumpad();
   const [searchParams] = useSearchParams();
   const isIM = ['IM', 'LEAD', 'MANAGER', 'ADMIN'].includes(user?.role ?? '');
@@ -211,7 +192,7 @@ export function PARPage() {
   // ── Row 1: DPCI / UPC / Description (Expiration Date state lives here too,
   // rendered just before Location further down) ─────────────────────
   // Numpad-driven Dept/Class/Item chain (v1.6.11, direct instruction — replaces the
-  // shared DpciField's plain-native-input design, which was deliberately built for
+  // former shared DpciField's (removed, #216) plain-native-input design, which was deliberately built for
   // infrequent admin edits, not this screen's now-fully-numpad-driven kiosk flow).
   // Mirrors IID's own identical Dept→Class→Item chain shape, with one deliberate
   // deviation from IID's own value-ref pattern: `handleItemConfirm` below reads
@@ -274,12 +255,11 @@ export function PARPage() {
       focusVcpRef.current();
     }, [setItem, clearMessage]),
     onNotFound: useCallback(() => {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'DPCI not found' });
+      showError('DPCI not found');
       setItem(null);
-    }, [setMessage, setItem]),
+    }, [showError, setItem]),
   });
-  const { deptField, classField, itemField, dpciInvalid, focusDeptField, focusClassField, focusItemField } = dpciFields;
+  const { deptField, classField, itemField, dpciInvalid } = dpciFields;
   const dpciDigits = `${deptField.value}${classField.value}${itemField.value}`;
 
   /** UPC entry field (issue #160, shared with IID/ISI) — looks up the item, also
@@ -299,9 +279,8 @@ export function PARPage() {
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [setItem, clearMessage]),
     onNotFound: useCallback(() => {
-      playAlert('error');
-      setMessage({ type: 'error', text: 'UPC not found' });
-    }, [setMessage]),
+      showError('UPC not found');
+    }, [showError]),
   });
   useEffect(() => { clearUpcFieldRef.current = upcFields.clear; });
 
@@ -453,7 +432,7 @@ export function PARPage() {
 
   /** Aisle box's own progressive check (v1.6.11), now owned by LocationEntryFields itself
    *  (issue #162) — this screen just supplies the fetch. */
-  const checkAisle = useCallback((aisle: string) => apiFetch<{ exists: boolean }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!), [token]);
+  const checkAisle = useCallback((aisle: string) => fetchAisleExists(token!, aisle), [token]);
   /** Bin box's own progressive check (v1.6.11), reusing `getLocation`'s existing 6-digit
    *  (Aisle+Bin, level-agnostic) lookup — same reasoning as before, now owned by
    *  LocationEntryFields itself (issue #162). */
@@ -803,24 +782,18 @@ export function PARPage() {
       <div className="flex-1 flex flex-col gap-5">
       {/* Row 1 — DPCI / UPC entry + Description.
           DPCI is its own numpad-driven Dept/Class/Item chain of 3 FieldBoxes (v1.6.11,
-          direct instruction — replaces the shared DpciField's native inputs so every field
+          direct instruction — replaces the former shared DpciField's native inputs so every field
           on this screen brings up the on-screen numpad), sized to land at the same 261px
           total width and ENTRY_BOX_HEIGHT height as the UPC box beside it. */}
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex flex-col gap-1 w-[261px]">
           <span className={`font-ui text-[13px] font-medium uppercase tracking-wider ${dpciInvalid ? 'text-[#FF6666]' : 'text-[#9A9A9A]'}`}>DPCI</span>
-          <div className={`flex items-center gap-1 rounded-[10px] ${dpciInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
-            <FieldBox label="" value={deptField.value} onFocus={focusDeptField} active={deptField.isActive} width="w-[76px]" />
-            <span className="text-[#555]">-</span>
-            <FieldBox label="" value={classField.value} onFocus={focusClassField} active={classField.isActive} width="w-[64px]" />
-            <span className="text-[#555]">-</span>
-            <FieldBox label="" value={itemField.value} onFocus={focusItemField} active={itemField.isActive} width="w-[92px]" />
-          </div>
+          <DpciEntry fields={dpciFields} size="entry" gapClass="gap-1" widths={['w-[76px]', 'w-[64px]', 'w-[92px]']} />
         </div>
         {/* Extra ml-8 beyond the row's own gap-4, direct instruction — DPCI and UPC read
             as two distinct entry methods, not one continuous group. */}
         <div className="ml-8">
-          <FieldBox label="UPC" value={upcFields.field.value} onFocus={upcFields.focusField} active={upcFields.field.isActive} invalid={upcFields.upcInvalid} width="w-[261px]" />
+          <UpcField fields={upcFields} size="entry" label="UPC" width="w-[261px]" />
         </div>
       </div>
 
@@ -903,7 +876,7 @@ export function PARPage() {
         <ModeToggle mode={mode} onChange={setMode} />
         {mode === 'single' ? (
           <div className="flex flex-wrap gap-4">
-            <FieldBox label="Cartons" value={cartonsField.value} onFocus={focusCartons} active={cartonsField.isActive} width="w-[144px]" />
+            <NumpadFieldBox size="entry" label="Cartons" value={cartonsField.value} onFocus={focusCartons} active={cartonsField.isActive} width="w-[144px]" />
             <LooseSspsField
               ref={sspsRef}
               sspPerCarton={sspPerCarton}
@@ -919,10 +892,10 @@ export function PARPage() {
           </div>
         ) : (
           <div className="flex items-stretch gap-4">
-            <FieldBox label="Full Pallets" value={fullPalletsField.value} onFocus={focusFullPallets} active={fullPalletsField.isActive} width="w-[144px]" />
-            <FieldBox label="Cartons per Pallet" value={cartonsPerPalletField.value} onFocus={focusCartonsPerPallet} active={cartonsPerPalletField.isActive} width="w-[180px]" />
+            <NumpadFieldBox size="entry" label="Full Pallets" value={fullPalletsField.value} onFocus={focusFullPallets} active={fullPalletsField.isActive} width="w-[144px]" />
+            <NumpadFieldBox size="entry" label="Cartons per Pallet" value={cartonsPerPalletField.value} onFocus={focusCartonsPerPallet} active={cartonsPerPalletField.isActive} width="w-[180px]" />
             <div className="w-px bg-[#3A3A3A]" />
-            <FieldBox label="Partial: Carton Count" value={partialCartonsField.value} onFocus={focusPartialCartons} active={partialCartonsField.isActive} width="w-[180px]" />
+            <NumpadFieldBox size="entry" label="Partial: Carton Count" value={partialCartonsField.value} onFocus={focusPartialCartons} active={partialCartonsField.isActive} width="w-[180px]" />
             <LooseSspsField
               ref={partialSspsRef}
               sspPerCarton={sspPerCarton}
@@ -1003,15 +976,15 @@ export function PARPage() {
         <div className={`flex items-center gap-4 rounded-[10px] self-start ${expirationInvalid ? `${INVALID_WASH} border-2 p-1` : ''}`}>
           <div className="flex items-center gap-2">
             <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Month</span>
-            <FieldBox label="" value={monthField.value} onFocus={focusMonthField} active={monthField.isActive} invalid={monthInvalid} width="w-[76px]" />
+            <NumpadFieldBox size="entry" label="" value={monthField.value} onFocus={focusMonthField} active={monthField.isActive} invalid={monthInvalid} width="w-[76px]" />
           </div>
           <div className="flex items-center gap-2">
             <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Day</span>
-            <FieldBox label="" value={dayField.value} onFocus={focusDayField} active={dayField.isActive} invalid={dayInvalid} width="w-[76px]" />
+            <NumpadFieldBox size="entry" label="" value={dayField.value} onFocus={focusDayField} active={dayField.isActive} invalid={dayInvalid} width="w-[76px]" />
           </div>
           <div className="flex items-center gap-2">
             <span className="font-ui text-[13px] font-medium text-[#9A9A9A] uppercase tracking-wider">Year</span>
-            <FieldBox label="" value={yearField.value} onFocus={focusYearField} active={yearField.isActive} width="w-[100px]" />
+            <NumpadFieldBox size="entry" label="" value={yearField.value} onFocus={focusYearField} active={yearField.isActive} width="w-[100px]" />
           </div>
         </div>
       </div>

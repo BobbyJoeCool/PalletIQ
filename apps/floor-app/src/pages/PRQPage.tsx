@@ -97,15 +97,10 @@ function formatDpci(dept: number, cls: number, item: number): string {
 /** @param batchDates - distinct batch dates from the current L1 summary, used as the options
  *   for L2/L3's editable Batch Date filter (PRQ.md: drill-down pre-fills stay editable). */
 function PRQFilterBar({ batchDates }: { batchDates: number[] }) {
-  const { token } = useAuth();
   const { filters, setFilters, currentLevel, setCurrentLevel, setSelectedIndex } = usePRQ();
   const { setMessage } = useMessageBar();
 
   const aisleStart = useAisleField({
-    fetch: async (aisle) => {
-      const res = await apiFetch<{ exists: boolean; breakdown: unknown[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!);
-      return { exists: res.exists, breakdown: [] };
-    },
     onResolved: (aisle) => {
       setFilters((f) => ({ ...f, aisleStart: aisle, workstation: '' }));
     },
@@ -115,10 +110,6 @@ function PRQFilterBar({ batchDates }: { batchDates: number[] }) {
   });
 
   const aisleEnd = useAisleField({
-    fetch: async (aisle) => {
-      const res = await apiFetch<{ exists: boolean; breakdown: unknown[] }>(`/api/locations/aisle-exists?aisle=${aisle}`, token!);
-      return { exists: res.exists, breakdown: [] };
-    },
     onResolved: (aisle) => {
       if (!isRangeEndValid(filters.aisleStart, aisle, false)) {
         setMessage({ type: 'error', text: 'End aisle must be higher than the start aisle.' });
