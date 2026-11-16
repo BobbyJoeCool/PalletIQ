@@ -216,3 +216,4 @@ export interface ActivityLog {
 }
 export * from './audit.js';
 export * from './aisleSetup.js';
+export * from './workforce.js';

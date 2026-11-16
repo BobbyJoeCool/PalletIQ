@@ -43,7 +43,7 @@ export const DESKTOP_SCREENS: readonly DesktopScreen[] = [
     title: 'Job/Function Assignment',
     issue: 145,
     summary: 'Drag-and-drop shift roster and function assignment.',
-    built: false,
+    built: true,
   },
   {
     id: 'prod-goals',

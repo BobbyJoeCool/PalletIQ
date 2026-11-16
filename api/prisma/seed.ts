@@ -2,6 +2,8 @@ import 'dotenv/config'
 import { PrismaClient } from '../generated/prisma/index.js'
 import { PrismaMariaDb } from '@prisma/adapter-mariadb'
 import bcrypt from 'bcryptjs'
+import { SHIFTS } from '../../shared/workforce.js'
+import { ROMAN_ROSTER, ROMAN_RAMPING, ROMAN_RAMPING_START } from './romanRoster.js'
 import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genCid } from './demoUtils.js'
 
 const adapter = new PrismaMariaDb(process.env.DATABASE_URL!)
@@ -1222,6 +1224,8 @@ async function main() {
   console.log('Clearing existing data...')
   await prisma.activityLog.deleteMany()
   await prisma.functionAssignment.deleteMany()
+  await prisma.rampingOverride.deleteMany()
+  await prisma.dailyPlanTarget.deleteMany()
   await prisma.container.deleteMany()
   await prisma.reservation.deleteMany()
   await prisma.pallet.deleteMany()
@@ -1231,6 +1235,8 @@ async function main() {
   await prisma.aisle.deleteMany()
   await prisma.userDepartment.deleteMany()
   await prisma.user.deleteMany()
+  await prisma.shiftBreak.deleteMany()
+  await prisma.shift.deleteMany()
   await prisma.item.deleteMany()
   await prisma.store.deleteMany()
   await prisma.reasonCodePrefixAllowance.deleteMany()
@@ -1262,6 +1268,14 @@ async function main() {
   await prisma.reasonCodeDomain.createMany({ data: REASON_CODE_DOMAINS })
   await prisma.store.createMany({ data: STORES })
   await prisma.prodGoal.createMany({ data: PROD_GOALS })
+
+  // Shifts (Job/Function Assignment, #145) — before users, who point at them.
+  await prisma.shift.createMany({
+    data: SHIFTS.map(({ code, daysLabel, startTime, endTime }) => ({ code, daysLabel, startTime, endTime })),
+  })
+  await prisma.shiftBreak.createMany({
+    data: SHIFTS.flatMap((s) => s.breaks.map((b) => ({ shiftCode: s.code, startTime: b.startTime, endTime: b.endTime }))),
+  })
   await prisma.printer.createMany({ data: PRINTERS })
   await prisma.workstation.createMany({ data: WORKSTATIONS.map(({ id, name }) => ({ id, name })) })
   await prisma.workstationAisle.createMany({ data: WORKSTATION_AISLES })
@@ -1277,7 +1291,20 @@ async function main() {
       { zNumber: 'z002p22', firstName: 'Sarah',   lastName: 'Okafor',     pinHash: PIN_HASH, role: 'IM',      departmentId: 'WHS' },
       { zNumber: 'z002p21', firstName: 'Tyler',   lastName: 'Hennessey',  pinHash: PIN_HASH, role: 'WORKER',  departmentId: 'INB' },
       ...irpData.users,
-    ],
+      // Roman demo roster (#145): emperors are OMs/LWWs with desktop access.
+      ...ROMAN_ROSTER.map((p) => ({
+        zNumber: p.zNumber, firstName: p.firstName, lastName: p.lastName, pinHash: PIN_HASH,
+        passwordHash: p.role === 'WORKER' ? null : DESKTOP_PASSWORD_HASH,
+        role: p.role, departmentId: 'WHS', homeShiftCode: p.homeShiftCode,
+      })),
+    ].map((u) => ({ homeShiftCode: 'B1', ...u })), // everyone else works B1, as the migration sets
+  })
+
+  // Ramping workers for Job/Function Assignment's RAMP badge (#145), open-ended.
+  await prisma.rampingOverride.createMany({
+    data: ROMAN_RAMPING.map(([workerZ, functionCode, percent]) => ({
+      workerZ, functionCode, percent, startDate: new Date(ROMAN_RAMPING_START), setByZ: 'z002p25',
+    })),
   })
 
   // 3. Items

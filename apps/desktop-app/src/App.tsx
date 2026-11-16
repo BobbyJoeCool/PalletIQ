@@ -3,6 +3,7 @@ import { DesktopShell } from './components/shell/DesktopShell';
 import { useAuth } from './context/authContext';
 import { AuditToolPage } from './pages/AuditToolPage';
 import { ComingSoonPage } from './pages/ComingSoonPage';
+import { JobAssignmentPage } from './pages/JobAssignmentPage';
 import { LocationSetupPage } from './pages/LocationSetupPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
@@ -28,6 +29,7 @@ export default function App() {
           {/* Built screens are routed by name; every other slug falls to Coming Soon. */}
           <Route path="screens/audit-tool" element={<AuditToolPage />} />
           <Route path="screens/location-setup" element={<LocationSetupPage />} />
+          <Route path="screens/job-assignment" element={<JobAssignmentPage />} />
           <Route path="screens/:screenId" element={<ComingSoonPage />} />
         </Route>
       </Route>

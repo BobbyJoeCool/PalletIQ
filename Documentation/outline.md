@@ -85,6 +85,8 @@ On opening the app, the user is always prompted to log in first — there is no 
 
 **Desktop Location Setup:** aisles have their own structure tables (`Aisle`, `AisleZone`, `AisleZoneSetting`). Every aisle has four zones; Zone 1 holds the highest bins by default (the back, where staging and putaway start), or the lowest when the aisle is set front-to-back. Locations are set up only by zone: every location on one level of one zone-side shares a storage code and size. The one per-location exception is a **Not For Storage** carve-out — storage code `XO`, with a required reason — which accepts no freight of any kind and cannot be overridden by any role; removing it restores the zone's storage code. Contraction is set from the same screen, by zone cell or by single location. Deleting an aisle requires every location to be empty and is a soft delete. See `Documentation/ScreenSpecs/Desktop-Location-Setup.md`.
 
+**Desktop Job/Function Assignment:** four fixed shifts (A1/A2 Sat–Mon, B1/B2 Tue–Fri, with break windows) are stored in `Shift`/`ShiftBreak`, and every user has a home shift. The roster for a date and shift lists the viewer's department's team members scheduled by a simulated myTime schedule (deterministic from worker and date). Each worker's shift is a timeline of sections in `FunctionAssignment`: a job function, Downtime (`DTM`, with a downtime reason) or time off (`OFF`, with an attendance code: VLE, VNS, COF, VAC, SCK, LOA, OTH). Plan targets come from `DailyPlanTarget` when an OM has entered one, otherwise from a simulated figure; ramping workers come from `RampingOverride`. LWW, OM and Admin only. See `Documentation/ScreenSpecs/Desktop-Job-Assignment.md`.
+
 ---
 
 ## Home Screen
