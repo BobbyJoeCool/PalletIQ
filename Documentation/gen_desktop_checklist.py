@@ -248,8 +248,11 @@ SCREENS = [
         "GPM and CON cards show pallets so far and per hour",
         "Downtime card shows headcount",
         "Expand shows each worker's hours, count, rate and % to goal, with RAMP badges",
+        "% to goal is against the ramping-adjusted goal (65% ramp at 117/hr of 180 reads 100%)",
+        "Expanded rows are ordered by % to goal, highest first",
+        "% to goal is green at 100%+, blends toward red, and is full red at 60% or below",
         "Downtime expands to names with hours",
-        "Figures match IRP for the same worker and function",
+        "Figures match IRP for the same worker and function (except % to goal for ramping workers)",
     ]),
 ]
 

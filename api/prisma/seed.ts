@@ -4,6 +4,7 @@ import { PrismaMariaDb } from '@prisma/adapter-mariadb'
 import bcrypt from 'bcryptjs'
 import { SHIFTS } from '../../shared/workforce.js'
 import { ROMAN_ROSTER, ROMAN_RAMPING, ROMAN_RAMPING_START } from './romanRoster.js'
+import { seedTeamProdDemo } from './demoTeamProd.js'
 import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genCid } from './demoUtils.js'
 
 const adapter = new PrismaMariaDb(process.env.DATABASE_URL!)
@@ -1288,7 +1289,9 @@ async function main() {
       { zNumber: 'z002p25', firstName: 'Robert',  lastName: 'Breutzmann', pinHash: PIN_HASH, passwordHash: DESKTOP_PASSWORD_HASH, role: 'ADMIN',   departmentId: 'WHS' },
       { zNumber: 'z002p24', firstName: 'Diana',   lastName: 'Kowalski',   pinHash: PIN_HASH, passwordHash: DESKTOP_PASSWORD_HASH, role: 'MANAGER', departmentId: 'IQA' },
       { zNumber: 'z002p23', firstName: 'Marcus',  lastName: 'Webb',       pinHash: PIN_HASH, passwordHash: DESKTOP_PASSWORD_HASH, role: 'LEAD',    departmentId: 'WHS' },
-      { zNumber: 'z002p22', firstName: 'Sarah',   lastName: 'Okafor',     pinHash: PIN_HASH, role: 'IM',      departmentId: 'WHS' },
+      // No home shift: a floor demo user, kept off the desktop roster and Team Prod Summary
+      // (direct instruction 2026-11-17) — as an IM she would otherwise be a B1 team member.
+      { zNumber: 'z002p22', firstName: 'Sarah',   lastName: 'Okafor',     pinHash: PIN_HASH, role: 'IM',      departmentId: 'WHS', homeShiftCode: null },
       { zNumber: 'z002p21', firstName: 'Tyler',   lastName: 'Hennessey',  pinHash: PIN_HASH, role: 'WORKER',  departmentId: 'INB' },
       ...irpData.users,
       // Roman demo roster (#145): emperors are OMs/LWWs with desktop access.
@@ -1406,6 +1409,12 @@ async function main() {
   await insertInChunks('IRP activity log entries', irpData.activityRows, 500,
     (chunk) => prisma.activityLog.createMany({ data: chunk })
   )
+
+  // 7. Team Prod demo production (#147 follow-up) — the Roman roster's timelines and
+  // output for today's shifts, up to now. Must come after users, shifts, goals and ramping.
+  console.log('Seeding Team Prod demo production...')
+  const teamProd = await seedTeamProdDemo(prisma)
+  console.log(`  Roster timeline rows: ${teamProd.assignmentsCreated}, activity rows: ${teamProd.activityRows}`)
 
   console.log('Seed complete.')
   console.log(`  Locations: ${locations.length}`)

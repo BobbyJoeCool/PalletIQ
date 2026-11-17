@@ -511,7 +511,7 @@ The seed builds one `Aisle` row, four `AisleZone` rows and one `AisleZoneSetting
 
 ## Roman roster and shifts (Job/Function Assignment, #145)
 
-Four shifts (A1, A2, B1, B2) with their breaks. Every user above works **B1**. The seed (and the `20261116140000_job_assignment` migration) adds a Roman-themed warehouse (WHS) roster, PIN `1234` for all:
+Four shifts (A1, A2, B1, B2) with their breaks. Every user above works **B1**, except Sarah Okafor (`z002p22`), who has no home shift so she stays off the desktop roster. The seed (and the `20261116140000_job_assignment` migration) adds a Roman-themed warehouse (WHS) roster, PIN `1234` for all:
 
 | Shift | OM (MANAGER) | LWWs (LEAD) | Team members (WORKER) |
 |---|---|---|---|
@@ -521,3 +521,11 @@ Four shifts (A1, A2, B1, B2) with their breaks. Every user above works **B1**. T
 | B2 | `z940m01` Marcus Aurelius | `z940l01` Lucius Verus, `z940l02` Septimius Severus | `z840t01`–`z840t25` (Galen, Boethius, Plotina…) |
 
 OMs and LWWs have the desktop password `Desktop1234`. Eight team members have open-ended ramping overrides (`z810t21` CA 60%, `z810t22` CF 75%, `z820t21` FP 50%, `z820t22` CA 80%, `z830t21` CA 65%, `z830t22` RP 70%, `z830t23` CF 85%, `z840t21` HP 55%). Schedules and default plan targets are generated, not stored.
+
+### Team Prod demo production
+
+`npm run seed` and every **Reseed Test Data** (`POST /api/demo/reseed`) fill in the Roman roster's day for the shifts that start today (`api/prisma/demoTeamProd.ts`):
+
+- **Timelines** for scheduled team members who have none yet: CA 5, CF 4, FP 2, BKP 2, BK 2, RP 3, HP 2, GPM 2, CON 1, one CA→RP split at the first break, and one CF worker in Training (Downtime) for the first two hours. Ramping workers go on their ramp function. Timelines already set on Job/Function Assignment are kept.
+- **Output** (`ActivityLog`, marked `"teamProdDemo":true`, no pallet/location/item) from the shift start up to the moment of the reseed, following the stored timelines. Each worker's pace is spread evenly from 80% to 120% of standard (stable per date), so the team averages 100%. A ramping worker produces pace × ramp % of the full standard, so they too read 80%–120% against their own (ramping-adjusted) goal. GPM runs at about 40 pallets/hr and CON at about 15. BKP and BK get no output (not tracked yet).
+- Each reseed replaces the marked rows, so reseeding later in the shift moves the picture forward.

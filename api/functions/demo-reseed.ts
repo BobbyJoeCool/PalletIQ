@@ -5,6 +5,7 @@ import { withHandler } from '../lib/response.js';
 import { whereAcceptsPut } from '../lib/locationPolicy.js';
 import { writeLog } from '../lib/activityLog.js';
 import { randomInt, randomFrom, shuffle, cartonsPerPalletFor, julianDate, makePidGenerator, genCid } from '../prisma/demoUtils.js';
+import { seedTeamProdDemo } from '../prisma/demoTeamProd.js';
 
 /** The interactive-transaction client type, derived from `prisma.$transaction` itself
  *  rather than importing a `Prisma` namespace type — lets the worker-shift simulator
@@ -994,6 +995,13 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     // that's owned by the paired lead web app, out of scope here). One full-shift block
     // per simulated worker, matching the function they're actually shown doing below.
     // z002p24 (IM work: holds/pallet edits) isn't an IRP prod function, so gets no row.
+    // z002p22 (rack puts) gets none either: as an IM-role user an assignment would put her
+    // on the desktop's B1 roster and Team Prod Summary beside the Roman team (direct
+    // instruction 2026-11-17 — keep the floor demo users off it); IRP still counts her puts.
+    // z002p23/z002p25 are a Lead and an Admin, which the roster leaves out by role.
+    // Her home shift is cleared too (seed.ts does the same), or the simulated schedule
+    // would still list her as a B1 team member on a migrated-but-not-reseeded database.
+    await tx.user.update({ where: { zNumber: 'z002p22' }, data: { homeShiftCode: null } });
     // z002p23 (Marcus Webb, the only LEAD-role demo user) is assignedByZ for all of them.
     // Uses the *intended* shift end (4pm), not shiftWindow.shiftEnd (which is capped at
     // "now") — IRP itself caps time-in-function display at the current moment, the
@@ -1006,7 +1014,6 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     );
     const FUNCTION_ASSIGNMENTS: { workerZ: string; functionCode: string }[] = [
       { workerZ: 'z002p21', functionCode: 'CA' },
-      { workerZ: 'z002p22', functionCode: 'RP' },
       { workerZ: 'z002p23', functionCode: 'GPM' },
       { workerZ: 'z002p25', functionCode: 'CON' },
     ];
@@ -1068,6 +1075,10 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
     const consolidationResume = await getShiftResumePoint(tx, 'z002p25', shiftWindow);
     const consolidationsSimulated = await simulateConsolidation(tx, consolidationResume, shiftWindow, isFreshDay);
 
+    // Team Prod demo production (#147 follow-up): the Roman roster's timelines and output
+    // for today's shifts, up to now — see prisma/demoTeamProd.ts.
+    const teamProd = await seedTeamProdDemo(tx, now.getTime());
+
     return {
       putPalletsCreated: putPalletRows.length,
       putPalletsToppedUp: pendingTopUpRows.length,
@@ -1091,6 +1102,7 @@ async function reseedTestData(_req: HttpRequest, _ctx: InvocationContext): Promi
         z002p24PalletsEdited: imWorkResult.palletsEdited,
         z002p25Consolidations: consolidationsSimulated,
       },
+      teamProd,
     };
   }, { timeout: 300_000, maxWait: 30_000 });
 }

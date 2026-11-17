@@ -82,7 +82,9 @@ export async function loadRoster(
     prisma.functionAssignment.findMany({
       where: {
         date,
-        worker: { departmentId: viewer.departmentId },
+        // Team members only: a lead's, manager's or admin's legacy IRP row (e.g. the floor
+        // demo users') never puts them on the roster, matching what saveTimelines accepts.
+        worker: { departmentId: viewer.departmentId, role: { in: ROSTER_ROLES } },
         OR: [{ shiftCode: shift }, { shiftCode: null, startTime: { gte: new Date(window.start), lt: new Date(window.end) } }],
       },
       orderBy: { startTime: 'asc' },

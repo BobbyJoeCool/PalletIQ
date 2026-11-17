@@ -51,3 +51,15 @@ test('team prod: staffed at an instant and time on a function', () => {
   assert.equal(msOnFunction(timelines[0], 'CA', w.start + 6 * H), 5 * H);
   assert.equal(msOnFunction(timelines[0], 'RP', w.start + 6 * H), H);
 });
+
+test('worker % to goal is measured against their ramping-adjusted goal; rows sort by it', async () => {
+  const { workerPctToGoal, compareWorkers } = await import('../../../shared/teamProd.js');
+  // 130.6/hr while ramping at 65% of 180/hr: over 100% of their own goal.
+  assert.ok(Math.abs(workerPctToGoal(130.6 * 4, 180, 4, 65)! - 111.62) < 0.01);
+  assert.equal(workerPctToGoal(720, 180, 4, null), 100);
+  assert.equal(workerPctToGoal(10, null, 4, null), null);
+  assert.equal(workerPctToGoal(10, 180, 0, null), null);
+  const w = (lastName: string, pctToGoal: number | null, count = 0) => ({ zNumber: lastName, firstName: '', lastName, rampPercent: null, hours: 1, count, ratePerHour: null, pctToGoal });
+  const sorted = [w('A', 90), w('B', null, 5), w('C', 112), w('D', 75)].sort(compareWorkers).map((x) => x.lastName);
+  assert.deepEqual(sorted, ['C', 'A', 'D', 'B']);
+});
