@@ -17,6 +17,9 @@
 4. **Other functions:** a Downtime card.
 5. Every card has an **Expand** toggle (collapsed by default).
    - Job function cards expand into a table of each worker's hours, count, rate per hour and % to goal, with a RAMP badge where it applies.
+   - **% to goal** is count ÷ (goal rate × the worker's ramping percent × their hours), so someone ramping at 65% is measured against 65% of the rate. IRP stays unweighted, so the two differ only for ramping workers.
+   - Rows are ordered by % to goal, highest first; rows without one (SCAN functions) follow by count.
+   - % to goal is coloured green at 100% and above, blending gradually to full red at 60% and below (OKLCH mix of the success and error tokens).
    - The Downtime card expands into names with hours.
 
 ## Cards
@@ -56,3 +59,4 @@ No writes. No schema changes.
 ## Change Log
 
 - **2026-11-16:** first build (#147). Decisions: SCAN cards show count + per hour; late finish shown amber with overrun; plan uses the roster's target (entered or simulated); tiers in shared code.
+- **2026-11-17:** expanded table — % to goal against the ramping-adjusted goal, rows sorted by it, green→red colour scale (red at 60%). Direct instruction.

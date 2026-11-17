@@ -8,7 +8,7 @@
 ## Concepts
 
 - **Shifts:** A1 / A2 run Sat–Mon (6a–6p, 6p–6a), B1 / B2 run Tue–Fri (6a–4p, 4p–2a), each with two breaks. Productive hours = length minus breaks (A1: 11h05m).
-- **Roster:** team members (WORKER, IM) of the viewer's department whose home shift is the selected shift and who are scheduled that day, plus anyone who already has time on the shift.
+- **Roster:** team members (WORKER, IM) of the viewer's department whose home shift is the selected shift and who are scheduled that day, plus any team member who already has time on the shift. A lead's, manager's or admin's time (only possible in older IRP demo rows, since saving refuses them) does not put them on the roster.
 - **Simulated myTime schedule:** everyone is scheduled for the whole shift on the days it runs, except about one day in ten that ends 2–4 hours early. Deterministic per worker and date — no stored rows, never stale.
 - **Timeline:** each worker's shift is a sequence of sections, each a job function, **Downtime** (`DTM`, with a reason) or **Time Off** (`OFF`, with an attendance code). Unassigned time is allowed and flagged.
 - **Reasons**
@@ -87,3 +87,4 @@ The server re-checks every timeline: sections inside the shift, in order, not ov
 
 - **2026-11-16:** staffing forecast uses full shift hours (breaks built into the rate); ramping workers count at their percent in effective headcount and the forecast (direct instruction).
 - **2026-11-16:** first build (#145). Timeline layout, bulk assign with a conflict dialog, split dialog, attendance codes and Roman demo roster decided with the user.
+- **2026-11-17:** only team members (WORKER, IM) count as "already has time on the shift" — the floor demo users' IRP rows (a Lead on GPM, an Admin on CON) no longer show up on the B1 roster. Direct instruction.

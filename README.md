@@ -25,6 +25,8 @@ A warehouse inventory/pallet-tracking system, built as a portfolio piece from 20
 | **Job/Function Assignment: the shift roster as a timeline, staffing vs plan in the header** | **Team Prod Summary: live production against plan, by function** |
 |---|---|
 | ![Job/Function Assignment](Documentation/screenshots/desktop/job-assignment.png) | ![Team Prod Summary](Documentation/screenshots/desktop/team-prod.png) |
+| **Team Prod Summary: Carton Air expanded — workers ranked by % to their (ramping-adjusted) goal** | |
+| ![Team Prod Summary, Carton Air expanded](Documentation/screenshots/desktop/team-prod-ca-expanded.png) | |
 | **Location Setup: zone cells edited on the aisle grid** | **Location Setup: contraction presets (here, all top locations)** |
 | ![Location Setup](Documentation/screenshots/desktop/location-setup.png) | ![Location Setup contraction](Documentation/screenshots/desktop/location-setup-contraction.png) |
 | **New aisle: zones, levels per side, and a live preview** | **Prod Goal / Ramping / Daily Plan: targets with the Daily Drop and staffing for reference** |

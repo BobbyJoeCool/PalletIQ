@@ -90,8 +90,33 @@ export interface TeamProdWorker {
   hours: number;
   count: number;
   ratePerHour: number | null;
-  /** Count vs the goal for their hours (unweighted, as IRP shows it). */
+  /**
+   * Count vs their own goal for their hours: goal rate × their ramping percent (direct
+   * instruction 2026-11-17 — a worker ramping at 65% is measured against 65% of the rate).
+   * Differs from IRP, which stays unweighted, only for ramping workers.
+   */
   pctToGoal: number | null;
+}
+
+/**
+ * A worker's % to goal on a function: count ÷ (rate × ramping share × hours).
+ *
+ * @param rampPercent - their ramping percent on the function, or null when not ramping (100%)
+ * @returns the percent, or null with no rate or no hours yet
+ */
+export function workerPctToGoal(count: number, ratePerHour: number | null, hours: number, rampPercent: number | null): number | null {
+  const goal = ratePerHour != null ? ratePerHour * ((rampPercent ?? 100) / 100) * hours : 0;
+  return goal > 0 ? (count / goal) * 100 : null;
+}
+
+/**
+ * Orders an expanded card's workers: highest % to goal first, then those without one
+ * (SCAN functions, no hours) by count, then by name.
+ */
+export function compareWorkers(a: TeamProdWorker, b: TeamProdWorker): number {
+  if (a.pctToGoal != null && b.pctToGoal != null && a.pctToGoal !== b.pctToGoal) return b.pctToGoal - a.pctToGoal;
+  if ((a.pctToGoal == null) !== (b.pctToGoal == null)) return a.pctToGoal == null ? 1 : -1;
+  return b.count - a.count || a.lastName.localeCompare(b.lastName);
 }
 
 /** One function's card. */

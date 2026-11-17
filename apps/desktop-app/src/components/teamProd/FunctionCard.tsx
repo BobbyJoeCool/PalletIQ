@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { TeamProdCard } from '@shared/teamProd';
 import { clockText } from '../../lib/rosterFormat';
 import { Gauge } from './Gauge';
+import { GoalPercent } from './GoalPercent';
 
 /** @returns a duration as "1h 20m" */
 function durationText(ms: number): string {
@@ -19,7 +20,8 @@ const fmt = (n: number | null, digits = 0) =>
  * One function's card on Team Prod Summary (#147). PULL and PROD cards show plan, staffing,
  * Team Prod % and % to Plan (PULL adds the estimated finish); SCAN cards show staffing,
  * count and rate; the Downtime card shows headcount. Every card expands into a per-worker
- * table (IRP-style figures; names only for Downtime).
+ * table (IRP-style figures, % to goal against each worker's ramping-adjusted goal, highest
+ * first; names only for Downtime).
  *
  * `elapsedPct` is how much of the shift has passed: % to Plan is coloured against it, so a
  * team on pace mid-shift reads green rather than red.
@@ -172,7 +174,7 @@ export function FunctionCard({ card, elapsedPct }: { card: TeamProdCard; elapsed
                   <td className="py-1 pr-2 text-right font-data">{fmt(w.ratePerHour, 1)}</td>
                   {card.tier !== 'SCAN' && (
                     <td className="py-1 text-right font-data">
-                      {w.pctToGoal != null ? `${Math.round(w.pctToGoal)}%` : '—'}
+                      <GoalPercent percent={w.pctToGoal} />
                     </td>
                   )}
                 </tr>

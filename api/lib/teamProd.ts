@@ -7,7 +7,7 @@ import { countFunctionUnits } from './irpUnits.js';
 import { GREYED_FUNCTIONS, type FunctionCode } from './irpReporting.js';
 import { functionsFor, loadRoster } from './roster.js';
 import {
-  estimateFinish, expectedUnits, msOnFunction, percentToPlan, staffedOn, teamProdPercent,
+  compareWorkers, estimateFinish, expectedUnits, msOnFunction, percentToPlan, staffedOn, teamProdPercent, workerPctToGoal,
   type TeamProdCard, type TeamProdView, type TeamProdWorker,
 } from '../../shared/teamProd.js';
 import { DOWNTIME_CODE, WAREHOUSE_FUNCTIONS, type ShiftCode } from '../../shared/workforce.js';
@@ -66,16 +66,17 @@ export async function loadTeamProd(
         const units = countFunctionUnits(f.code, rows);
         const count = f.tier === 'SCAN' ? units.primaryCount : units.goalCount;
         const hours = msOnFunction(w.segments, f.code, asOf) / HOUR;
+        const rampPercent = rampOf(w.zNumber, f.code);
         return {
           zNumber: w.zNumber, firstName: w.firstName, lastName: w.lastName,
-          rampPercent: rampOf(w.zNumber, f.code),
+          rampPercent,
           hours, count,
           ratePerHour: hours > 0 ? count / hours : null,
-          pctToGoal: rate && hours > 0 ? (count / (rate * hours)) * 100 : null,
+          pctToGoal: workerPctToGoal(count, rate, hours, rampPercent),
         };
       })
       .filter((w) => w.hours > 0 || w.count > 0)
-      .sort((a, b) => b.count - a.count || a.lastName.localeCompare(b.lastName));
+      .sort(compareWorkers);
 
     const actual = tracked ? workers.reduce((sum, w) => sum + w.count, 0) : null;
     const teamHours = workers.reduce((sum, w) => sum + w.hours, 0);
