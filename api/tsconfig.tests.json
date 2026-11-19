@@ -1,0 +1,13 @@
+{
+  // Type-checks the test suites, which tsconfig.json excludes from the build (#237).
+  // `npx tsc -p tsconfig.tests.json` — no output is emitted.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "ES2022"
+  },
+  "include": ["**/*.ts", "../shared/**/*.ts"],
+  "exclude": ["node_modules", "dist", "prisma/seed.ts", "prisma.config.ts", "scripts"]
+}

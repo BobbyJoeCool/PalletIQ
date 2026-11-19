@@ -14,6 +14,7 @@
     "test": "tsx --import ./tests/unit/setup.ts --test 'tests/unit/**/*.test.ts'",
     "test:db": "node --env-file=.env.test node_modules/tsx/dist/cli.mjs --test --test-concurrency=1 'tests/db/**/*.test.ts'",
     "test:api": "node --env-file=.env.test node_modules/tsx/dist/cli.mjs --test --test-concurrency=1 'tests/api/**/*.test.ts'",
+    "typecheck:tests": "tsc -p tsconfig.tests.json",
     "test:db:up": "node scripts/test-db.mjs up",
     "test:db:reset": "node scripts/test-db.mjs reset",
     "test:db:down": "node scripts/test-db.mjs down"
@@ -34,6 +35,7 @@
     "@eslint/js": "^10.0.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "exceljs": "^4.4.0",
