@@ -1,0 +1,28 @@
+# PalletIQ — isolated E2E test database (issue #236).
+#
+# A throwaway MySQL server for the Playwright suites, so test runs never write to the dev
+# database on :3306. Same major version as the Homebrew dev server (MySQL 9). Credentials
+# here are test-only and match api/.env.test.
+#
+#   cd api && npm run test:db:up      # start, migrate, seed if empty
+#   cd api && npm run test:db:reset   # drop everything, migrate, reseed
+#   cd api && npm run test:db:down    # stop (data kept in the named volume)
+services:
+  mysql-test:
+    image: mysql:9.6
+    container_name: palletiq-mysql-test
+    environment:
+      MYSQL_ROOT_PASSWORD: palletiq_test
+      MYSQL_DATABASE: palletiq_test
+    ports:
+      - "3307:3306"
+    volumes:
+      - palletiq-mysql-test:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ppalletiq_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  palletiq-mysql-test:

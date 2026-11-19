@@ -18,7 +18,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:7071',
+      // PALLETIQ_API_URL points the proxy at the E2E test API (:7072, issue #236) when
+      // Playwright starts this server; everyday dev keeps the dev API on :7071.
+      '/api': process.env.PALLETIQ_API_URL ?? 'http://localhost:7071',
     },
   },
   // Injects the app version from package.json as a build-time global — see src/vite-env.d.ts

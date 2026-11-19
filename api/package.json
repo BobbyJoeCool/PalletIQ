@@ -9,9 +9,14 @@
     "postbuild": "cp -r generated dist/api/generated && printf \"import './api/index.js';\\n\" > dist/index.js",
     "watch": "tsc -p tsconfig.json --watch",
     "start": "tsx watch index.ts",
+    "start:test": "node --env-file=.env.test node_modules/tsx/dist/cli.mjs index.ts",
     "lint": "eslint .",
-    "test": "tsx --test 'tests/unit/**/*.test.ts'",
-    "test:db": "tsx --env-file=.env --test 'tests/db/**/*.test.ts'"
+    "test": "tsx --import ./tests/unit/setup.ts --test 'tests/unit/**/*.test.ts'",
+    "test:db": "node --env-file=.env.test node_modules/tsx/dist/cli.mjs --test --test-concurrency=1 'tests/db/**/*.test.ts'",
+    "test:api": "node --env-file=.env.test node_modules/tsx/dist/cli.mjs --test --test-concurrency=1 'tests/api/**/*.test.ts'",
+    "test:db:up": "node scripts/test-db.mjs up",
+    "test:db:reset": "node scripts/test-db.mjs reset",
+    "test:db:down": "node scripts/test-db.mjs down"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
