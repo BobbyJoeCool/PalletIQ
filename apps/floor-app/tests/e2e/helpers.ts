@@ -109,3 +109,12 @@ export async function selectPullFunction(page: Page, desc: string) {
   await trigger.click();
   await page.locator('div.absolute.z-50').getByRole('button', { name: desc }).click();
 }
+
+/**
+ * A labeled keypad field's box (NumpadFieldBox with a `label`). The box button is named by
+ * its current value ("—" when empty), not its label, so it is found through the label span
+ * it sits under.
+ */
+export function fieldBox(page: Page, label: string) {
+  return page.getByText(label, { exact: true }).locator('xpath=..').getByRole('button').first();
+}

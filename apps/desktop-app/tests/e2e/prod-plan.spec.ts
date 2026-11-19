@@ -47,12 +47,19 @@ test('an LWW can open the screen but not change prod goals', async () => {
 test('a Daily Plan target drives Needs: 18,000 CA cartons at the goal rate over a 10-hour shift', async () => {
   const rate = (await api<Goals>(lwwToken, 'GET', '/prod-goals')).body.functions.find((f) => f.functionCode === 'CA')!.current!.rate;
   const plan = section('Daily Plan');
+  // The B1 button is already pressed from today's plan, and the new date's plan, when it
+  // arrives, replaces any target typed before it (Save goes back to disabled). So wait for
+  // that response, then retry type-and-save until the save goes through (#239).
+  const loaded = window.waitForResponse((r) => r.url().includes('/api/daily-plan') && r.url().includes(DATE));
   await plan.getByLabel('Plan date').fill(DATE);
+  await loaded;
   await expect(plan.getByRole('button', { name: 'Day (B1)' })).toHaveAttribute('aria-pressed', 'true');
-  await plan.getByLabel('CA target').fill('18000');
-  await expect(plan.locator('tbody tr').filter({ hasText: 'Carton Air' })).toContainText(`${Math.ceil(18000 / (rate * 10))} people`);
-  await plan.getByRole('button', { name: 'Save targets' }).click();
+  await expect(async () => {
+    await plan.getByLabel('CA target').fill('18000');
+    await plan.getByRole('button', { name: 'Save targets' }).click({ timeout: 2_000 });
+  }).toPass();
   await expect(plan.getByRole('status')).toHaveText('Saved');
+  await expect(plan.locator('tbody tr').filter({ hasText: 'Carton Air' })).toContainText(`${Math.ceil(18000 / (rate * 10))} people`);
   await plan.getByLabel('CA target').fill('');
   await plan.getByRole('button', { name: 'Save targets' }).click();
   await expect(plan.getByLabel('CA target')).toHaveAttribute('placeholder', /simulated/);

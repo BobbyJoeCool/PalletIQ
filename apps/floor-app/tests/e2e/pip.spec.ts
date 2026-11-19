@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { hardwareScan, tapKeys, selectPullFunction } from './helpers';
+import { fieldBox, hardwareScan, tapKeys, selectPullFunction } from './helpers';
 
 test.use({ storageState: 'playwright/.auth/worker.json' });
 
@@ -400,7 +400,9 @@ test.describe('PIP — Pallet ID Pull flow', () => {
     // the Level (01 vs the mocked actual 04) mismatches, which the server (not the locked-
     // field client-side check) is what surfaces here. Aisle is locked at this point, so the
     // first editable button in the group is Bin's.
-    await page.locator('div.flex.flex-col.gap-1', { hasText: 'Location' }).getByRole('button').first().click();
+    // The Location group's own Bin box (Aisle is locked here). A div-with-text locator for
+    // "Location" matched an outer wrapper whose first button was the Pallet ID box (#239).
+    await fieldBox(page, 'Bin').click();
     await hardwareScan(page, '30105601');
 
     const dialog = page.getByTestId('level-correction-dialog');
