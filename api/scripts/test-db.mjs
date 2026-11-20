@@ -7,9 +7,11 @@
  *   node scripts/test-db.mjs reset   drop every table, recreate the schema, reseed
  *   node scripts/test-db.mjs down    stop the container (the named volume keeps the data)
  *
- * Run from api/ (the npm scripts do). Every Prisma command runs with api/.env.test loaded
- * through `node --env-file`, so DATABASE_URL points at the test server; prisma.config.ts's
- * own `dotenv/config` never overrides a variable that is already set.
+ * Run from api/ (the npm scripts do). Every Prisma command and the seed run with
+ * api/.env.test's values applied over the inherited environment (testEnv.mjs, #241), and
+ * only after DATABASE_URL is confirmed to be the test server, so an exported dev
+ * DATABASE_URL can't redirect them. prisma.config.ts's own `dotenv/config` never overrides
+ * a variable that is already set, so api/.env doesn't either.
  *
  * The schema comes from `prisma db push` (schema.prisma as it is now), not `migrate
  * deploy`: some migrations insert demo rows that depend on seeded data (e.g.
@@ -20,6 +22,7 @@
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readTestEnv } from './testEnv.mjs';
 
 const API_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMPOSE_FILE = resolve(API_DIR, '../docker-compose.test.yml');
@@ -28,13 +31,14 @@ const PRISMA_CLI = resolve(API_DIR, 'node_modules/prisma/build/index.js');
 const TSX_CLI = resolve(API_DIR, 'node_modules/tsx/dist/cli.mjs');
 
 /** Runs a command in api/, streaming its output; throws on a non-zero exit. */
-function run(cmd, args) {
-  execFileSync(cmd, args, { cwd: API_DIR, stdio: 'inherit' });
+function run(cmd, args, env = process.env) {
+  execFileSync(cmd, args, { cwd: API_DIR, stdio: 'inherit', env });
 }
 
-/** Runs a command with api/.env.test loaded, so it only ever sees the test database. */
+/** Runs a Node script with api/.env.test's values overriding the inherited environment.
+ *  readTestEnv throws, before anything is spawned, unless DATABASE_URL is the test DB. */
 function runWithTestEnv(script, args) {
-  run(process.execPath, ['--env-file=.env.test', script, ...args]);
+  run(process.execPath, [script, ...args], readTestEnv());
 }
 
 /** Runs one SQL statement inside the test container and returns its trimmed output. */
@@ -98,6 +102,9 @@ if (!commands[command]) {
   process.exit(2);
 }
 try {
+  // Check the environment before touching Docker, so a wrong DATABASE_URL stops the run
+  // before the test database is dropped rather than just before the push.
+  if (command !== 'down') readTestEnv();
   commands[command]();
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);
