@@ -1,28 +1,6 @@
 import 'dotenv/config';
 
-import './functions/auth.js';
-import './functions/health.js';
-import './functions/pallets.js';
-import './functions/locations.js';
-import './functions/containers.js';
-import './functions/pulls.js';
-import './functions/puts.js';
-import './functions/staging.js';
-import './functions/samples.js';
-import './functions/demo-reseed.js';
-import './functions/reservationTimer.js';
-import './functions/activity.js';
-import './functions/items.js';
-import './functions/reporting.js';
-import './functions/irp.js';
-import './functions/reasonCodes.js';
-import './functions/containerInquiry.js';
-import './functions/pullRequest.js';
-import './functions/audit.js';
-import './functions/aisles.js';
-import './functions/roster.js';
-import './functions/prodPlan.js';
-import './functions/teamProd.js';
+import './routes.js';
 
 import { app } from './lib/functionsRuntime.js';
 

@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import type { Server } from 'node:http';
 import helmet from 'helmet';
 
 /**
@@ -126,6 +127,7 @@ interface HttpOptions {
  * segments first) fixes this class of bug generally, not just this one route pair — no
  * source file needs to know or care about registration order.
  */
+let routesRegistered = false;
 const pendingRoutes: { method: Lowercase<HttpMethod>; path: string; handler: (req: Request, res: Response) => void }[] = [];
 
 interface TimerOptions {
@@ -166,9 +168,11 @@ export const app = {
     if (options.schedule !== '0 * * * * *') {
       throw new Error(`functionsRuntime.app.timer('${name}'): only the every-minute schedule ('0 * * * * *') is supported`);
     }
+    // unref(): the timer alone never keeps the process alive. The listening server does
+    // that in production; the API test suite (#237) needs its processes to exit when done.
     setInterval(() => {
       void options.handler({}, context).catch((err) => context.error(`Unhandled error in timer ${name}:`, err));
-    }, 60_000);
+    }, 60_000).unref();
   },
 
   /** Starts listening — called once from `index.ts` after every `./functions/*.js` side-
@@ -176,11 +180,21 @@ export const app = {
    *  real Express app first, sorted so routes with fewer `:param` segments (more literal,
    *  more specific) register before ones with more — a stable sort, so routes with equal
    *  specificity keep their original relative order. See `pendingRoutes`' own comment for
-   *  why this sort exists at all. */
-  listen(port: number): void {
-    const paramCount = (path: string) => (path.match(/:/g) ?? []).length;
-    const sorted = [...pendingRoutes].sort((a, b) => paramCount(a.path) - paramCount(b.path));
-    for (const { method, path, handler } of sorted) expressApp[method](path, handler);
-    expressApp.listen(port, () => context.log(`API listening on http://localhost:${port}`));
+   *  why this sort exists at all.
+   *
+   *  Returns the HTTP server, and port 0 picks a free port — the API test suite (#237)
+   *  starts the app this way and reads the port back from `server.address()`. Routes are
+   *  registered once even if this is called again. */
+  listen(port: number, onListening?: () => void): Server {
+    if (!routesRegistered) {
+      const paramCount = (path: string) => (path.match(/:/g) ?? []).length;
+      const sorted = [...pendingRoutes].sort((a, b) => paramCount(a.path) - paramCount(b.path));
+      for (const { method, path, handler } of sorted) expressApp[method](path, handler);
+      routesRegistered = true;
+    }
+    return expressApp.listen(port, () => {
+      if (onListening) onListening();
+      else context.log(`API listening on http://localhost:${port}`);
+    });
   },
 };

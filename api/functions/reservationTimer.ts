@@ -30,8 +30,11 @@ const TIMEOUT_MINUTES = 5;
  *
  * @param _timer - Azure Functions timer trigger metadata (unused)
  * @param ctx - Invocation context used for logging the count of cleared reservations
+ *
+ * Exported for the API test suite (#237), which calls it directly under a mocked clock
+ * instead of waiting for the every-minute timer.
  */
-async function clearExpiredReservations(_timer: Timer, ctx: InvocationContext): Promise<void> {
+export async function clearExpiredReservations(_timer: Timer, ctx: InvocationContext): Promise<void> {
   const cutoff = new Date(Date.now() - TIMEOUT_MINUTES * 60 * 1000);
 
   const expired = await prisma.reservation.findMany({

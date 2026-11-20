@@ -1,0 +1,6 @@
+{
+  "name": "palletiq-apps-e2e-shared",
+  "private": true,
+  "description": "Marks apps/e2e-test-env.ts (shared by both apps' Playwright configs, #236) as an ES module. Not an npm workspace; each app keeps its own package.json.",
+  "type": "module"
+}

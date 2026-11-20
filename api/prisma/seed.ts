@@ -154,6 +154,15 @@ function foldedSize(bin: number, level: number): string {
 
 // ─── Lookup table data ────────────────────────────────────────────────────────
 
+/** Location/pallet sizes — identical to the add_size_lookup_table migration's rows. */
+const SIZES = [
+  { id: 'XS', desc: 'Extra Small (Hand Put)' },
+  { id: 'HS', desc: 'Half Small' },
+  { id: 'S', desc: 'Small' },
+  { id: 'M', desc: 'Medium' },
+  { id: 'L', desc: 'Large' },
+]
+
 const STORAGE_CODES = [
   { id: 'CR', desc: 'Conveyable Reserve' },
   { id: 'FD', desc: 'Conveyable Food' },
@@ -1260,6 +1269,12 @@ async function main() {
 
   // 1. Lookup tables
   console.log('Seeding lookup tables...')
+  // Sizes were only ever inserted by the 20260729034138_add_size_lookup_table migration,
+  // so a database built without the migration history (the E2E test DB, #236, which uses
+  // `prisma db push`) had none and every Location insert failed its size FK. Same five
+  // rows as that migration; skipDuplicates keeps this a no-op on a migrated database.
+  // Not in the deleteMany list above: Location/Pallet rows elsewhere still reference them.
+  await prisma.size.createMany({ data: SIZES, skipDuplicates: true })
   await prisma.storageCode.createMany({ data: STORAGE_CODES })
   await prisma.packingZone.createMany({ data: PACKING_ZONES })
   await prisma.department.createMany({ data: DEPARTMENTS })
